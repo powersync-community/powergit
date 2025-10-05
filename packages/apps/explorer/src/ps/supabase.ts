@@ -6,9 +6,11 @@ export interface SupabaseConfig {
   schema?: string
 }
 
-let cached: SupabaseClient | null = null
+type AnySupabaseClient = SupabaseClient<any, any, any, any, any>
 
-export function getSupabaseClient(): SupabaseClient | null {
+let cached: AnySupabaseClient | null = null
+
+export function getSupabaseClient(): AnySupabaseClient | null {
   if (cached) return cached
   const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -16,7 +18,7 @@ export function getSupabaseClient(): SupabaseClient | null {
   cached = createClient(url, anonKey, {
     db: { schema: (import.meta.env.VITE_SUPABASE_SCHEMA as string | undefined) ?? 'public' },
     auth: { persistSession: false },
-  })
+  }) as AnySupabaseClient
   return cached
 }
 

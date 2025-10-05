@@ -1,7 +1,7 @@
 
 import { spawn } from 'node:child_process'
 import { Readable } from 'node:stream'
-import { parsePowerSyncUrl, invokeSupabaseEdgeFunction } from '@shared/core'
+import { parsePowerSyncUrl, invokeSupabaseEdgeFunction as invokeSupabaseEdgeFunctionImport } from '@shared/core'
 import { PowerSyncRemoteClient, type FetchPackResult } from '@shared/core/node'
 
 const ZERO_SHA = '0000000000000000000000000000000000000000'
@@ -20,13 +20,14 @@ let remote: PowerSyncRemoteClient | null = null
 let tokenPromise: Promise<string | undefined> | null = null
 let fetchBatch: FetchRequest[] = []
 let pushBatch: PushRequest[] = []
+let cachedSupabaseInvoker: typeof invokeSupabaseEdgeFunctionImport | null = null
 
 function println(s: string = '') { process.stdout.write(s + '\n') }
 
 export async function runHelper() {
   initFromArgs()
   const iterator = process.stdin[Symbol.asyncIterator]()
-  let buffer = Buffer.alloc(0)
+  let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0)
 
   while (true) {
     const { line, done, nextBuffer } = await readNextLine(iterator, buffer)
@@ -218,7 +219,7 @@ async function requestSupabaseToken(details: { endpoint: string; org: string; re
   if (!supabaseUrl || !serviceKey) return undefined
   const functionName = process.env.POWERSYNC_SUPABASE_REMOTE_FN ?? 'powersync-remote-token'
   try {
-    const response = await invokeSupabaseEdgeFunction<{ token?: string }>(functionName, {
+    const response = await callSupabaseEdgeFunction<{ token?: string }>(functionName, {
       remoteUrl: `${details.endpoint}/orgs/${details.org}/repos/${details.repo}`,
     }, { url: supabaseUrl, serviceRoleKey: serviceKey })
     return response?.token
@@ -299,10 +300,38 @@ async function uploadPushPack(details: { org: string; repo: string }, updates: P
     packEncoding: 'base64' as const,
   }
 
-  return invokeSupabaseEdgeFunction<PushFunctionResult>(functionName, payload, {
+  return callSupabaseEdgeFunction<PushFunctionResult>(functionName, payload, {
     url: supabaseUrl,
     serviceRoleKey: serviceKey,
   })
+}
+
+async function callSupabaseEdgeFunction<T = unknown>(
+  functionName: string,
+  payload: Record<string, unknown>,
+  config: Parameters<typeof invokeSupabaseEdgeFunctionImport>[2],
+): Promise<T> {
+  const invoker = await ensureSupabaseInvoker()
+  return invoker(functionName, payload, config) as Promise<T>
+}
+
+async function ensureSupabaseInvoker(): Promise<typeof invokeSupabaseEdgeFunctionImport> {
+  if (cachedSupabaseInvoker) return cachedSupabaseInvoker
+  if (typeof invokeSupabaseEdgeFunctionImport === 'function') {
+    cachedSupabaseInvoker = invokeSupabaseEdgeFunctionImport
+    return cachedSupabaseInvoker
+  }
+  const actual = await import('@shared/core')
+  let invoker = actual.invokeSupabaseEdgeFunction
+  if (typeof invoker !== 'function') {
+  const direct = await import('../../shared/src/supabase')
+    invoker = direct.invokeSupabaseEdgeFunction
+  }
+  if (typeof invoker !== 'function') {
+    throw new Error('Supabase function invoker unavailable')
+  }
+  cachedSupabaseInvoker = invoker
+  return cachedSupabaseInvoker
 }
 
 async function collectPackBuffer(initial: Buffer, iterator: AsyncIterator<Buffer>): Promise<Buffer> {

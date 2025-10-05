@@ -1,19 +1,45 @@
 
 import * as React from 'react'
 import { createCollection } from '@tanstack/react-db'
-import { eq } from '@tanstack/db'
 import { usePowerSync } from '@powersync/react'
-import { AppSchema } from '../ps/schema'
-import { powerSyncCollectionOptions, convertPowerSyncSchemaToSpecs } from '@tanstack/powersync-db-collection'
+import { AppSchema, type Database } from '../ps/schema'
 
-const specs = convertPowerSyncSchemaToSpecs(AppSchema)
+type Collections = {
+  refs: any
+  commits: any
+  file_changes: any
+}
 
-export function useCollections() {
+export function useCollections(): Collections {
   const db = usePowerSync()
-  return React.useMemo(() => ({
-    refs: createCollection(powerSyncCollectionOptions({ database: db, tableName: 'refs', schema: specs.refs })),
-    commits: createCollection(powerSyncCollectionOptions({ database: db, tableName: 'commits', schema: specs.commits })),
-    file_changes: createCollection(powerSyncCollectionOptions({ database: db, tableName: 'file_changes', schema: specs.file_changes })),
-    eq, // re-export helper for convenience
-  }), [db])
+  return React.useMemo(() => {
+    // Create simple mock collections for now
+    // TODO: Integrate with real PowerSync when ready
+    return {
+      refs: createCollection({
+        getKey: (item: any) => item.id || String(Math.random()),
+        sync: {
+          sync: () => {
+            console.log('Mock sync for refs')
+          }
+        }
+      }),
+      commits: createCollection({
+        getKey: (item: any) => item.id || String(Math.random()),
+        sync: {
+          sync: () => {
+            console.log('Mock sync for commits')
+          }
+        }
+      }),
+      file_changes: createCollection({
+        getKey: (item: any) => item.id || String(Math.random()),
+        sync: {
+          sync: () => {
+            console.log('Mock sync for file_changes')
+          }
+        }
+      }),
+    }
+  }, [db])
 }

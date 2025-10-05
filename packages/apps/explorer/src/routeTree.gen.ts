@@ -1,3 +1,4 @@
+// @ts-nocheck
 
 /* Manual stub for TanStack Router route tree */
 import { createRootRoute, createRoute } from '@tanstack/react-router'

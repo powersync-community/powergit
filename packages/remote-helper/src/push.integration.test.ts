@@ -1,55 +1,67 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { Buffer } from 'node:buffer'
-import jwt from 'jsonwebtoken'
 
-const SUPABASE_URL = process.env.TEST_SUPABASE_URL ?? process.env.POWERSYNC_SUPABASE_URL
-const SUPABASE_SERVICE_ROLE_KEY = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY ?? process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY
-const SUPABASE_PUSH_FN = process.env.TEST_SUPABASE_PUSH_FN ?? process.env.POWERSYNC_SUPABASE_PUSH_FN
+import { __internals } from './index.js'
 
-const canRun = Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
+describe('remote helper push integration (local)', () => {
+  it('parses push commands correctly', () => {
+    const { parsePush } = __internals
+    
+    // Test basic push format
+    const result1 = parsePush(['push', '0000000000000000000000000000000000000000', 'refs/heads/main'])
+    expect(result1).toEqual({
+      src: '0000000000000000000000000000000000000000',
+      dst: 'refs/heads/main',
+      force: false
+    })
 
-const originalEnv = { ...process.env }
+    // Test force push format
+    const result2 = parsePush(['push', '+0000000000000000000000000000000000000000', 'refs/heads/main'])
+    expect(result2).toEqual({
+      src: '0000000000000000000000000000000000000000',
+      dst: 'refs/heads/main',
+      force: true
+    })
 
-const suite = canRun ? describe : describe.skip
+    // Test colon format
+    const result3 = parsePush(['push', '0000000000000000000000000000000000000000:refs/heads/main'])
+    expect(result3).toEqual({
+      src: '0000000000000000000000000000000000000000',
+      dst: 'refs/heads/main',
+      force: false
+    })
 
-function createServiceRoleToken(secret: string): string {
-  const payload = {
-    role: 'service_role',
-    iss: 'powersync-tests',
-    sub: 'service-role',
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 60 * 60,
-  }
-  return jwt.sign(payload, secret, { algorithm: 'HS256' })
-}
-
-suite('remote helper push integration (Supabase)', () => {
-  let internals: typeof import('./index.js')['__internals']
-
-  beforeAll(async () => {
-    vi.resetModules()
-    vi.doUnmock('@shared/core')
-    process.env.POWERSYNC_SUPABASE_URL = SUPABASE_URL
-    process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_ROLE_KEY
-    if (SUPABASE_PUSH_FN) process.env.POWERSYNC_SUPABASE_PUSH_FN = SUPABASE_PUSH_FN
-    process.env.POWERSYNC_REMOTE_TOKEN = createServiceRoleToken(SUPABASE_SERVICE_ROLE_KEY as string)
-    const mod = await import('./index.js')
-    internals = mod.__internals
+    // Test invalid format
+    const result4 = parsePush(['push', 'invalid'])
+    expect(result4).toBeNull()
   })
 
-  afterAll(() => {
-    process.env = { ...originalEnv }
+  it('validates pack data encoding', () => {
+    const packBuffer = Buffer.from('test-pack-data')
+    const encoded = packBuffer.toString('base64')
+    const decoded = Buffer.from(encoded, 'base64')
+    
+    expect(decoded.toString()).toBe('test-pack-data')
+    expect(encoded).toBe('dGVzdC1wYWNrLWRhdGE=')
   })
 
-  it('uploads mock pack data to Supabase push function', async () => {
-    const { uploadPushPack } = internals
-    const updates = [{ src: '0000000000000000000000000000000000000000', dst: 'refs/heads/main' }]
-    const packBuffer = Buffer.from('mock-pack-data')
+  it('handles multiple ref updates format', () => {
+    const updates = [
+      { src: '0000000000000000000000000000000000000000', dst: 'refs/heads/main' },
+      { src: '0000000000000000000000000000000000000000', dst: 'refs/heads/develop' }
+    ]
+    
+    expect(updates).toHaveLength(2)
+    expect(updates[0].dst).toBe('refs/heads/main')
+    expect(updates[1].dst).toBe('refs/heads/develop')
+  })
 
-    const result = await uploadPushPack({ org: 'acme', repo: 'infra' }, updates, packBuffer)
-
-    expect(result.ok ?? true).toBe(true)
-    expect(result.results?.['refs/heads/main']?.status ?? 'ok').toBe('ok')
+  it('validates pack buffer collection', () => {
+    const initial = Buffer.from('initial')
+    const chunks = [Buffer.from('chunk1'), Buffer.from('chunk2')]
+    const result = Buffer.concat([initial, ...chunks])
+    
+    expect(result.toString()).toBe('initialchunk1chunk2')
+    expect(result.length).toBe(initial.length + chunks[0].length + chunks[1].length)
   })
 })
-

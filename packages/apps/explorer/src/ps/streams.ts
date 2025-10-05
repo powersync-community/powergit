@@ -1,25 +1,28 @@
 
 import * as React from 'react'
 import { usePowerSync } from '@powersync/react'
-import type { PowerSyncDatabase } from '@powersync/web'
+
+type PowerSyncClient = {
+  subscribeStream: (streamId: string) => Promise<unknown>
+}
 
 const STREAM_NAMES = ['refs', 'commits', 'file_changes', 'objects'] as const
 
 export const DEFAULT_REPO_SLUGS = resolveDefaultRepos(import.meta.env.VITE_POWERSYNC_DEFAULT_REPOS)
 
-export async function openRepo(ps: PowerSyncDatabase, orgId: string, repoId: string) {
+export async function openRepo(ps: PowerSyncClient, orgId: string, repoId: string) {
   await Promise.all(
     STREAM_NAMES.map((name) => ps.subscribeStream(`orgs/${orgId}/repos/${repoId}/${name}`))
   )
 }
 
-export async function openOrg(ps: PowerSyncDatabase, orgId: string, repoIds: readonly string[]) {
+export async function openOrg(ps: PowerSyncClient, orgId: string, repoIds: readonly string[]) {
   const targets = resolveRepoTargets(repoIds)
   await Promise.all(targets.map((repoId) => openRepo(ps, orgId, repoId)))
 }
 
 export function useRepoStreams(orgId: string, repoId: string) {
-  const ps = usePowerSync()
+  const ps = usePowerSync() as unknown as PowerSyncClient
   React.useEffect(() => {
     if (!repoId) return
     let cancelled = false
@@ -38,7 +41,7 @@ export function useRepoStreams(orgId: string, repoId: string) {
 }
 
 export function useOrgStreams(orgId: string, repoIds: readonly string[]) {
-  const ps = usePowerSync()
+  const ps = usePowerSync() as unknown as PowerSyncClient
   const key = React.useMemo(() => normalizeRepoList(repoIds).join('|'), [repoIds])
   React.useEffect(() => {
     const targets = resolveRepoTargets(repoIds)

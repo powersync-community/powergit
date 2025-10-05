@@ -10,10 +10,22 @@
     ],
     "paths": {
       "@tanstack/powersync-db-collection": [
-        "./node_modules/@tanstack/powersync-db-collection/packages/powersync-db-collection/src/index.ts"
+        "./src/types/powersync-db-collection"
       ],
       "@tanstack/powersync-db-collection/*": [
-        "./node_modules/@tanstack/powersync-db-collection/packages/powersync-db-collection/src/*"
+        "./src/types/powersync-db-collection"
+      ],
+      "@ps": [
+        "./src/ps/index.ts"
+      ],
+      "@ps/*": [
+        "./src/ps/*"
+      ],
+      "@tsdb": [
+        "./src/tsdb/index.ts"
+      ],
+      "@tsdb/*": [
+        "./src/tsdb/*"
       ]
     }
   },
