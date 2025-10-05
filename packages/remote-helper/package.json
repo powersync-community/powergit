@@ -1,0 +1,23 @@
+{
+  "name": "@pkg/remote-helper",
+  "version": "0.0.4",
+  "type": "module",
+  "bin": {
+    "git-remote-powersync": "dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/bin.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'stub'",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@shared/core": "workspace:*",
+    "@supabase/supabase-js": "^2.48.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.7.5",
+    "vitest": "^1.6.0"
+  }
+}

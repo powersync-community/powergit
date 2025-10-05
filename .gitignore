@@ -1,0 +1,11 @@
+node_modules
+dist
+.vite
+.next
+out
+.DS_Store
+*.log
+pnpm-lock.yaml
+.env
+.env.*
+repo-explorer.db

@@ -1,0 +1,31 @@
+{
+  "name": "@shared/core",
+  "version": "0.0.4",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./node": {
+      "import": "./dist/node.js",
+      "types": "./dist/node.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'stub'",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.7.5",
+    "vitest": "^1.6.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.48.1"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "powersync-git-monorepo",
+  "private": true,
+  "version": "0.4.0",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm --filter @app/explorer dev",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test"
+  },
+  "pnpm": {
+    "overrides": {
+      "@tanstack/powersync-db-collection": "github:powersync-ja/temp-tanstack-db#c887d90"
+    }
+  }
+}
