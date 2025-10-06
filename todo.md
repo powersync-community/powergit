@@ -9,12 +9,14 @@
 - Explorer vendored TanStack DB packages are wired up; branches, commits, and file routes now use `useLiveQuery` against real PowerSync collections, and `pnpm --filter @app/explorer typecheck` passes with the new adapters.
 - Workspace now overrides all TanStack DB packages to the vendored sources; ambient type shims are gone, and Vite resolves `@tanstack/powersync-db-collection` without Git tarballs.
 - Playwright smoke tests now seed deterministic repo fixtures through the PowerSync dev bridge after navigation; `pnpm --filter @app/explorer test:e2e` runs green.
+- `@pkg/cli` commands now have e2e coverage (temp `/tmp/psgit-e2e-*` repos for remote add/update/help flows) plus lightweight unit tests that stub `simple-git` to assert add vs set-url behavior.
 
 ## In-Flight / Blocked
 - Supabase documentation lives in `docs/supabase.md`, but explorer README references only; ensure CLI + remote helper docs link back.
 - PowerSync edge functions still POST to stub endpoints; need to wire real PowerSync backend/S3 storage and update config guidance now that push is flowing.
 - Live query routes lean on lightweight type assertions until upstream `@tanstack/db` exposes stronger inference for PowerSync collections; keep tracking the PR and remove casts once released.
 - Playwright coverage is still smoke-level; consider layering additional flows (e.g., repo selector, activity timeline) now that fixture seeding is stable.
+- CLI only wires the remote helper today; with tests in place, evaluate additional commands (e.g., `psgit clone`, `psgit auth`) once remote helper endpoints stabilize.
 
 ## Next Steps
 1. Expand Playwright coverage with deterministic fixtures for refs/commits/files lists (likely by injecting a seeded PowerSync DB or mocking TanStack queries).

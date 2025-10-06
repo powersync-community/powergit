@@ -8,13 +8,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/bin.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "echo 'stub'"
+    "lint": "echo 'stub'",
+    "test": "vitest run"
   },
   "dependencies": {
     "simple-git": "^3.22.0"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
-    "@types/node": "^22.7.5"
+    "@types/node": "^22.7.5",
+    "vitest": "^3.2.4",
+    "tsx": "^4.20.6"
   }
 }
