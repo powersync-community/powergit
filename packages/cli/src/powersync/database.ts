@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { Worker } from 'node:worker_threads'
 import { PowerSyncDatabase } from '@powersync/node'
-import { AppSchema } from './schema'
+import { AppSchema } from './schema.js'
 
 const DEFAULT_DB_RELATIVE_PATH = '.psgit/psgit.db'
 

@@ -19,6 +19,24 @@ npx @pkg/cli remote add powersync powersync::https://<endpoint>/orgs/<org_slug>/
 > **Heads up**
 > The CLI configures Git to use the PowerSync remote helper. Make sure the helper is also installed—e.g. `npm install -g @pkg/remote-helper` so the executable `git-remote-powersync` is on your `PATH`.
 
+## Authenticate once with `psgit login`
+
+Before running commands that talk to PowerSync (for example `psgit sync`), sign in so the CLI can reuse the access token across invocations:
+
+```bash
+psgit login
+```
+
+By default this calls the Supabase credential signer (`powersync-creds`) using the service-role key that `pnpm dev:stack` exports. The returned RS256 token is cached under `~/.psgit/session.json` and automatically reused by the CLI.
+
+Need to stash a token manually (for CI or when you already have one)?
+
+```bash
+psgit login --manual --endpoint https://powersync.example.com --token <JWT>
+```
+
+When you want to discard credentials, run `psgit logout` to delete the cache file.
+
 ## Add a PowerSync remote in seconds
 
 From the root of any Git repository, run:

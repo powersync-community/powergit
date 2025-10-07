@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './diagnostics'
 import { BASE_URL } from 'playwright.config'
-import { seedRepoFixtures, type RepoFixturePayload } from './utils'
+import { clearRepoFixtures, setRepoFixture, type RepoFixturePayload } from './utils'
 
 const ORG_ID = 'acme'
 const REPO_ID = 'infra'
@@ -46,68 +46,77 @@ const REPO_FIXTURE: RepoFixturePayload = {
   ],
 }
 
-test.describe('Explorer smoke', () => {
-  test.beforeEach(async ({ page }) => {
-    page.on('console', (message) => {
-      console.log('[browser]', message.type(), message.text())
-    })
+test.describe('Explorer repo lists', () => {
+  test.afterEach(async ({ page }) => {
+    await clearRepoFixtures(page)
   })
 
-  test('shows repo branches from seeded data', async ({ page }) => {
+  test('shows repo branches from fixture data', async ({ page }) => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/branches`)
-    await seedRepoFixtures(page, REPO_FIXTURE)
-    console.log('branches url', await page.url())
-    console.log('branches html snippet', (await page.content()).slice(0, 200))
-    console.log('branches body', (await page.innerText('body')).slice(0, 200))
-    console.log('branches matches', await page.evaluate(() => {
-      const router = (window as typeof window & { __appRouter?: any }).__appRouter
-      return router?.state?.matches?.map((match: any) => match.id)
-    }))
-    console.log('branches component', await page.evaluate(() => {
-      const router = (window as typeof window & { __appRouter?: any }).__appRouter
-      return router?.state?.matches?.[1]?.route?.options?.component ?? null
-    }))
+    await setRepoFixture(page, REPO_FIXTURE)
 
     await expect(page.getByText('Branches (acme/infra)')).toBeVisible()
     const branchItems = page.locator('ul.space-y-1 li')
-    await expect(branchItems.filter({ hasText: 'main' })).toBeVisible()
-    await expect(branchItems.filter({ hasText: 'develop' })).toBeVisible()
+    await expect(branchItems).toHaveCount(2)
+    await expect(branchItems.nth(0)).toContainText('main')
+    await expect(branchItems.nth(1)).toContainText('develop')
 
     const hashPrefixes = await branchItems.locator('span.font-mono').allTextContents()
     expect(hashPrefixes[0]).toContain('f00baa11'.slice(0, 7))
   })
 
-  test('lists commits with author and message', async ({ page }) => {
+  test('lists commits with newest first', async ({ page }) => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/commits`)
-    await seedRepoFixtures(page, REPO_FIXTURE)
-    console.log('commits url', await page.url())
-    console.log('commits body', (await page.innerText('body')).slice(0, 200))
-    console.log('commits matches', await page.evaluate(() => {
-      const router = (window as typeof window & { __appRouter?: any }).__appRouter
-      return router?.state?.matches?.map((match: any) => match.id)
-    }))
+    await setRepoFixture(page, REPO_FIXTURE)
 
     await expect(page.getByText('Commits (acme/infra)')).toBeVisible()
     const commitItems = page.locator('ul.space-y-2 li')
+    await expect(commitItems).toHaveCount(2)
+
     const firstCommit = commitItems.first()
     await expect(firstCommit).toContainText('Add replication logic')
     await expect(firstCommit).toContainText('Grace Hopper')
-    const commitHash = await firstCommit.locator('span.font-mono').innerText()
-    expect(commitHash).toContain('f00baa22deadbeef000000000000000000000002'.slice(0, 7))
+    await expect(firstCommit.locator('span.font-mono').first()).toContainText('f00baa22deadbeef000000000000000000000002'.slice(0, 7))
+
+    const secondCommit = commitItems.nth(1)
+    await expect(secondCommit).toContainText('Initial commit')
+    await expect(secondCommit).toContainText('Ada Lovelace')
   })
 
-  test('renders file changes summary', async ({ page }) => {
+  test('renders file changes summary with counts', async ({ page }) => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/files`)
-    await seedRepoFixtures(page, REPO_FIXTURE)
-    console.log('files url', await page.url())
-    console.log('files body', (await page.innerText('body')).slice(0, 200))
-    console.log('files matches', await page.evaluate(() => {
-      const router = (window as typeof window & { __appRouter?: any }).__appRouter
-      return router?.state?.matches?.map((match: any) => match.id)
-    }))
+    await setRepoFixture(page, REPO_FIXTURE)
 
     await expect(page.getByText('Recent file changes (acme/infra)')).toBeVisible()
-    await expect(page.locator('li').filter({ hasText: 'src/replication.ts' })).toContainText('+120')
-    await expect(page.locator('li').filter({ hasText: 'README.md' })).toContainText('-2')
+    const changeItems = page.locator('ul.space-y-1 li')
+    await expect(changeItems).toHaveCount(2)
+    await expect(changeItems.nth(0)).toContainText('src/replication.ts')
+    await expect(changeItems.nth(0)).toContainText('+120')
+    await expect(changeItems.nth(0)).toContainText('-8')
+    await expect(changeItems.nth(1)).toContainText('README.md')
+    await expect(changeItems.nth(1)).toContainText('+10')
+    await expect(changeItems.nth(1)).toContainText('-2')
+  })
+
+  test('updates branch list when fixture changes', async ({ page }) => {
+    await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/branches`)
+    await setRepoFixture(page, REPO_FIXTURE)
+
+    const branchItems = page.locator('ul.space-y-1 li')
+    await expect(branchItems).toHaveCount(2)
+    await expect(branchItems.first()).toContainText('main')
+
+    await setRepoFixture(page, {
+      ...REPO_FIXTURE,
+      branches: [
+        { name: 'hotfix', target_sha: 'deadbeefcafefeed000000000000000000000033', updated_at: '2024-09-05T10:00:00Z' },
+        { name: 'release', target_sha: 'deadbeefcafefeed000000000000000000000044', updated_at: '2024-09-04T10:00:00Z' },
+      ],
+    })
+
+    await expect(branchItems).toHaveCount(2)
+    await expect(branchItems.first()).toContainText('hotfix')
+    await expect(branchItems.last()).toContainText('release')
+    await expect(branchItems.filter({ hasText: 'main' })).toHaveCount(0)
   })
 })

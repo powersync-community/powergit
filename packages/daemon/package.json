@@ -1,24 +1,20 @@
 {
-  "name": "@pkg/cli",
-  "version": "0.0.4",
+  "name": "@svc/daemon",
+  "version": "0.0.1",
   "type": "module",
-  "bin": {
-    "psgit": "dist/bin.js"
-  },
   "scripts": {
-    "build": "tsc -p tsconfig.json && chmod +x dist/cli/src/bin.js",
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'stub'",
     "test": "vitest run"
   },
   "dependencies": {
     "@powersync/node": "^0.11.1",
-    "@shared/core": "workspace:*",
-    "better-sqlite3": "^12.4.1",
-    "simple-git": "^3.28.0"
+    "@shared/core": "workspace:*"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.7.5",
     "tsx": "^4.20.6",
     "typescript": "^5.5.0",

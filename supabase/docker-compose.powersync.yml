@@ -1,19 +1,24 @@
-version: '3.9'
+
 
 services:
   powersync:
-    image: powersync/powersync:latest
+    image: ${POWERSYNC_IMAGE:-journeyapps/powersync-service:latest}
     container_name: powersync-local
     restart: unless-stopped
     environment:
       # Connection string to the Supabase Postgres instance started via `supabase start`
       POWERSYNC_DATABASE_URL: ${POWERSYNC_DATABASE_URL:-postgres://postgres:postgres@host.docker.internal:55432/postgres}
-      # Persist streamed objects and Git pack files on disk
-      POWERSYNC_STORAGE_PROVIDER: file
-      POWERSYNC_STORAGE_DIRECTORY: /var/lib/powersync/storage
+      # Persist streamed objects and Git pack files in Postgres
+      POWERSYNC_STORAGE_PROVIDER: ${POWERSYNC_STORAGE_PROVIDER:-postgresql}
+      POWERSYNC_STORAGE_URI: ${POWERSYNC_STORAGE_URI:-postgres://postgres:postgres@host.docker.internal:55432/postgres}
       # Expose additional configuration points if needed
       POWERSYNC_LOG_LEVEL: ${POWERSYNC_LOG_LEVEL:-info}
       POWERSYNC_CONFIG_PATH: /config/config.yaml
+      # PowerSync config !env substitutions require PS_ prefixes
+      PS_DATABASE_URL: "${POWERSYNC_DATABASE_URL:-postgres://postgres:postgres@host.docker.internal:55432/postgres}"
+      PS_STORAGE_URI: "${POWERSYNC_STORAGE_URI:-postgres://postgres:postgres@host.docker.internal:55432/postgres}"
+      PS_PORT: "3000"
+      PS_SUPABASE_JWT_SECRET: "${POWERSYNC_SUPABASE_JWT_SECRET:-${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}}"
     ports:
       - "${POWERSYNC_PORT:-55440}:3000"
     volumes:

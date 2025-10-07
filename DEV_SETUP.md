@@ -33,7 +33,15 @@ Open **Agents.md** for the architecture.
 
    Edit `.env.local` if you have real Supabase/PowerSync credentials. The defaults match the local stack started below.
 
-3. **Start the local services** (Supabase API, Postgres, PowerSync functions) in one terminal:
+3. **Apply the database schema** (first time after pulling changes)
+
+   ```bash
+   supabase db push
+   ```
+
+   This applies the SQL migration under `supabase/migrations/20241007090000_powersync_git_tables.sql`, provisioning the `refs`, `commits`, `file_changes`, and `git_packs` tables required by both the CLI and explorer.
+
+4. **Start the local services** (Supabase API, Postgres, PowerSync functions) in one terminal:
 
    ```bash
    pnpm dev:stack
@@ -41,7 +49,34 @@ Open **Agents.md** for the architecture.
 
    The script listens on ports `55431-55435`, deploys edge functions under `supabase/functions`, and prints connection info. Keep this terminal running.
 
-4. **Launch the explorer UI** in another terminal:
+   > Need deeper deployment guidance (e.g., Supabase Cloud, `verify_jwt`, RS256 secrets)? See [docs/supabase.md](docs/supabase.md#deploying-edge-functions) for the production playbook.
+
+   > Tip: whenever you change `supabase/powersync/config.yaml` run `pnpm seed:streams` to mirror the updated sync rules into the Supabase database. The script keeps Supabase and the PowerSync container config in sync so the CLI and explorer see the same stream definitions.
+
+   Command palette:
+
+   - `pnpm dev:stack stop` stops Supabase, Docker Compose, and edge functions once you're done.
+   - Append `-- --log` (or run `pnpm dev:stack:up`) to tee all output into `logs/dev-stack/<timestamp>.log` while still mirroring to the terminal.
+   - `pnpm dev:stack:down` is a shorthand for `pnpm dev:stack stop -- --log` if you prefer the legacy alias.
+   - Need a dry run? `pnpm dev:stack -- --dry-run` prints each step without executing it.
+
+4. **Authenticate the CLI** so `psgit` can reuse credentials:
+
+   ```bash
+   pnpm --filter @pkg/cli login
+   ```
+
+   The command contacts the `powersync-creds` edge function (using the service-role key exported by `pnpm dev:stack`) and caches the RS256 token under `~/.psgit/session.json`. Future CLI commands reuse the cached token automatically. To inspect the stored credentials or clear them, run `psgit login --manual ...` or `psgit logout`.
+
+5. **Seed the demo repository via the CLI helper** (optional but handy for smoke tests):
+
+   ```bash
+   pnpm seed:stack
+   ```
+
+   The script builds `@pkg/cli` (if needed) and runs `psgit demo-seed`, pushing two commits to the default remote (`powersync::…/orgs/demo/repos/infra`). This command expects the environment variables exported by `pnpm dev:stack` (notably `POWERSYNC_SEED_REMOTE_URL`) to be active in your shell.
+
+6. **Launch the explorer UI** in another terminal:
 
    ```bash
    pnpm dev
@@ -49,7 +84,7 @@ Open **Agents.md** for the architecture.
 
    Vite serves `http://localhost:5173`. The explorer picks up `.env.local`, connects to the local Supabase + PowerSync stack, and streams org/repo data into TanStack DB. Set `VITE_POWERSYNC_DISABLED=true` to work fully offline with cached data.
 
-5. **Stop everything** with <kbd>Ctrl</kbd>+<kbd>C</kbd> in both terminals when you wrap up.
+7. **Stop everything** with <kbd>Ctrl</kbd>+<kbd>C</kbd> in both terminals when you wrap up.
 
 ## Day-to-day commands
 
@@ -60,6 +95,10 @@ Open **Agents.md** for the architecture.
 | Type check all packages | `pnpm typecheck` |
 | Build the remote helper | `pnpm --filter @pkg/remote-helper build` |
 | Build the CLI (`psgit`) | `pnpm --filter @pkg/cli build` |
+| Seed demo repo via CLI | `pnpm seed:stack` |
+| Cache PowerSync CLI credentials | `pnpm --filter @pkg/cli login` |
+| Start local Supabase + PowerSync stack | `pnpm dev:stack` |
+| Stop local stack | `pnpm dev:stack stop` |
 
 > Top-level helpers mirror these: `pnpm dev` proxies to the explorer dev server and `pnpm dev:stack` starts the Supabase + PowerSync bootstrapper.
 
@@ -156,7 +195,7 @@ pnpm --filter @app/explorer test:e2e --project=chromium
 ### Test configuration notes
 
 - Playwright serves the explorer on port `5191` to avoid clashing with the dev server.
-- `VITE_POWERSYNC_DISABLED=true` during e2e runs to keep tests deterministic.
+- During Playwright runs we now default `VITE_POWERSYNC_DISABLED=false` so tests exercise the live PowerSync stack by default. Set `VITE_POWERSYNC_DISABLED=true` (and optionally `VITE_POWERSYNC_USE_FIXTURES=true`) if you need the old fixture-only behavior.
 - Default timeouts: 30 s overall, 10 s per action for quick feedback.
 
 ## Wrapping up

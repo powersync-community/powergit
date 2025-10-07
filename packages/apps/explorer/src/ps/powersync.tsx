@@ -61,6 +61,9 @@ export const PowerSyncProvider: React.FC<React.PropsWithChildren> = ({ children 
   }, [powerSync])
 
   React.useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.debug('[PowerSyncProvider] initializing test fixture bridge')
+    }
     initTestFixtureBridge()
   }, [])
 

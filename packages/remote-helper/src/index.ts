@@ -1,10 +1,16 @@
 
 import { spawn } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
-import { parsePowerSyncUrl, invokeSupabaseEdgeFunction as invokeSupabaseEdgeFunctionImport } from '@shared/core'
+import { createHash } from 'node:crypto'
+import {
+  parsePowerSyncUrl,
+  invokeSupabaseEdgeFunction as invokeSupabaseEdgeFunctionImport,
+  type GitPushSummary,
+} from '@shared/core'
 import { PowerSyncRemoteClient, type FetchPackResult } from '@shared/core/node'
 
 const ZERO_SHA = '0000000000000000000000000000000000000000'
+const MAX_COMMITS_PER_UPDATE = Number.parseInt(process.env.POWERSYNC_MAX_PUSH_COMMITS ?? '256', 10)
 
 interface FetchRequest { sha: string; name: string }
 interface PushRequest { src: string; dst: string; force?: boolean }
@@ -38,11 +44,11 @@ function println(s: string = '') { process.stdout.write(s + '\n') }
 export async function runHelper() {
   initFromArgs()
   const iterator = process.stdin[Symbol.asyncIterator]()
-  let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0)
+  let buffer: Buffer = Buffer.alloc(0)
 
   while (true) {
-    const { line, done, nextBuffer } = await readNextLine(iterator, buffer)
-    buffer = nextBuffer
+  const { line, done, nextBuffer } = await readNextLine(iterator, buffer)
+  buffer = nextBuffer as Buffer
     if (line === null) break
 
     const raw = line.replace(/\r$/, '')
@@ -188,15 +194,34 @@ function ensureClient(): PowerSyncRemoteClient | null {
   if (!remote) {
     remote = new PowerSyncRemoteClient({
       endpoint: parsed.endpoint,
+      basePath: parsed.basePath,
+      pathRouting: inferPathRouting(parsed.basePath),
       getToken: async () => resolveAuthToken(),
     })
   }
   return remote
 }
 
-function ensureRemote(): { org: string; repo: string } | null {
+function ensureRemote(): { org: string; repo: string; endpoint: string; basePath?: string } | null {
   if (!parsed) return null
-  return { org: parsed.org, repo: parsed.repo }
+  return { org: parsed.org, repo: parsed.repo, endpoint: parsed.endpoint, basePath: parsed.basePath }
+}
+
+function inferPathRouting(basePath?: string): 'segments' | 'query' {
+  return basePath && basePath.includes('/functions/') ? 'query' : 'segments'
+}
+
+function buildRemoteHttpUrl(details: { endpoint: string; basePath?: string; org: string; repo: string }): string {
+  const encodedOrg = encodeURIComponent(details.org)
+  const encodedRepo = encodeURIComponent(details.repo)
+  const path = `/orgs/${encodedOrg}/repos/${encodedRepo}`
+  if (inferPathRouting(details.basePath) === 'query') {
+    const baseUrl = new URL(details.basePath ? `${details.endpoint}${details.basePath}` : details.endpoint)
+    baseUrl.searchParams.set('path', path)
+    return baseUrl.toString()
+  }
+  const base = details.basePath ? `${details.endpoint}${details.basePath}` : details.endpoint
+  return `${base}${path}`
 }
 
 function detectRemoteReference(parts: string[]) {
@@ -235,14 +260,15 @@ async function resolveAuthToken(): Promise<string | undefined> {
   return tokenPromise
 }
 
-async function requestSupabaseToken(details: { endpoint: string; org: string; repo: string }): Promise<string | undefined> {
+async function requestSupabaseToken(details: { endpoint: string; basePath?: string; org: string; repo: string }): Promise<string | undefined> {
   const supabaseUrl = process.env.POWERSYNC_SUPABASE_URL
   const serviceKey = process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceKey) return undefined
   const functionName = process.env.POWERSYNC_SUPABASE_REMOTE_FN ?? 'powersync-remote-token'
+  const remoteHttpUrl = buildRemoteHttpUrl(details)
   try {
     const response = await callSupabaseEdgeFunction<{ token?: string }>(functionName, {
-      remoteUrl: `${details.endpoint}/orgs/${details.org}/repos/${details.repo}`,
+      remoteUrl: remoteHttpUrl,
     }, { url: supabaseUrl, serviceRoleKey: serviceKey })
     return response?.token
   } catch (error) {
@@ -291,13 +317,21 @@ async function handlePush(updates: PushRequest[]) {
   try {
     debugLog(`handlePush updates:${updates.length}`)
     const resolvedUpdates = await resolvePushUpdates(updates)
+    let summary: GitPushSummary | undefined
+    try {
+      summary = await collectPushSummary(resolvedUpdates)
+    } catch (error) {
+      console.warn('[powersync] failed to collect push summary', error)
+      summary = undefined
+    }
     const packData = await generatePackForPush(resolvedUpdates)
     const nonDeleteUpdates = resolvedUpdates.filter(update => update.src && update.src !== ZERO_SHA)
     if (packData.length === 0 && nonDeleteUpdates.length > 0) {
       throw new Error('git pack-objects produced empty pack')
     }
     debugLog(`packSize:${packData.length}`)
-    const result = await uploadPushPack(details, resolvedUpdates, packData)
+    const packOid = packData.length > 0 ? createHash('sha1').update(packData).digest('hex') : undefined
+    const result = await uploadPushPack(details, resolvedUpdates, packData, { summary, packOid })
     const statuses = result.results ?? {}
     for (const update of resolvedUpdates) {
       const entry = statuses[update.dst]
@@ -315,7 +349,12 @@ async function handlePush(updates: PushRequest[]) {
     println('')
   }
 }
-async function uploadPushPack(details: { org: string; repo: string }, updates: PushRequest[], packBuffer: Buffer): Promise<PushFunctionResult> {
+async function uploadPushPack(
+  details: { org: string; repo: string },
+  updates: PushRequest[],
+  packBuffer: Buffer,
+  extras: { summary?: GitPushSummary; packOid?: string } = {},
+): Promise<PushFunctionResult> {
   const supabaseUrl = process.env.POWERSYNC_SUPABASE_URL
   const serviceKey = process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceKey) throw new Error('Supabase push configuration missing')
@@ -327,6 +366,13 @@ async function uploadPushPack(details: { org: string; repo: string }, updates: P
     updates,
     pack: packBuffer.toString('base64'),
     packEncoding: 'base64' as const,
+  }
+
+  if (extras.packOid) {
+    Object.assign(payload, { packOid: extras.packOid })
+  }
+  if (extras.summary && (extras.summary.commits.length > 0 || extras.summary.refs.length > 0 || extras.summary.head)) {
+    Object.assign(payload, { summary: extras.summary })
   }
 
   return callSupabaseEdgeFunction<PushFunctionResult>(functionName, payload, {
@@ -423,6 +469,132 @@ async function generatePackForPush(updates: PushRequest[]): Promise<Buffer> {
       child.stdin.write(`${src}\n`)
     }
     child.stdin.end()
+  })
+}
+
+async function collectPushSummary(updates: PushRequest[]): Promise<GitPushSummary> {
+  const refs = updates.map((update) => ({ name: update.dst, target: update.src }))
+  const seen = new Set<string>()
+  const orderedCommits: string[] = []
+
+  for (const update of updates) {
+    if (!update.src || update.src === ZERO_SHA) {
+      continue
+    }
+    const commits = await listCommitsForRef(update.src)
+    for (const sha of commits) {
+      if (sha && !seen.has(sha)) {
+        seen.add(sha)
+        orderedCommits.push(sha)
+      }
+    }
+  }
+
+  const commitSummaries = [] as GitPushSummary['commits']
+  for (const sha of orderedCommits) {
+    try {
+      commitSummaries.push(await readCommitSummary(sha))
+    } catch (error) {
+      console.warn('[powersync] failed to read commit summary', sha, error)
+    }
+  }
+
+  let headTarget = refs.find((ref) => ref.name === 'HEAD')?.target
+  if (!headTarget) {
+    headTarget = refs.find((ref) => ref.name.startsWith('refs/heads/'))?.target
+  }
+
+  const normalizedRefs = [...refs]
+  if (headTarget && !refs.some((ref) => ref.name === 'HEAD')) {
+    normalizedRefs.push({ name: 'HEAD', target: headTarget })
+  }
+
+  return {
+    head: headTarget && headTarget !== ZERO_SHA ? headTarget : undefined,
+    refs: normalizedRefs,
+    commits: commitSummaries,
+  }
+}
+
+async function listCommitsForRef(ref: string): Promise<string[]> {
+  const args = ['rev-list', '--max-count', String(MAX_COMMITS_PER_UPDATE), ref]
+  const output = await execGit(args).catch((error) => {
+    console.warn('[powersync] failed to list commits for ref', ref, error)
+    return ''
+  })
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+}
+
+async function readCommitSummary(sha: string): Promise<GitPushSummary['commits'][number]> {
+  const headerRaw = await execGit(['show', '--no-patch', '--format=%H\x00%T\x00%an\x00%ae\x00%aI\x00%P\x00%B\x00', sha])
+  const headerParts = headerRaw.split('\x00')
+  if (headerParts.length && headerParts[headerParts.length - 1] === '') {
+    headerParts.pop()
+  }
+  const [commitSha, treeSha, authorName, authorEmail, authoredAt, parentsRaw = '', messageRaw = ''] = headerParts
+  const parents = parentsRaw.trim().length > 0 ? parentsRaw.trim().split(/\s+/) : []
+  const files = await readCommitFileChanges(sha)
+  return {
+    sha: commitSha,
+    tree: treeSha,
+    author_name: authorName,
+    author_email: authorEmail,
+    authored_at: authoredAt,
+    message: messageRaw.trimEnd(),
+    parents,
+    files,
+  }
+}
+
+async function readCommitFileChanges(sha: string): Promise<GitPushSummary['commits'][number]['files']> {
+  const output = await execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', sha]).catch((error) => {
+    console.warn('[powersync] failed to read commit file changes', sha, error)
+    return ''
+  })
+
+  if (!output) return []
+  const lines = output.split(/\r?\n/)
+  const entries = [] as GitPushSummary['commits'][number]['files']
+  for (const line of lines) {
+    if (!line || !line.trim()) continue
+    const parts = line.split('\t')
+    if (parts.length < 3) continue
+    const [addRaw, delRaw, ...pathParts] = parts
+    const path = pathParts.join('\t')
+    entries.push({
+      path,
+      additions: parseGitStat(addRaw),
+      deletions: parseGitStat(delRaw),
+    })
+  }
+  return entries
+}
+
+function parseGitStat(value: string): number {
+  if (!value || value === '-' || value === 'binary') return 0
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+async function execGit(args: string[]): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn('git', args, { stdio: ['ignore', 'pipe', 'inherit'] })
+    let output = ''
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString('utf8')
+    })
+    child.stdout.on('error', reject)
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(output)
+      } else {
+        reject(new Error(`git ${args.join(' ')} exited with code ${code}`))
+      }
+    })
   })
 }
 

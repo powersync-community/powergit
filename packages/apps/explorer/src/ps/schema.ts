@@ -3,7 +3,7 @@ import { column, Schema, Table } from '@powersync/web'
 import { buildPowerSyncSchema, powerSyncSchemaSpec } from '@shared/core'
 
 const { schema, tables } = buildPowerSyncSchema<Schema, Table, Pick<typeof column, 'text' | 'integer'>>({
-  createSchema: (tableMap) => new Schema(Object.values(tableMap)),
+  createSchema: (tableMap) => new Schema(tableMap as Record<string, Table>),
   createTable: (columns, options) => new Table(columns, options),
   column: {
     text: column.text,

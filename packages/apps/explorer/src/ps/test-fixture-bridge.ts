@@ -7,6 +7,8 @@ const SETTER_KEY = '__powersyncSetRepoFixture'
 const CLEAR_KEY = '__powersyncClearRepoFixtures'
 const GETTER_KEY = '__powersyncGetRepoFixtures'
 
+const fixtureBridgeEnabled = import.meta.env.DEV && import.meta.env.VITE_POWERSYNC_USE_FIXTURES !== 'false'
+
 export type RepoFixture = RepoFixturePayload & {
   branches: NonNullable<RepoFixturePayload['branches']>
   commits: NonNullable<RepoFixturePayload['commits']>
@@ -60,13 +62,15 @@ function dispatchUpdate(key: string) {
 }
 
 export function initTestFixtureBridge() {
-  if (!import.meta.env.DEV || typeof window === 'undefined') return
+  if (!fixtureBridgeEnabled || typeof window === 'undefined') return
   const global = getGlobal()
   if (global[SETTER_KEY] && global[CLEAR_KEY]) {
+    console.debug('[TestFixtureBridge] already initialized')
     return
   }
 
   const store = ensureStore()
+  console.debug('[TestFixtureBridge] initializing fixture store')
   global[SETTER_KEY] = (fixture: RepoFixturePayload) => {
     const key = makeRepoKey(fixture.orgId, fixture.repoId)
     store[key] = normalizeFixture(fixture)
@@ -86,7 +90,7 @@ export function initTestFixtureBridge() {
 export function useRepoFixture(orgId: string, repoId: string): RepoFixture | null {
   const subscribe = React.useCallback(
     (onStoreChange: () => void) => {
-      if (!import.meta.env.DEV || typeof window === 'undefined') {
+      if (!fixtureBridgeEnabled || typeof window === 'undefined') {
         return () => {}
       }
 
@@ -111,7 +115,7 @@ export function useRepoFixture(orgId: string, repoId: string): RepoFixture | nul
   )
 
   const getSnapshot = React.useCallback(() => {
-    if (!import.meta.env.DEV || typeof window === 'undefined') return null
+  if (!fixtureBridgeEnabled || typeof window === 'undefined') return null
     const store = getGlobal()[STORE_KEY]
     if (!store) return null
     return store[makeRepoKey(orgId, repoId)] ?? null
@@ -123,7 +127,7 @@ export function useRepoFixture(orgId: string, repoId: string): RepoFixture | nul
 }
 
 export function getRepoFixture(orgId: string, repoId: string): RepoFixture | null {
-  if (!import.meta.env.DEV || typeof window === 'undefined') return null
+  if (!fixtureBridgeEnabled || typeof window === 'undefined') return null
   const store = getGlobal()[STORE_KEY]
   if (!store) return null
   return store[makeRepoKey(orgId, repoId)] ?? null

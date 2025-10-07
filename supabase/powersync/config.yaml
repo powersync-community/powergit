@@ -1,22 +1,35 @@
 version: 1
 
 database:
-  connection_url: ${POWERSYNC_DATABASE_URL:-postgres://postgres:postgres@127.0.0.1:55432/postgres}
+  connection_url: !env PS_DATABASE_URL
+  sslmode: disable
+
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_URI
+  sslmode: disable
+
+port: !env PS_PORT
+
+client_auth:
+  supabase: true
+  audience:
+    - authenticated
 
 sync_rules:
-  - stream: orgs/{org_id}/repos/{repo_id}/refs
+  orgs/{org_id}/repos/{repo_id}/refs:
     table: refs
     filter:
       org_id: "{org_id}"
       repo_id: "{repo_id}"
 
-  - stream: orgs/{org_id}/repos/{repo_id}/commits
+  orgs/{org_id}/repos/{repo_id}/commits:
     table: commits
     filter:
       org_id: "{org_id}"
       repo_id: "{repo_id}"
 
-  - stream: orgs/{org_id}/repos/{repo_id}/file_changes
+  orgs/{org_id}/repos/{repo_id}/file_changes:
     table: file_changes
     filter:
       org_id: "{org_id}"

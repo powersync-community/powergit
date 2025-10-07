@@ -1,8 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 export interface SupabaseServerConfig {
-  url: string
-  serviceRoleKey: string
+  url?: string
+  serviceRoleKey?: string
   schema?: string
   functionsBaseUrl?: string
 }
@@ -36,7 +36,12 @@ export async function invokeSupabaseEdgeFunction<T = unknown>(
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
-    if (serviceRoleKey) headers.Authorization = `Bearer ${serviceRoleKey}`
+    if (serviceRoleKey) {
+      headers.apikey = serviceRoleKey
+      if (serviceRoleKey.includes('.')) {
+        headers.Authorization = `Bearer ${serviceRoleKey}`
+      }
+    }
 
     const response = await fetch(targetUrl, {
       method: 'POST',

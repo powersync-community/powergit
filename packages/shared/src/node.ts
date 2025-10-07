@@ -4,9 +4,11 @@ import type { RefRow } from './index.js'
 
 export interface PowerSyncRemoteConfig {
   endpoint: string
+  basePath?: string
   token?: string
   getToken?: () => Promise<string | undefined>
   fetchImpl?: typeof fetch
+  pathRouting?: 'segments' | 'query'
 }
 
 export interface ListRefsResult {
@@ -71,9 +73,13 @@ export class PowerSyncRemoteClient {
   private authHeader?: string
   private readonly tokenProvider?: () => Promise<string | undefined>
   private readonly fetchFn: typeof fetch
+  private readonly pathRouting: 'segments' | 'query'
 
   constructor(private readonly config: PowerSyncRemoteConfig) {
-    this.baseUrl = config.endpoint.replace(/\/$/, '')
+    const endpointBase = config.endpoint.replace(/\/$/, '')
+    const normalizedBasePath = config.basePath ? `/${config.basePath.replace(/^\/+|\/+$/g, '')}` : ''
+    this.baseUrl = `${endpointBase}${normalizedBasePath}`
+    this.pathRouting = config.pathRouting ?? (normalizedBasePath.includes('/functions/') ? 'query' : 'segments')
     this.authHeader = config.token ? `Bearer ${config.token}` : undefined
     this.tokenProvider = config.getToken
     const impl = config.fetchImpl ?? globalThis.fetch
@@ -155,7 +161,17 @@ export class PowerSyncRemoteClient {
       if (token) headers.set('authorization', token)
     }
     if (!headers.has('accept')) headers.set('accept', 'application/json')
-    return this.fetchFn(`${this.baseUrl}${path}`, { ...init, headers })
+    const targetUrl = this.composeUrl(path)
+    return this.fetchFn(targetUrl, { ...init, headers })
+  }
+
+  private composeUrl(path: string): string {
+    if (this.pathRouting === 'query') {
+      const url = new URL(this.baseUrl)
+      url.searchParams.set('path', path)
+      return url.toString()
+    }
+    return `${this.baseUrl}${path}`
   }
 
   private async resolveAuthHeader(): Promise<string | undefined> {

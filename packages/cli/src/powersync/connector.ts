@@ -1,5 +1,6 @@
 import type { AbstractPowerSyncDatabase, PowerSyncBackendConnector, PowerSyncCredentials } from '@powersync/node'
 import { invokeSupabaseEdgeFunction } from '@shared/core'
+import { isCredentialExpired, loadStoredCredentials } from '../auth/session.js'
 
 interface SupabaseCredentialResponse {
   endpoint: string
@@ -16,6 +17,7 @@ export interface CliConnectorOptions {
   credentialFunction?: string
   uploadFunction?: string
   enableUploads?: boolean
+  sessionPath?: string
 }
 
 const DEFAULT_CREDENTIAL_FUNCTION = process.env.POWERSYNC_SUPABASE_CREDS_FN ?? 'powersync-creds'
@@ -25,8 +27,29 @@ export class CliPowerSyncConnector implements PowerSyncBackendConnector {
   constructor(private readonly options: CliConnectorOptions = {}) {}
 
   async fetchCredentials(): Promise<PowerSyncCredentials | null> {
-    const endpoint = this.options.endpoint ?? process.env.POWERSYNC_ENDPOINT
-    const token = this.options.token ?? process.env.POWERSYNC_TOKEN
+    const stored = await loadStoredCredentials(this.options.sessionPath)
+      .catch((error) => {
+        console.warn('[psgit] failed to read cached credentials', error)
+        return null
+      })
+
+    if (stored) {
+      if (!isCredentialExpired(stored)) {
+        return { endpoint: stored.endpoint, token: stored.token }
+      }
+      console.warn('[psgit] cached PowerSync credentials have expired; attempting refresh...')
+    }
+
+    const endpoint =
+      this.options.endpoint ??
+      process.env.POWERSYNC_ENDPOINT ??
+      process.env.PSGIT_TEST_ENDPOINT ??
+      null
+    const token =
+      this.options.token ??
+      process.env.POWERSYNC_TOKEN ??
+      process.env.PSGIT_TEST_REMOTE_TOKEN ??
+      null
 
     if (endpoint && token) {
       return { endpoint, token }
