@@ -1,0 +1,3 @@
+[submodule "third_party/powersync-tanstack-db"]
+	path = third_party/powersync-tanstack-db
+	url = https://github.com/powersync-ja/temp-tanstack-db.git
