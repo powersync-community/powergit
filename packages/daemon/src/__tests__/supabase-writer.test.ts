@@ -164,7 +164,7 @@ describe('SupabaseWriter', () => {
 
     await writer.stop();
 
-    const packCall = currentSupabaseStub.upsertCalls.find((call) => call.table === 'git_packs');
+    const packCall = currentSupabaseStub.upsertCalls.find((call) => call.table === 'raw_objects');
     expect(packCall).toBeTruthy();
     expect(packCall?.rows).toHaveLength(1);
     const packRow = packCall?.rows[0] ?? {};
@@ -178,7 +178,7 @@ describe('SupabaseWriter', () => {
     expect(packRow.pack_bytes).toBe(base64Pack);
     expect(packCall?.options).toMatchObject({ onConflict: 'id' });
 
-    const refUpsert = currentSupabaseStub.upsertCalls.find((call) => call.table === 'refs');
+    const refUpsert = currentSupabaseStub.upsertCalls.find((call) => call.table === 'raw_refs');
     expect(refUpsert).toBeTruthy();
     expect(refUpsert?.rows[0]).toMatchObject({
       id: 'demo/infra/refs/heads/main',
@@ -188,7 +188,7 @@ describe('SupabaseWriter', () => {
       target_sha: '1111111111111111111111111111111111111111',
     });
 
-    const deleteCall = currentSupabaseStub.deleteCalls.find((call) => call.table === 'refs');
+    const deleteCall = currentSupabaseStub.deleteCalls.find((call) => call.table === 'raw_refs');
     expect(deleteCall).toBeTruthy();
     expect(deleteCall?.filters).toEqual({
       id: 'demo/infra/refs/heads/old',

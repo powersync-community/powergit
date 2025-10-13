@@ -389,7 +389,7 @@ async function handlePush(updates: PushRequest[]) {
   }
 }
 async function pushViaDaemon(
-  _client: PowerSyncRemoteClient | null,
+  client: PowerSyncRemoteClient | null,
   details: { org: string; repo: string },
   updates: PushRequest[],
   packBuffer: Buffer,
@@ -398,10 +398,24 @@ async function pushViaDaemon(
   await ensureDaemonReady()
 
   const targetUpdates = updates.map((update) => ({
-    src: update.src ?? ZERO_SHA,
+    src: update.src && update.src.length > 0 ? update.src : ZERO_SHA,
     dst: update.dst,
-    force: update.force,
+    ...(update.force ? { force: true } : {}),
   }))
+
+  const options: Record<string, unknown> = {}
+  if (extras.packOid) options.packOid = extras.packOid
+  if (extras.summary) options.summary = extras.summary
+
+  if (client) {
+    return client.pushPack({
+      org: details.org,
+      repo: details.repo,
+      updates: targetUpdates,
+      pack: packBuffer.length > 0 ? packBuffer : Buffer.alloc(0),
+      options: Object.keys(options).length > 0 ? options : undefined,
+    })
+  }
 
   const payload: Record<string, unknown> = {
     updates: targetUpdates,
@@ -418,6 +432,10 @@ async function pushViaDaemon(
 
   if (extras.summary) {
     payload.summary = extras.summary
+  }
+
+  if (Object.keys(options).length > 0) {
+    payload.options = options
   }
 
   const endpoint = `${daemonBaseUrl}/orgs/${encodeURIComponent(details.org)}/repos/${encodeURIComponent(details.repo)}/git/push`

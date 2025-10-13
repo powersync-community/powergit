@@ -30,10 +30,7 @@ describe('remote helper internals', () => {
       if (target.endsWith('/health')) {
         return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
       }
-      return new Response(
-        JSON.stringify({ ok: true, results: { 'refs/heads/main': { status: 'ok' } } }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      )
+      return new Response('not used', { status: 500 })
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
@@ -45,18 +42,26 @@ describe('remote helper internals', () => {
       commits: [],
     }
 
-    const result = await __internals.pushViaDaemon(null, { org: 'acme', repo: 'infra' }, updates, pack, {
+    const pushPackMock = vi.fn(async () => ({ ok: true, results: { 'refs/heads/main': { status: 'ok' } } }))
+    const fakeClient = { pushPack: pushPackMock }
+
+    const result = await __internals.pushViaDaemon(fakeClient as any, { org: 'acme', repo: 'infra' }, updates, pack, {
       summary,
       packOid: '123',
     })
 
     expect(result.ok).toBe(true)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    const pushCall = fetchMock.mock.calls[1] as unknown[] | undefined
-    expect(pushCall).toBeDefined()
-    const url = String(pushCall?.[0])
-    const init = pushCall?.[1] as RequestInit | undefined
-    expect(url).toMatch(/\/orgs\/acme\/repos\/infra\/git\/push$/)
-    expect(init?.method).toBe('POST')
+    expect(pushPackMock).toHaveBeenCalledTimes(1)
+    const [[pushArgs]] = pushPackMock.mock.calls as unknown as [
+      [
+        { org: string; repo: string; updates: unknown[]; pack: unknown; options?: Record<string, unknown> },
+      ],
+    ]
+    expect(pushArgs.org).toBe('acme')
+    expect(pushArgs.repo).toBe('infra')
+    expect(Array.isArray(pushArgs.updates)).toBe(true)
+    expect(Buffer.isBuffer(pushArgs.pack)).toBe(true)
+    expect(pushArgs.options).toMatchObject({ packOid: '123', summary })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
