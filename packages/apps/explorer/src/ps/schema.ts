@@ -35,7 +35,7 @@ const typedTables = tables as SchemaTables
 const typedSchema = schema as Schema<SchemaTables>
 
 export const AppSchema = typedSchema
-export const { refs, commits, file_changes } = typedTables
+export const { refs, commits, file_changes, objects } = typedTables
 
 type ColumnValueMap = {
   text: string | null

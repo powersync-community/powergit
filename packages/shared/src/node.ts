@@ -146,6 +146,10 @@ export class PowerSyncRemoteClient {
       method: 'POST',
       headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
       body: formBody as any,
+      // Node.js requires duplex to be specified when streaming the request body.
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore -- not yet in lib.dom types for all TS versions
+      duplex: 'half',
     })
     if (!res.ok) throw await this.toHttpError('push pack', res)
     const data = await res.json().catch(() => ({})) as PushPackResult | undefined

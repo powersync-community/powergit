@@ -73,7 +73,7 @@ describe('syncPowerSyncRepository', () => {
     }
     simpleGitMock.mockReturnValue(gitApi)
 
-    const fakeDb = new FakeDatabase({ refs: 2, commits: 5, file_changes: 9 })
+    const fakeDb = new FakeDatabase({ refs: 2, commits: 5, file_changes: 9, objects: 4 })
     const databaseFactory = vi.fn(async () => fakeDb as unknown as PowerSyncDatabase)
     const connector: PowerSyncBackendConnector = {
       fetchCredentials: vi.fn(async () => ({ endpoint: 'https://api.example.com', token: 'token' })),
@@ -95,7 +95,7 @@ describe('syncPowerSyncRepository', () => {
       repo: 'infra',
       endpoint: 'https://api.example.com',
       databasePath: expect.any(String),
-      counts: { refs: 2, commits: 5, file_changes: 9 },
+      counts: { refs: 2, commits: 5, file_changes: 9, objects: 4 },
     })
     expect(fakeDb.close).toHaveBeenCalled()
     fakeDb.subscriptions.forEach((subscription) => {
@@ -115,7 +115,7 @@ describe('syncPowerSyncRepository', () => {
     }
     simpleGitMock.mockReturnValue(gitApi)
 
-    const fakeDb = new FakeDatabase({ refs: 0, commits: 0, file_changes: 0 })
+    const fakeDb = new FakeDatabase({ refs: 0, commits: 0, file_changes: 0, objects: 0 })
     const databaseFactory = vi.fn(async (options: { dbPath?: string }) => {
       expect(options.dbPath).toBe('/custom/path.db')
       return fakeDb as unknown as PowerSyncDatabase

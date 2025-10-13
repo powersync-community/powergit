@@ -54,7 +54,7 @@ This function always signs tokens with the RSA private key supplied via `POWERSY
 
 ### Local emulator
 
-1. Start the Supabase stack (`pnpm dev:stack`). The script automatically runs `supabase functions serve powersync-creds`, `powersync-upload`, `powersync-remote-token`, and `powersync-push` with `--env-file supabase/.env`.
+1. Start the Supabase stack (`pnpm dev:stack`). The script automatically runs `supabase functions serve powersync-creds`, `powersync-upload`, and `powersync-remote-token` with `--env-file supabase/.env`.
 2. When iterating on a single function, you can hot-reload it without restarting the full stack:
 
   ```bash
@@ -87,7 +87,6 @@ This function always signs tokens with the RSA private key supplied via `POWERSY
   supabase functions deploy powersync-creds --no-verify-jwt
   supabase functions deploy powersync-upload --no-verify-jwt
   supabase functions deploy powersync-remote-token --no-verify-jwt
-  supabase functions deploy powersync-push --no-verify-jwt
   ```
 
   When ready to enforce JWT verification, redeploy each function without `--no-verify-jwt` after you confirm the RS256 key is configured (see below).
@@ -113,7 +112,7 @@ This function always signs tokens with the RSA private key supplied via `POWERSY
 1. Ensure RS256 secrets from [Rotating Supabase Auth to RS256](#rotating-supabase-auth-to-rs256-production-readiness) are set via `supabase secrets set`.
 2. Deploy `powersync-remote-token` first without `--no-verify-jwt` so the signer enforces JWT verification immediately.
 3. Update `.env.local` (or secrets in production) so the explorer and remote helper use the RS256 tokens issued by the function.
-4. Redeploy `powersync-creds`, `powersync-upload`, and `powersync-push` without `--no-verify-jwt`. Run `curl` or the CLI smoke tests (`pnpm seed:stack`) to confirm they accept the RS256-signed tokens.
+4. Redeploy `powersync-creds` and `powersync-upload` without `--no-verify-jwt`. Run `curl` or the CLI smoke tests to confirm they accept the RS256-signed tokens.
 5. Once all traffic flows, delete any leftover HS256 tokens or secrets to avoid confusion.
 
 ## Smoke testing edge functions
@@ -141,11 +140,10 @@ The script logs the exact responses so you can paste them into incident reports 
 3. Deploy the edge functions from `supabase/functions/*` to the local emulator (already wired into `pnpm dev:stack` once linked).
 4. Export local env overrides (see `docs/env.local.example`) so both the explorer and remote helper hit the Supabase emulator + PowerSync container.
   - Copy the example: `cp docs/env.local.example .env.local` and tweak tokens/endpoints as needed.
-5. Seed the demo repository so the explorer has commits and refs to render: `pnpm seed:stack`. This expects the `POWERSYNC_SEED_REMOTE_URL`/`PSGIT_TEST_REMOTE_URL` vars that `pnpm dev:stack` exports; re-run the stack script (or source the `.env.powersync-stack` it emits) before seeding.
-6. Cache CLI credentials once: `pnpm --filter @pkg/cli login`.
-7. Start the explorer: `pnpm dev` or `pnpm --filter @app/explorer test:e2e`.
-8. When finished, run `supabase stop` to tear down the containers.
-9. The connector now retrieves credentials via Supabase and pushes optimistic updates through the `powersync-upload` function.
+5. Cache CLI credentials once: `pnpm --filter @pkg/cli login`.
+6. Start the explorer: `pnpm dev` or `pnpm --filter @app/explorer test:e2e`.
+7. When finished, run `supabase stop` to tear down the containers.
+8. The connector now retrieves credentials via Supabase and pushes optimistic updates through the `powersync-upload` function.
 
   ### Generating migrations from `schema.sql`
 

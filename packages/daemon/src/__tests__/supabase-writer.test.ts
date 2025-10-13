@@ -1,0 +1,199 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { UpdateType, type CrudEntry, type CrudTransaction } from '@powersync/common';
+import type { PowerSyncDatabase } from '@powersync/node';
+
+const createClientMock = vi.fn();
+
+interface SupabaseUpsertCall {
+  table: string;
+  rows: Record<string, unknown>[];
+  options?: Record<string, unknown>;
+}
+
+interface SupabaseDeleteCall {
+  table: string;
+  filters: Record<string, unknown>;
+}
+
+type SupabaseStub = ReturnType<typeof createSupabaseDouble>;
+
+let currentSupabaseStub: SupabaseStub = createSupabaseDouble();
+
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: (...args: unknown[]) => createClientMock(...args),
+}));
+
+// Import after mocking.
+import { SupabaseWriter } from '../supabase-writer.js';
+
+function createSupabaseDouble() {
+  const upsertCalls: SupabaseUpsertCall[] = [];
+  const deleteCalls: SupabaseDeleteCall[] = [];
+  return {
+    upsertCalls,
+    deleteCalls,
+    from(table: string) {
+      return {
+        upsert: async (rows: Record<string, unknown>[], options?: Record<string, unknown>) => {
+          upsertCalls.push({ table, rows, options });
+          return { error: null };
+        },
+        delete: () => ({
+          match: async (filters: Record<string, unknown>) => {
+            deleteCalls.push({ table, filters });
+            return { error: null };
+          },
+        }),
+      };
+    },
+  };
+}
+
+class FakeDatabase {
+  private readonly queue: CrudTransaction[];
+
+  public readonly getNextCrudTransaction = vi.fn(async () => this.queue.shift() ?? null);
+
+  constructor(transactions: CrudTransaction[]) {
+    this.queue = [...transactions];
+  }
+}
+
+function createEntry(partial: Partial<CrudEntry>): CrudEntry {
+  return {
+    table: '',
+    id: '',
+    clientId: 0,
+    op: UpdateType.PUT,
+    opData: {},
+    previousValues: undefined,
+    metadata: undefined,
+    transactionId: undefined,
+    ...partial,
+  } as CrudEntry;
+}
+
+function createTransaction(entries: CrudEntry[]) {
+  const complete = vi.fn(async () => undefined);
+  const tx = {
+    crud: entries,
+    complete,
+    transactionId: 1,
+  } as unknown as CrudTransaction;
+  return { tx, complete };
+}
+
+async function waitForExpect(assertFn: () => void, timeoutMs = 1_000, intervalMs = 20): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      assertFn();
+      return;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+}
+
+describe('SupabaseWriter', () => {
+  beforeEach(() => {
+    currentSupabaseStub = createSupabaseDouble();
+    createClientMock.mockReset();
+    createClientMock.mockImplementation(() => currentSupabaseStub);
+  });
+
+  it('upserts PowerSync mutations to Supabase with pack bytes normalized', async () => {
+    const base64Pack = Buffer.from('fake pack').toString('base64');
+    const packEntry = createEntry({
+      table: 'objects',
+      op: UpdateType.PUT,
+      opData: {
+        id: 'demo/infra/abcdef1234567890',
+        org_id: 'demo',
+        repo_id: 'infra',
+        pack_oid: 'abcdef1234567890',
+        pack_bytes: base64Pack,
+        created_at: '2024-01-01T00:00:00Z',
+      },
+    });
+
+    const refEntry = createEntry({
+      table: 'refs',
+      op: UpdateType.PUT,
+      opData: {
+        id: 'demo/infra/refs/heads/main',
+        org_id: 'demo',
+        repo_id: 'infra',
+        name: 'refs/heads/main',
+        target_sha: '1111111111111111111111111111111111111111',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
+    });
+
+    const deleteEntry = createEntry({
+      table: 'refs',
+      op: UpdateType.DELETE,
+      previousValues: {
+        id: 'demo/infra/refs/heads/old',
+        org_id: 'demo',
+        repo_id: 'infra',
+        name: 'refs/heads/old',
+        target_sha: '0000000000000000000000000000000000000000',
+        updated_at: '2023-12-31T00:00:00Z',
+      },
+    });
+
+    const { tx, complete } = createTransaction([packEntry, refEntry, deleteEntry]);
+    const database = new FakeDatabase([tx]);
+
+    const writer = new SupabaseWriter({
+      database: database as unknown as PowerSyncDatabase,
+      config: { url: 'http://example.local', serviceRoleKey: 'service-key' },
+      pollIntervalMs: 10,
+      retryDelayMs: 50,
+      batchSize: 4,
+    });
+
+    writer.start();
+
+    await waitForExpect(() => {
+      expect(complete).toHaveBeenCalledTimes(1);
+    });
+
+    await writer.stop();
+
+    const packCall = currentSupabaseStub.upsertCalls.find((call) => call.table === 'git_packs');
+    expect(packCall).toBeTruthy();
+    expect(packCall?.rows).toHaveLength(1);
+    const packRow = packCall?.rows[0] ?? {};
+    expect(packRow).toMatchObject({
+      id: 'demo/infra/abcdef1234567890',
+      org_id: 'demo',
+      repo_id: 'infra',
+      pack_oid: 'abcdef1234567890',
+      created_at: '2024-01-01T00:00:00Z',
+    });
+    expect(packRow.pack_bytes).toBe(base64Pack);
+    expect(packCall?.options).toMatchObject({ onConflict: 'id' });
+
+    const refUpsert = currentSupabaseStub.upsertCalls.find((call) => call.table === 'refs');
+    expect(refUpsert).toBeTruthy();
+    expect(refUpsert?.rows[0]).toMatchObject({
+      id: 'demo/infra/refs/heads/main',
+      org_id: 'demo',
+      repo_id: 'infra',
+      name: 'refs/heads/main',
+      target_sha: '1111111111111111111111111111111111111111',
+    });
+
+    const deleteCall = currentSupabaseStub.deleteCalls.find((call) => call.table === 'refs');
+    expect(deleteCall).toBeTruthy();
+    expect(deleteCall?.filters).toEqual({
+      id: 'demo/infra/refs/heads/old',
+    });
+
+    expect(createClientMock).toHaveBeenCalledWith('http://example.local', 'service-key', expect.any(Object));
+  });
+});

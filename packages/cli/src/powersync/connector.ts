@@ -1,6 +1,7 @@
 import type { AbstractPowerSyncDatabase, PowerSyncBackendConnector, PowerSyncCredentials } from '@powersync/node'
 import { invokeSupabaseEdgeFunction } from '@shared/core'
-import { isCredentialExpired, loadStoredCredentials } from '../auth/session.js'
+import { isCredentialExpired, loadStoredCredentials, saveStoredCredentials } from '../auth/session.js'
+import { extractJwtMetadata } from '../auth/token.js'
 
 interface SupabaseCredentialResponse {
   endpoint: string
@@ -26,6 +27,35 @@ const DEFAULT_UPLOAD_FUNCTION = process.env.POWERSYNC_SUPABASE_UPLOAD_FN ?? 'pow
 export class CliPowerSyncConnector implements PowerSyncBackendConnector {
   constructor(private readonly options: CliConnectorOptions = {}) {}
 
+  private resolveEndpoint(fallback: string | null): string {
+    const preferred =
+      this.options.endpoint ??
+      process.env.POWERSYNC_ENDPOINT ??
+      process.env.PSGIT_TEST_ENDPOINT ??
+      null
+    if (preferred) {
+      return preferred
+    }
+    return fallback ?? ''
+  }
+
+  private async persistCredentials(endpoint: string, token: string) {
+    try {
+      const metadata = extractJwtMetadata(token)
+      await saveStoredCredentials(
+        {
+          endpoint,
+          token,
+          expiresAt: metadata.expiresAt,
+          obtainedAt: metadata.issuedAt ?? new Date().toISOString(),
+        },
+        this.options.sessionPath,
+      )
+    } catch (error) {
+      console.warn('[psgit] failed to cache PowerSync credentials', error)
+    }
+  }
+
   async fetchCredentials(): Promise<PowerSyncCredentials | null> {
     const stored = await loadStoredCredentials(this.options.sessionPath)
       .catch((error) => {
@@ -35,16 +65,12 @@ export class CliPowerSyncConnector implements PowerSyncBackendConnector {
 
     if (stored) {
       if (!isCredentialExpired(stored)) {
-        return { endpoint: stored.endpoint, token: stored.token }
+        return { endpoint: this.resolveEndpoint(stored.endpoint), token: stored.token }
       }
       console.warn('[psgit] cached PowerSync credentials have expired; attempting refresh...')
     }
 
-    const endpoint =
-      this.options.endpoint ??
-      process.env.POWERSYNC_ENDPOINT ??
-      process.env.PSGIT_TEST_ENDPOINT ??
-      null
+    const endpoint = this.resolveEndpoint(null)
     const token =
       this.options.token ??
       process.env.POWERSYNC_TOKEN ??
@@ -52,6 +78,7 @@ export class CliPowerSyncConnector implements PowerSyncBackendConnector {
       null
 
     if (endpoint && token) {
+      await this.persistCredentials(endpoint, token)
       return { endpoint, token }
     }
 
@@ -70,7 +97,9 @@ export class CliPowerSyncConnector implements PowerSyncBackendConnector {
       return null
     }
 
-    return { endpoint: credentials.endpoint, token: credentials.token }
+    const resolvedEndpoint = this.resolveEndpoint(credentials.endpoint)
+    await this.persistCredentials(resolvedEndpoint, credentials.token)
+    return { endpoint: resolvedEndpoint, token: credentials.token }
   }
 
   async uploadData(db: AbstractPowerSyncDatabase): Promise<void> {

@@ -2,9 +2,16 @@
 export type OrgId = string;
 export type RepoId = string;
 
-export interface RefRow { org_id: OrgId; repo_id: RepoId; name: string; target_sha: string; updated_at: string; }
-export interface CommitRow { org_id: OrgId; repo_id: RepoId; sha: string; author_name: string; author_email: string; authored_at: string; message: string; tree_sha: string; }
-export interface FileChangeRow { org_id: OrgId; repo_id: RepoId; commit_sha: string; path: string; additions: number; deletions: number; }
+export interface RefRow { id: string; org_id: OrgId; repo_id: RepoId; name: string; target_sha: string; updated_at: string; }
+export interface CommitRow { id: string; org_id: OrgId; repo_id: RepoId; sha: string; author_name: string; author_email: string; authored_at: string; message: string; tree_sha: string; }
+export interface FileChangeRow { id: string; org_id: OrgId; repo_id: RepoId; commit_sha: string; path: string; additions: number; deletions: number; }
+export interface PackRow { id: string; org_id: OrgId; repo_id: RepoId; pack_oid: string; pack_bytes: string; created_at: string; }
+export interface RepoSummaryRow {
+  org_id: OrgId;
+  repo_id: RepoId;
+  ref_count: number;
+  latest_ref_updated_at: string | null;
+}
 
 export const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 export function invariant(cond: any, msg: string): asserts cond { if (!cond) throw new Error(msg); }

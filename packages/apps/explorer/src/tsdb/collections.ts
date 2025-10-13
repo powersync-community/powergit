@@ -9,6 +9,7 @@ type Collections = {
   refs: CollectionImpl<Database['refs']>
   commits: CollectionImpl<Database['commits']>
   file_changes: CollectionImpl<Database['file_changes']>
+  objects: CollectionImpl<Database['objects']>
 }
 
 const collectionSpecs = convertPowerSyncSchemaToSpecs(AppSchema)
@@ -43,6 +44,13 @@ export function useCollections(): Collections {
           schema: collectionSpecs.file_changes,
         })
       ) as unknown as CollectionImpl<Database['file_changes']>,
+      objects: createCollection(
+        powerSyncCollectionOptions<Database['objects']>({
+          database: db,
+          tableName: 'objects',
+          schema: collectionSpecs.objects,
+        })
+      ) as unknown as CollectionImpl<Database['objects']>,
     }
   }, [db])
 }

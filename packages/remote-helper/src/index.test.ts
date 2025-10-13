@@ -1,78 +1,62 @@
-import { describe, expect, it, vi, afterEach } from 'vitest'
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import { Buffer } from 'node:buffer'
 
-describe('remote helper Supabase integration', () => {
-  const originalEnv = { ...process.env }
+import { __internals } from './index.js'
+
+const originalFetch = globalThis.fetch
+
+describe('remote helper internals', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
 
   afterEach(() => {
-    vi.resetModules()
-    vi.clearAllMocks()
-    vi.unmock('@shared/core')
-    process.env = { ...originalEnv }
+    vi.restoreAllMocks()
+    globalThis.fetch = originalFetch
   })
 
-  it('fetches token via Supabase edge function when configured', async () => {
-    const invokeSupabaseEdgeFunction = vi.fn().mockResolvedValue({ token: 'from-supabase' })
-
-    vi.doMock('@shared/core', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('@shared/core')>()
-      return {
-        ...actual,
-        invokeSupabaseEdgeFunction,
-      }
-    })
-
-    process.env.POWERSYNC_SUPABASE_URL = 'https://supabase.local'
-    process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY = 'service-key'
-
-    const { __internals } = await import('./index.js')
-    const token = await __internals.requestSupabaseToken({ endpoint: 'https://ps.example', org: 'acme', repo: 'infra' })
-
-    expect(token).toBe('from-supabase')
-    expect(invokeSupabaseEdgeFunction).toHaveBeenCalledWith(
-      'powersync-remote-token',
-      { remoteUrl: 'https://ps.example/orgs/acme/repos/infra' },
-      { url: 'https://supabase.local', serviceRoleKey: 'service-key' },
-    )
-  })
-
-  it('parses push directives correctly', async () => {
-    const { __internals } = await import('./index.js')
-    const parsePush = __internals.parsePush
-    expect(parsePush(['push', 'abc', 'def'])).toEqual({ src: 'abc', dst: 'def', force: false })
-    expect(parsePush(['push', 'abc:def'])).toEqual({ src: 'abc', dst: 'def', force: false })
-    expect(parsePush(['push', '+abc', 'def'])).toEqual({ src: 'abc', dst: 'def', force: true })
-    expect(parsePush(['push', 'abc', '+def'])).toEqual({ src: 'abc', dst: 'def', force: true })
-    expect(parsePush(['push', '+abc:+def'])).toEqual({ src: 'abc', dst: 'def', force: true })
+  it('parses push directives', () => {
+    const { parsePush } = __internals
+    expect(parsePush(['push', 'abc', 'refs/heads/main'])).toEqual({ src: 'abc', dst: 'refs/heads/main', force: false })
+    expect(parsePush(['push', 'abc:refs/heads/main'])).toEqual({ src: 'abc', dst: 'refs/heads/main', force: false })
+    expect(parsePush(['push', '+abc', 'refs/heads/main'])).toEqual({ src: 'abc', dst: 'refs/heads/main', force: true })
+    expect(parsePush(['push', '+abc:+refs/heads/main'])).toEqual({ src: 'abc', dst: 'refs/heads/main', force: true })
     expect(parsePush(['push'])).toBeNull()
   })
 
-  it('invokes Supabase push function', async () => {
-    const invokeSupabaseEdgeFunction = vi.fn().mockResolvedValue({ ok: true, results: { 'refs/heads/main': { status: 'ok' } } })
-
-    vi.doMock('@shared/core', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('@shared/core')>()
-      return {
-        ...actual,
-        invokeSupabaseEdgeFunction,
+  it('pushViaDaemon forwards payload to PowerSync client', async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const target = String(url)
+      if (target.endsWith('/health')) {
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
       }
+      return new Response(
+        JSON.stringify({ ok: true, results: { 'refs/heads/main': { status: 'ok' } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const updates = [{ src: 'abc', dst: 'refs/heads/main' }]
+    const pack = Buffer.from('pack')
+    const summary = {
+      head: 'abc',
+      refs: [{ name: 'refs/heads/main', target: 'abc' }],
+      commits: [],
+    }
+
+    const result = await __internals.pushViaDaemon(null, { org: 'acme', repo: 'infra' }, updates, pack, {
+      summary,
+      packOid: '123',
     })
 
-    process.env.POWERSYNC_SUPABASE_URL = 'http://supabase.local'
-    process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY = 'service-role'
-    process.env.POWERSYNC_SUPABASE_PUSH_FN = 'powersync-push'
-
-    const { __internals } = await import('./index.js')
-    const buffer = Buffer.from('packdata')
-    const result = await __internals.uploadPushPack({ org: 'acme', repo: 'infra' }, [{ src: 'abc', dst: 'refs/heads/main' }], buffer)
-
     expect(result.ok).toBe(true)
-    expect(invokeSupabaseEdgeFunction).toHaveBeenCalledWith('powersync-push', {
-      org: 'acme',
-      repo: 'infra',
-      updates: [{ src: 'abc', dst: 'refs/heads/main' }],
-      pack: buffer.toString('base64'),
-      packEncoding: 'base64',
-    }, { url: 'http://supabase.local', serviceRoleKey: 'service-role' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const pushCall = fetchMock.mock.calls[1] as unknown[] | undefined
+    expect(pushCall).toBeDefined()
+    const url = String(pushCall?.[0])
+    const init = pushCall?.[1] as RequestInit | undefined
+    expect(url).toMatch(/\/orgs\/acme\/repos\/infra\/git\/push$/)
+    expect(init?.method).toBe('POST')
   })
 })

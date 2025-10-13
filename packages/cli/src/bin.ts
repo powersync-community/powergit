@@ -34,7 +34,7 @@ async function main() {
     console.log(`  Endpoint: ${result.endpoint}`)
     console.log(`  Database: ${result.databasePath}`)
     console.log(
-      `  Rows: ${result.counts.refs} refs, ${result.counts.commits} commits, ${result.counts.file_changes} file changes`,
+      `  Rows: ${result.counts.refs} refs, ${result.counts.commits} commits, ${result.counts.file_changes} file changes, ${result.counts.objects} objects`,
     )
   } else if (cmd === 'demo-seed') {
     const parsed = parseSeedArgs(rest)

@@ -4,11 +4,12 @@ import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import simpleGit from 'simple-git'
 import type { PowerSyncDatabase, PowerSyncBackendConnector } from '@powersync/node'
-import { parsePowerSyncUrl, powerSyncSchemaSpec } from '@shared/core'
+import { parsePowerSyncUrl } from '@shared/core'
 import { CliPowerSyncConnector } from './powersync/connector.js'
 import { createPowerSyncDatabase, getDefaultDatabasePath, type CliDatabaseOptions } from './powersync/database.js'
 
 const STREAM_SUFFIXES = ['refs', 'commits', 'file_changes', 'objects'] as const
+type StreamSuffix = typeof STREAM_SUFFIXES[number]
 const DEFAULT_SEED_BRANCH = 'main'
 const DEFAULT_SEED_AUTHOR = { name: 'PowerSync Seed Bot', email: 'seed@powersync.test' }
 
@@ -134,7 +135,7 @@ export interface SyncCommandResult {
   repo: string
   endpoint: string
   databasePath: string
-  counts: Record<'refs' | 'commits' | 'file_changes', number>
+  counts: Record<StreamSuffix, number>
 }
 
 export async function syncPowerSyncRepository(dir: string, options: SyncCommandOptions = {}): Promise<SyncCommandResult> {
@@ -195,13 +196,9 @@ export async function syncPowerSyncRepository(dir: string, options: SyncCommandO
   }
 }
 
-async function collectTableCounts(database: PowerSyncDatabase): Promise<Record<'refs' | 'commits' | 'file_changes', number>> {
-  const targets: Array<keyof typeof powerSyncSchemaSpec> = ['refs', 'commits', 'file_changes']
-  const result: Record<'refs' | 'commits' | 'file_changes', number> = {
-    refs: 0,
-    commits: 0,
-    file_changes: 0,
-  }
+async function collectTableCounts(database: PowerSyncDatabase): Promise<Record<StreamSuffix, number>> {
+  const targets: StreamSuffix[] = [...STREAM_SUFFIXES]
+  const result = Object.fromEntries(targets.map((name) => [name, 0])) as Record<StreamSuffix, number>
 
   for (const tableName of targets) {
     const rows = await database.getAll<{ count: number }>(`SELECT COUNT(*) AS count FROM ${tableName}`)

@@ -13,7 +13,6 @@
   "dev:stack:up": "node ./scripts/dev-stack-up.mjs",
   "dev:stack:down": "node ./scripts/dev-stack-down.mjs",
   "seed:streams": "node ./scripts/seed-sync-rules.mjs",
-  "seed:stack": "pnpm --filter @pkg/cli build && node ./packages/cli/dist/cli/src/bin.js demo-seed",
   "schema:migrate": "node ./scripts/schema-to-migration.mjs && pnpx supabase db push",
   "supabase:smoke": "node ./scripts/supabase-function-smoke.mjs",
     "lint": "pnpm -r run lint",

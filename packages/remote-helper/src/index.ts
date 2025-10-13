@@ -2,31 +2,27 @@
 import { spawn } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import {
-  parsePowerSyncUrl,
-  invokeSupabaseEdgeFunction as invokeSupabaseEdgeFunctionImport,
-  type GitPushSummary,
-} from '@shared/core'
-import { PowerSyncRemoteClient, type FetchPackResult } from '@shared/core/node'
+import { parsePowerSyncUrl, type GitPushSummary } from '@shared/core'
+import { PowerSyncRemoteClient, type FetchPackResult, type PushPackResult } from '@shared/core/node'
 
 const ZERO_SHA = '0000000000000000000000000000000000000000'
 const MAX_COMMITS_PER_UPDATE = Number.parseInt(process.env.POWERSYNC_MAX_PUSH_COMMITS ?? '256', 10)
+const DEFAULT_DAEMON_URL = process.env.POWERSYNC_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? 'http://127.0.0.1:5030'
+const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm --filter @svc/daemon start'
+const DAEMON_AUTOSTART_DISABLED = (process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
+const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000', 10)
+const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000', 10)
+const DAEMON_START_HINT =
+  'PowerSync daemon unreachable — start it with "pnpm --filter @svc/daemon start" or point POWERSYNC_DAEMON_URL at a running instance.'
 
 interface FetchRequest { sha: string; name: string }
 interface PushRequest { src: string; dst: string; force?: boolean }
 
-interface PushFunctionResult {
-  ok?: boolean
-  message?: string
-  results?: Record<string, { status: 'ok' | 'error'; message?: string }>
-}
-
 let parsed: ReturnType<typeof parsePowerSyncUrl> | null = null
-let remote: PowerSyncRemoteClient | null = null
-let tokenPromise: Promise<string | undefined> | null = null
+let daemonClient: PowerSyncRemoteClient | null = null
+let daemonBaseUrl = normalizeBaseUrl(DEFAULT_DAEMON_URL)
 let fetchBatch: FetchRequest[] = []
 let pushBatch: PushRequest[] = []
-let cachedSupabaseInvoker: typeof invokeSupabaseEdgeFunctionImport | null = null
 
 const debugLogFile = process.env.POWERSYNC_HELPER_DEBUG_LOG
 
@@ -108,7 +104,7 @@ async function handleList() {
     println('')
     return
   }
-  const client = ensureClient()
+  const client = await ensureClient()
   if (!client) {
     println(`${ZERO_SHA} refs/heads/main`)
     println('')
@@ -123,7 +119,9 @@ async function handleList() {
     }
     println('')
   } catch (error) {
-    console.error(`[powersync] failed to list refs: ${(error as Error).message}`)
+    const friendly = formatDaemonError('list refs', error)
+    if (friendly) console.error(`[powersync] ${friendly}`)
+    else console.error(`[powersync] failed to list refs: ${(error as Error).message}`)
     println(`${ZERO_SHA} refs/heads/main`)
     println('')
   }
@@ -137,7 +135,7 @@ async function flushFetchBatch() {
     fetchBatch = []
     return
   }
-  const client = ensureClient()
+  const client = await ensureClient()
   if (!client) {
     println('')
     fetchBatch = []
@@ -155,7 +153,9 @@ async function flushFetchBatch() {
     await writePackToGit(pack)
     println('')
   } catch (error) {
-    console.error(`[powersync] fetch failed: ${(error as Error).message}`)
+    const friendly = formatDaemonError('fetch packs', error)
+    if (friendly) console.error(`[powersync] ${friendly}`)
+    else console.error(`[powersync] fetch failed: ${(error as Error).message}`)
     println('')
   } finally {
     fetchBatch = []
@@ -189,17 +189,26 @@ function dedupeFetch(items: FetchRequest[]): FetchRequest[] {
   return result
 }
 
-function ensureClient(): PowerSyncRemoteClient | null {
+async function ensureClient(): Promise<PowerSyncRemoteClient | null> {
   if (!parsed) return null
-  if (!remote) {
-    remote = new PowerSyncRemoteClient({
-      endpoint: parsed.endpoint,
-      basePath: parsed.basePath,
-      pathRouting: inferPathRouting(parsed.basePath),
-      getToken: async () => resolveAuthToken(),
+  await ensureDaemonReady()
+  if (!daemonClient) {
+    if (typeof globalThis.fetch !== 'function') {
+      console.error('[powersync] fetch API unavailable; requires Node 18+')
+      return null
+    }
+    daemonBaseUrl = normalizeBaseUrl(DEFAULT_DAEMON_URL)
+    daemonClient = new PowerSyncRemoteClient({
+      endpoint: daemonBaseUrl,
+      pathRouting: 'segments',
+      fetchImpl: globalThis.fetch as typeof fetch,
     })
   }
-  return remote
+  return daemonClient
+}
+
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/$/, '')
 }
 
 function ensureRemote(): { org: string; repo: string; endpoint: string; basePath?: string } | null {
@@ -207,21 +216,67 @@ function ensureRemote(): { org: string; repo: string; endpoint: string; basePath
   return { org: parsed.org, repo: parsed.repo, endpoint: parsed.endpoint, basePath: parsed.basePath }
 }
 
-function inferPathRouting(basePath?: string): 'segments' | 'query' {
-  return basePath && basePath.includes('/functions/') ? 'query' : 'segments'
+let daemonStartInFlight = false
+
+async function ensureDaemonReady(): Promise<void> {
+  if (typeof globalThis.fetch !== 'function') return
+  if (await isDaemonResponsive()) return
+
+  if (DAEMON_AUTOSTART_DISABLED) {
+    throw new Error(DAEMON_START_HINT)
+  }
+
+  if (!daemonStartInFlight) {
+    daemonStartInFlight = true
+    debugLog(`[powersync] attempting to start daemon via: ${DAEMON_START_COMMAND}`)
+    try {
+      launchDaemon()
+    } catch (error) {
+      daemonStartInFlight = false
+      throw new Error(`failed to launch PowerSync daemon — ${(error as Error).message}`)
+    }
+  }
+
+  const deadline = Date.now() + DAEMON_START_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (await isDaemonResponsive()) {
+      daemonStartInFlight = false
+      return
+    }
+    await delay(200)
+  }
+
+  daemonStartInFlight = false
+  throw new Error(`${DAEMON_START_HINT} (daemon start timed out)`)
 }
 
-function buildRemoteHttpUrl(details: { endpoint: string; basePath?: string; org: string; repo: string }): string {
-  const encodedOrg = encodeURIComponent(details.org)
-  const encodedRepo = encodeURIComponent(details.repo)
-  const path = `/orgs/${encodedOrg}/repos/${encodedRepo}`
-  if (inferPathRouting(details.basePath) === 'query') {
-    const baseUrl = new URL(details.basePath ? `${details.endpoint}${details.basePath}` : details.endpoint)
-    baseUrl.searchParams.set('path', path)
-    return baseUrl.toString()
+async function isDaemonResponsive(): Promise<boolean> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), DAEMON_CHECK_TIMEOUT_MS)
+    const res = await fetch(`${daemonBaseUrl}/health`, { signal: controller.signal })
+    clearTimeout(timeout)
+    return res.ok
+  } catch {
+    return false
   }
-  const base = details.basePath ? `${details.endpoint}${details.basePath}` : details.endpoint
-  return `${base}${path}`
+}
+
+function launchDaemon(): void {
+  try {
+    const child = spawn(DAEMON_START_COMMAND, {
+      shell: true,
+      detached: true,
+      stdio: 'ignore',
+    })
+    child.unref()
+  } catch (error) {
+    throw new Error(`unable to spawn PowerSync daemon (${(error as Error).message})`)
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function detectRemoteReference(parts: string[]) {
@@ -249,31 +304,6 @@ function tryParseRemote(candidate?: string): boolean {
       console.error(`[powersync] failed to parse remote URL: ${(error as Error).message}`)
     }
     return false
-  }
-}
-
-async function resolveAuthToken(): Promise<string | undefined> {
-  const direct = process.env.POWERSYNC_REMOTE_TOKEN || process.env.POWERSYNC_TOKEN || process.env.POWERSYNC_AUTH_TOKEN
-  if (direct) return direct
-  if (!parsed) return undefined
-  if (!tokenPromise) tokenPromise = requestSupabaseToken(parsed)
-  return tokenPromise
-}
-
-async function requestSupabaseToken(details: { endpoint: string; basePath?: string; org: string; repo: string }): Promise<string | undefined> {
-  const supabaseUrl = process.env.POWERSYNC_SUPABASE_URL
-  const serviceKey = process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY
-  if (!supabaseUrl || !serviceKey) return undefined
-  const functionName = process.env.POWERSYNC_SUPABASE_REMOTE_FN ?? 'powersync-remote-token'
-  const remoteHttpUrl = buildRemoteHttpUrl(details)
-  try {
-    const response = await callSupabaseEdgeFunction<{ token?: string }>(functionName, {
-      remoteUrl: remoteHttpUrl,
-    }, { url: supabaseUrl, serviceRoleKey: serviceKey })
-    return response?.token
-  } catch (error) {
-    console.error('[powersync] failed to fetch Supabase remote token', error)
-    return undefined
   }
 }
 
@@ -313,6 +343,12 @@ async function handlePush(updates: PushRequest[]) {
     println('')
     return
   }
+  const client = await ensureClient()
+  if (!client) {
+    for (const update of updates) println(`error ${update.dst} daemon-unavailable`)
+    println('')
+    return
+  }
 
   try {
     debugLog(`handlePush updates:${updates.length}`)
@@ -331,7 +367,7 @@ async function handlePush(updates: PushRequest[]) {
     }
     debugLog(`packSize:${packData.length}`)
     const packOid = packData.length > 0 ? createHash('sha1').update(packData).digest('hex') : undefined
-    const result = await uploadPushPack(details, resolvedUpdates, packData, { summary, packOid })
+    const result = await pushViaDaemon(client, details, resolvedUpdates, packData, { summary, packOid })
     const statuses = result.results ?? {}
     for (const update of resolvedUpdates) {
       const entry = statuses[update.dst]
@@ -344,69 +380,62 @@ async function handlePush(updates: PushRequest[]) {
     }
     println('')
   } catch (error) {
-    console.error(`[powersync] push failed: ${(error as Error).message}`)
-    for (const update of updates) println(`error ${update.dst} ${(error as Error).message}`)
+    const friendly = formatDaemonError('push', error)
+    const message = friendly ?? (error as Error).message ?? 'push failed'
+    if (friendly) console.error(`[powersync] ${friendly}`)
+    else console.error(`[powersync] push failed: ${message}`)
+    for (const update of updates) println(`error ${update.dst} ${message}`)
     println('')
   }
 }
-async function uploadPushPack(
+async function pushViaDaemon(
+  _client: PowerSyncRemoteClient | null,
   details: { org: string; repo: string },
   updates: PushRequest[],
   packBuffer: Buffer,
   extras: { summary?: GitPushSummary; packOid?: string } = {},
-): Promise<PushFunctionResult> {
-  const supabaseUrl = process.env.POWERSYNC_SUPABASE_URL
-  const serviceKey = process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY
-  if (!supabaseUrl || !serviceKey) throw new Error('Supabase push configuration missing')
-  const functionName = process.env.POWERSYNC_SUPABASE_PUSH_FN ?? 'powersync-push'
+): Promise<PushPackResult> {
+  await ensureDaemonReady()
 
-  const payload = {
-    org: details.org,
-    repo: details.repo,
-    updates,
-    pack: packBuffer.toString('base64'),
-    packEncoding: 'base64' as const,
+  const targetUpdates = updates.map((update) => ({
+    src: update.src ?? ZERO_SHA,
+    dst: update.dst,
+    force: update.force,
+  }))
+
+  const payload: Record<string, unknown> = {
+    updates: targetUpdates,
+  }
+
+  if (packBuffer.length > 0) {
+    payload.packBase64 = packBuffer.toString('base64')
+    payload.packEncoding = 'base64'
   }
 
   if (extras.packOid) {
-    Object.assign(payload, { packOid: extras.packOid })
-  }
-  if (extras.summary && (extras.summary.commits.length > 0 || extras.summary.refs.length > 0 || extras.summary.head)) {
-    Object.assign(payload, { summary: extras.summary })
+    payload.packOid = extras.packOid
   }
 
-  return callSupabaseEdgeFunction<PushFunctionResult>(functionName, payload, {
-    url: supabaseUrl,
-    serviceRoleKey: serviceKey,
+  if (extras.summary) {
+    payload.summary = extras.summary
+  }
+
+  const endpoint = `${daemonBaseUrl}/orgs/${encodeURIComponent(details.org)}/repos/${encodeURIComponent(details.repo)}/git/push`
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
   })
-}
 
-async function callSupabaseEdgeFunction<T = unknown>(
-  functionName: string,
-  payload: Record<string, unknown>,
-  config: Parameters<typeof invokeSupabaseEdgeFunctionImport>[2],
-): Promise<T> {
-  const invoker = await ensureSupabaseInvoker()
-  return invoker(functionName, payload, config) as Promise<T>
-}
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`daemon push failed (${res.status} ${res.statusText}${text ? ` — ${text}` : ''})`)
+  }
 
-async function ensureSupabaseInvoker(): Promise<typeof invokeSupabaseEdgeFunctionImport> {
-  if (cachedSupabaseInvoker) return cachedSupabaseInvoker
-  if (typeof invokeSupabaseEdgeFunctionImport === 'function') {
-    cachedSupabaseInvoker = invokeSupabaseEdgeFunctionImport
-    return cachedSupabaseInvoker
-  }
-  const actual = await import('@shared/core')
-  let invoker = actual.invokeSupabaseEdgeFunction
-  if (typeof invoker !== 'function') {
-  const direct = await import('../../shared/src/supabase')
-    invoker = direct.invokeSupabaseEdgeFunction
-  }
-  if (typeof invoker !== 'function') {
-    throw new Error('Supabase function invoker unavailable')
-  }
-  cachedSupabaseInvoker = invoker
-  return cachedSupabaseInvoker
+  const data = await res.json().catch(() => ({})) as { ok?: boolean; results?: PushPackResult['results']; message?: string }
+  const results = data.results ?? {}
+  const ok = data.ok ?? Object.values(results).every((entry) => entry.status === 'ok')
+  return { ok, results, message: data.message }
 }
 
 async function resolvePushUpdates(updates: PushRequest[]): Promise<PushRequest[]> {
@@ -529,7 +558,7 @@ async function listCommitsForRef(ref: string): Promise<string[]> {
 }
 
 async function readCommitSummary(sha: string): Promise<GitPushSummary['commits'][number]> {
-  const headerRaw = await execGit(['show', '--no-patch', '--format=%H\x00%T\x00%an\x00%ae\x00%aI\x00%P\x00%B\x00', sha])
+  const headerRaw = await execGit(['show', '--no-patch', '--format=%H%x00%T%x00%an%x00%ae%x00%aI%x00%P%x00%B%x00', sha])
   const headerParts = headerRaw.split('\x00')
   if (headerParts.length && headerParts[headerParts.length - 1] === '') {
     headerParts.pop()
@@ -618,8 +647,20 @@ async function readNextLine(iterator: AsyncIterator<Buffer>, buffer: Buffer): Pr
 }
 
 export const __internals = {
-  requestSupabaseToken,
-  uploadPushPack,
   parsePush,
+  pushViaDaemon,
 }
 
+function formatDaemonError(operation: string, error: unknown): string | null {
+  const err = error as Error & { cause?: unknown }
+  const cause = err?.cause as { code?: string } | null | undefined
+  if (cause && typeof cause.code === 'string') {
+    if (cause.code === 'ECONNREFUSED' || cause.code === 'EHOSTUNREACH' || cause.code === 'ENOENT') {
+      return `${DAEMON_START_HINT} (${operation})`
+    }
+  }
+  if (err instanceof TypeError && /fetch failed/i.test(err.message)) {
+    return `${DAEMON_START_HINT} (${operation})`
+  }
+  return null
+}

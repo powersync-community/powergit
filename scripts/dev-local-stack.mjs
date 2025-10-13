@@ -3,19 +3,21 @@
 import { spawn, execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, relative } from 'node:path'
-import { writeFile, mkdir as mkdirAsync } from 'node:fs/promises'
+import { writeFile, mkdir as mkdirAsync, readFile } from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import { createConnection } from 'node:net'
 import { inspect } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
+import { Client } from 'pg'
 
 const STACK_ENV_FILENAME = '.env.powersync-stack'
 const DEFAULT_ORG = process.env.POWERSYNC_STACK_ORG ?? 'demo'
 const DEFAULT_REPO = process.env.POWERSYNC_STACK_REPO ?? 'infra'
 const DEFAULT_REMOTE_NAME = process.env.POWERSYNC_STACK_REMOTE ?? 'powersync'
 const POWERSYNC_PORT = process.env.POWERSYNC_PORT ?? '55440'
+const POWERSYNC_INTERNAL_PORT = process.env.POWERSYNC_INTERNAL_PORT ?? '3000'
 const SUPABASE_PORT = process.env.SUPABASE_API_PORT ?? process.env.SUPABASE_PORT ?? '55431'
-const DEFAULT_POWERSYNC_ENDPOINT = `http://127.0.0.1:${POWERSYNC_PORT}`
+const DEFAULT_LOCAL_DB_URL = 'postgresql://postgres:postgres@127.0.0.1:55432/postgres'
 const DEFAULT_SUPABASE_URL = `http://127.0.0.1:${SUPABASE_PORT}`
 
 const __filename = fileURLToPath(import.meta.url)
@@ -150,6 +152,28 @@ function warnLog(...args) {
 function errorLog(...args) {
   console.error(...args)
   writeLogLine(...args)
+}
+
+function normalizeEnvValues(entries) {
+  return Object.entries(entries).reduce((accumulator, [key, value]) => {
+    if (value == null) return accumulator
+    accumulator[key] = typeof value === 'string' ? value : String(value)
+    return accumulator
+  }, {})
+}
+
+function transformLocalUrlForDocker(urlString) {
+  if (!urlString) return urlString
+  try {
+    const url = new URL(urlString)
+    if (['localhost', '127.0.0.1', '0.0.0.0'].includes(url.hostname)) {
+      url.hostname = 'host.docker.internal'
+      return url.toString()
+    }
+    return urlString
+  } catch {
+    return urlString
+  }
 }
 
 async function initLogging() {
@@ -340,17 +364,15 @@ async function waitForPowerSyncReady(endpoint) {
 }
 
 async function ensureWorkspaceBinaries() {
-  try {
-    await runCommand('pnpm', ['--filter', '@pkg/remote-helper', 'build'])
-  } catch (error) {
-    warnLog('[dev:stack] Warning: failed to build remote helper.', error?.message ?? error)
-  }
+  await runCommand('pnpm', ['--filter', '@pkg/remote-helper', 'build']).catch((error) => {
+    errorLog('[dev:stack] Failed to build remote helper.', error?.message ?? error)
+    throw error
+  })
 
-  try {
-    await runCommand('pnpm', ['--filter', '@pkg/cli', 'build'])
-  } catch (error) {
-    warnLog('[dev:stack] Warning: failed to build @pkg/cli.', error?.message ?? error)
-  }
+  await runCommand('pnpm', ['--filter', '@pkg/cli', 'build']).catch((error) => {
+    errorLog('[dev:stack] Failed to build @pkg/cli.', error?.message ?? error)
+    throw error
+  })
 }
 
 async function supabaseStatusEnv() {
@@ -404,13 +426,41 @@ function buildStackEnv(statusEnv) {
   const functionsUrl = `${supabaseUrl}/functions/v1`
   const serviceRoleKey = statusEnv.SERVICE_ROLE_KEY ?? process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY ?? 'service-role-placeholder'
   const anonKey = statusEnv.ANON_KEY ?? process.env.POWERSYNC_SUPABASE_ANON_KEY ?? 'anon-placeholder'
-  const powersyncEndpoint = process.env.POWERSYNC_ENDPOINT ?? DEFAULT_POWERSYNC_ENDPOINT
+  const resolvedDatabaseUrl =
+    statusEnv.DATABASE_URL ??
+    statusEnv.DB_URL ??
+    statusEnv.DB_CONNECTION_STRING ??
+    process.env.SUPABASE_DB_URL ??
+    process.env.SUPABASE_DB_CONNECTION_STRING ??
+    process.env.DATABASE_URL ??
+    DEFAULT_LOCAL_DB_URL
+  const primaryDatabaseUrl =
+    process.env.POWERSYNC_DATABASE_URL ?? statusEnv.POWERSYNC_DATABASE_URL ?? resolvedDatabaseUrl
+  const hostDatabaseUrl = primaryDatabaseUrl
+  const containerDatabaseUrl =
+    process.env.POWERSYNC_CONTAINER_DATABASE_URL ??
+    transformLocalUrlForDocker(primaryDatabaseUrl)
+  const primaryStorageUri =
+    process.env.POWERSYNC_STORAGE_URI ?? statusEnv.POWERSYNC_STORAGE_URI ?? primaryDatabaseUrl
+  const hostStorageUri = primaryStorageUri
+  const containerStorageUri =
+    process.env.POWERSYNC_CONTAINER_STORAGE_URI ??
+    transformLocalUrlForDocker(primaryStorageUri)
+  const powersyncPort =
+    `${process.env.POWERSYNC_PORT ?? statusEnv.POWERSYNC_PORT ?? POWERSYNC_PORT ?? '55440'}`
+  const psDatabaseUrl =
+    process.env.PS_DATABASE_URL ?? statusEnv.PS_DATABASE_URL ?? containerDatabaseUrl
+  const psStorageUri =
+    process.env.PS_STORAGE_URI ?? statusEnv.PS_STORAGE_URI ?? containerStorageUri
+  const psPort = `${process.env.PS_PORT ?? statusEnv.PS_PORT ?? POWERSYNC_INTERNAL_PORT}`
+  const powersyncEndpoint =
+    process.env.POWERSYNC_ENDPOINT ?? statusEnv.POWERSYNC_ENDPOINT ?? `http://127.0.0.1:${powersyncPort}`
   const defaultRemoteEndpoint = functionsUrl ? `${functionsUrl}/powersync-remote` : powersyncEndpoint
   const powersyncRemoteEndpoint = (process.env.POWERSYNC_REMOTE_ENDPOINT ?? defaultRemoteEndpoint).replace(/\/$/, '')
   const powersyncToken =
     process.env.POWERSYNC_TOKEN ?? process.env.POWERSYNC_REMOTE_TOKEN ?? undefined
   const remoteUrl = `powersync::${powersyncRemoteEndpoint.replace(/\/$/, '')}/orgs/${DEFAULT_ORG}/repos/${DEFAULT_REPO}`
-  const databaseUrl = statusEnv.DATABASE_URL ?? statusEnv.DB_URL ?? process.env.POWERSYNC_DATABASE_URL ?? process.env.SUPABASE_DB_URL
+  const databaseUrl = resolvedDatabaseUrl
 
   return {
     supabaseUrl,
@@ -422,7 +472,15 @@ function buildStackEnv(statusEnv) {
     powersyncToken,
     remoteUrl,
     remoteHttpUrl: stripPowersyncScheme(remoteUrl),
-    databaseUrl,
+    databaseUrl: hostDatabaseUrl,
+    powersyncDatabaseUrl: hostDatabaseUrl,
+    powersyncStorageUri: hostStorageUri,
+    powersyncContainerDatabaseUrl: containerDatabaseUrl,
+    powersyncContainerStorageUri: containerStorageUri,
+    powersyncPort,
+    psDatabaseUrl,
+    psStorageUri,
+    psPort,
   }
 }
 
@@ -444,6 +502,13 @@ function buildExportLines(env) {
     `export POWERSYNC_SUPABASE_FUNCTIONS_URL=${JSON.stringify(env.functionsUrl)}`,
     `export POWERSYNC_SUPABASE_SERVICE_ROLE_KEY=${JSON.stringify(env.serviceRoleKey)}`,
     `export POWERSYNC_SUPABASE_ANON_KEY=${JSON.stringify(env.anonKey)}`,
+    `export POWERSYNC_SUPABASE_DATABASE_URL=${JSON.stringify(env.databaseUrl)}`,
+    `export POWERSYNC_DATABASE_URL=${JSON.stringify(env.powersyncDatabaseUrl)}`,
+    `export POWERSYNC_STORAGE_URI=${JSON.stringify(env.powersyncStorageUri)}`,
+    `export POWERSYNC_PORT=${JSON.stringify(env.powersyncPort)}`,
+    `export PS_DATABASE_URL=${JSON.stringify(env.psDatabaseUrl)}`,
+    `export PS_STORAGE_URI=${JSON.stringify(env.psStorageUri)}`,
+    `export PS_PORT=${JSON.stringify(env.psPort)}`,
   ]
 
   if (env.powersyncToken) {
@@ -477,36 +542,53 @@ async function seedSyncRules(env) {
     return
   }
 
+  const seedEnv = normalizeEnvValues({
+    POWERSYNC_DATABASE_URL: env.powersyncDatabaseUrl ?? env.databaseUrl ?? process.env.POWERSYNC_DATABASE_URL,
+    SUPABASE_DB_URL: env.databaseUrl ?? process.env.SUPABASE_DB_URL,
+    SUPABASE_DB_CONNECTION_STRING: env.databaseUrl ?? process.env.SUPABASE_DB_CONNECTION_STRING,
+    DATABASE_URL: env.databaseUrl ?? process.env.DATABASE_URL,
+    PS_DATABASE_URL:
+      env.psDatabaseUrl ?? env.powersyncDatabaseUrl ?? env.databaseUrl ?? process.env.PS_DATABASE_URL,
+    PS_STORAGE_URI:
+      env.psStorageUri ?? env.powersyncStorageUri ?? env.databaseUrl ?? process.env.PS_STORAGE_URI,
+    PS_PORT: env.psPort ?? process.env.PS_PORT,
+  })
+
   await runCommand('node', ['scripts/seed-sync-rules.mjs'], {
-    env: {
-      POWERSYNC_DATABASE_URL: env.databaseUrl ?? process.env.POWERSYNC_DATABASE_URL,
-      SUPABASE_DB_URL: env.databaseUrl ?? process.env.SUPABASE_DB_URL,
-      SUPABASE_DB_CONNECTION_STRING: env.databaseUrl ?? process.env.SUPABASE_DB_CONNECTION_STRING,
-      DATABASE_URL: env.databaseUrl ?? process.env.DATABASE_URL,
-    },
+    env: seedEnv,
   })
   infoLog('✅ Supabase stream metadata synced from config.yaml')
 }
 
-async function seedDemoRepo(env) {
-  if (cliOptions.skipSeeds || cliOptions.skipDemoSeed) {
-    infoLog('[skip] Demo repository seed disabled via flag.')
+async function applySupabaseSchema(env) {
+  const databaseUrl = env.databaseUrl ?? env.powersyncDatabaseUrl
+  if (!databaseUrl) {
+    warnLog('[dev:stack] Skipping schema apply – database URL unavailable.')
     return
   }
 
-  const cliBin = resolve(repoRoot, 'packages/cli/dist/cli/src/bin.js')
-  const branch = process.env.POWERSYNC_SEED_BRANCH ?? 'main'
+  const schemaPath = resolve(repoRoot, 'supabase', 'schema.sql')
+  let sql = ''
+  try {
+    sql = await readFile(schemaPath, 'utf8')
+  } catch (error) {
+    warnLog('[dev:stack] Failed to read supabase/schema.sql', error?.message ?? error)
+    return
+  }
 
-  await runCommand('node', [cliBin, 'demo-seed', '--remote-url', env.remoteUrl, '--remote', DEFAULT_REMOTE_NAME, '--branch', branch], {
-    env: {
-      POWERSYNC_SUPABASE_FUNCTIONS_URL: env.functionsUrl,
-      POWERSYNC_SUPABASE_SERVICE_ROLE_KEY: env.serviceRoleKey,
-      POWERSYNC_SUPABASE_URL: env.supabaseUrl,
-      POWERSYNC_ENDPOINT: env.powersyncEndpoint,
-      POWERSYNC_TOKEN: env.powersyncToken,
-    },
-  })
-  infoLog(`✅ Seeded demo repo to ${env.remoteUrl}`)
+  const client = new Client({ connectionString: databaseUrl })
+  try {
+    await client.connect()
+    await client.query('begin')
+    await client.query(sql)
+    await client.query('commit')
+    infoLog('✅ Supabase schema ensured via supabase/schema.sql')
+  } catch (error) {
+    await client.query('rollback').catch(() => undefined)
+    warnLog('[dev:stack] Failed to apply supabase/schema.sql', error?.message ?? error)
+  } finally {
+    await client.end().catch(() => undefined)
+  }
 }
 
 async function ensurePowerSyncToken(env) {
@@ -558,11 +640,28 @@ async function ensurePowerSyncToken(env) {
 }
 
 async function startStack() {
-  await runCommand('supabase', ['start'])
+  await runCommand('supabase', ['start', '--ignore-health-check'])
   const statusEnv = await supabaseStatusEnv()
   const env = buildStackEnv(statusEnv)
 
-  const powersyncEnv = {}
+  const hostEnvVars = normalizeEnvValues({
+    POWERSYNC_DATABASE_URL: env.powersyncDatabaseUrl,
+    POWERSYNC_STORAGE_URI: env.powersyncStorageUri,
+    POWERSYNC_PORT: env.powersyncPort,
+    PS_DATABASE_URL: env.psDatabaseUrl,
+    PS_STORAGE_URI: env.psStorageUri,
+    PS_PORT: env.psPort,
+  })
+  Object.assign(process.env, hostEnvVars)
+
+  const powersyncEnv = normalizeEnvValues({
+    POWERSYNC_DATABASE_URL: env.powersyncContainerDatabaseUrl ?? env.powersyncDatabaseUrl,
+    POWERSYNC_STORAGE_URI: env.powersyncContainerStorageUri ?? env.powersyncStorageUri,
+    POWERSYNC_PORT: env.powersyncPort,
+    PS_DATABASE_URL: env.psDatabaseUrl,
+    PS_STORAGE_URI: env.psStorageUri,
+    PS_PORT: env.psPort,
+  })
 
   await runCommand('docker', ['compose', '-f', 'supabase/docker-compose.powersync.yml', 'up', '-d', '--wait'], {
     env: powersyncEnv,
@@ -574,22 +673,13 @@ async function startStack() {
   await ensureWorkspaceBinaries()
 
   await ensurePowerSyncToken(env)
+  await applySupabaseSchema(env)
 
   const exportLines = await writeStackEnvFile(env)
 
   await waitForPowerSyncReady(env.powersyncEndpoint)
 
-  try {
-    await seedSyncRules(env)
-  } catch (error) {
-    warnLog('[dev:stack] Warning: failed to apply sync rules.', error?.message ?? error)
-  }
-
-  try {
-    await seedDemoRepo(env)
-  } catch (error) {
-    warnLog('[dev:stack] Warning: failed to seed demo repo.', error?.message ?? error)
-  }
+  await seedSyncRules(env)
 
   infoLog('✨ Supabase + PowerSync stack is ready.')
   infoLog(`   Remote name: ${DEFAULT_REMOTE_NAME}`)
@@ -683,4 +773,3 @@ main().catch((error) => {
   errorLog('Local stack script crashed:', error)
   process.exit(1)
 })
-

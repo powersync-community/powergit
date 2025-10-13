@@ -60,21 +60,13 @@ Open **Agents.md** for the architecture.
    - `pnpm dev:stack:down` is a shorthand for `pnpm dev:stack stop -- --log` if you prefer the legacy alias.
    - Need a dry run? `pnpm dev:stack -- --dry-run` prints each step without executing it.
 
-4. **Authenticate the CLI** so `psgit` can reuse credentials:
+5. **Authenticate the CLI** so `psgit` can reuse credentials:
 
    ```bash
    pnpm --filter @pkg/cli login
    ```
 
    The command contacts the `powersync-creds` edge function (using the service-role key exported by `pnpm dev:stack`) and caches the RS256 token under `~/.psgit/session.json`. Future CLI commands reuse the cached token automatically. To inspect the stored credentials or clear them, run `psgit login --manual ...` or `psgit logout`.
-
-5. **Seed the demo repository via the CLI helper** (optional but handy for smoke tests):
-
-   ```bash
-   pnpm seed:stack
-   ```
-
-   The script builds `@pkg/cli` (if needed) and runs `psgit demo-seed`, pushing two commits to the default remote (`powersync::…/orgs/demo/repos/infra`). This command expects the environment variables exported by `pnpm dev:stack` (notably `POWERSYNC_SEED_REMOTE_URL`) to be active in your shell.
 
 6. **Launch the explorer UI** in another terminal:
 
@@ -95,7 +87,6 @@ Open **Agents.md** for the architecture.
 | Type check all packages | `pnpm typecheck` |
 | Build the remote helper | `pnpm --filter @pkg/remote-helper build` |
 | Build the CLI (`psgit`) | `pnpm --filter @pkg/cli build` |
-| Seed demo repo via CLI | `pnpm seed:stack` |
 | Cache PowerSync CLI credentials | `pnpm --filter @pkg/cli login` |
 | Start local Supabase + PowerSync stack | `pnpm dev:stack` |
 | Stop local stack | `pnpm dev:stack stop` |
@@ -157,7 +148,7 @@ VITE_POWERSYNC_DISABLED=false
 3. Export credentials so the remote helper can reach the PowerSync control plane:
    - `POWERSYNC_TOKEN` (or `POWERSYNC_REMOTE_TOKEN`)
    - `POWERSYNC_SUPABASE_REMOTE_FN` when brokering tokens via Supabase (defaults to `powersync-remote-token`)
-4. The local stack now includes Supabase **and** a PowerSync container. After running `pnpm dev:stack`, you can connect to the PowerSync API at `http://127.0.0.1:55440` (override with `POWERSYNC_PORT`). Adjust `POWERSYNC_DATABASE_URL` or other env vars in `supabase/docker-compose.powersync.yml` if you need different credentials. Bring the stream definitions online with `pnpm seed:streams`, then push test data through the CLI via `pnpm seed:stack`.
+4. The local stack now includes Supabase **and** a PowerSync container. After running `pnpm dev:stack`, you can connect to the PowerSync API at `http://127.0.0.1:55440` (override with `POWERSYNC_PORT`). Adjust `POWERSYNC_DATABASE_URL` or other env vars in `supabase/docker-compose.powersync.yml` if you need different credentials. Bring the stream definitions online with `pnpm seed:streams`; from there you can interact with refs/commits using the CLI or explorer as needed.
 
 5. To debug metadata locally, mirror the org-scoped streams into SQLite:
    ```bash
