@@ -2,7 +2,7 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest'
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { execFile } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
@@ -10,6 +10,18 @@ import { startStack, stopStack } from './__tests__/stack-hooks.js'
 import { getServerSupabaseClient, parsePowerSyncUrl } from '@shared/core'
 
 const execFileAsync = promisify(execFile)
+
+const supabaseBinary = process.env.SUPABASE_BIN ?? 'supabase'
+const supabaseProbe = spawnSync(supabaseBinary, ['--version'], { stdio: 'ignore' })
+const hasSupabaseCli = !supabaseProbe.error || (supabaseProbe.error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT'
+
+if (!hasSupabaseCli) {
+  console.warn(
+    '[remote-helper] skipping git e2e tests — Supabase CLI not found on PATH (set SUPABASE_BIN to override)',
+  )
+}
+
+const describeIfSupabase = hasSupabaseCli ? describe : describe.skip
 
 async function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
   return execFileAsync('git', args, { cwd, env })
@@ -37,7 +49,7 @@ async function createHelperExecutable(dir: string): Promise<string> {
   return helperPath
 }
 
-describe('git push/fetch via PowerSync remote helper', () => {
+describeIfSupabase('git push/fetch via PowerSync remote helper', () => {
   let helperDir: string
   let repoDir: string
   let cloneDir: string
