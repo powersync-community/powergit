@@ -1,7 +1,8 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest'
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { execFile, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -11,23 +12,70 @@ import { getServerSupabaseClient, parsePowerSyncUrl } from '@shared/core'
 
 const execFileAsync = promisify(execFile)
 
-const supabaseBinary = process.env.SUPABASE_BIN ?? 'supabase'
+const requireForTests = createRequire(import.meta.url)
+
+function resolveSupabaseBinary(): string {
+  const configured = process.env.SUPABASE_BIN
+  if (configured && configured.length > 0) {
+    return configured
+  }
+
+  try {
+    const packagePath = requireForTests.resolve('@supabase/cli/package.json')
+    const packageDir = dirname(packagePath)
+    const candidate = join(packageDir, 'bin', 'supabase')
+    if (existsSync(candidate)) {
+      return candidate
+    }
+  } catch {
+    // ignore missing workspace copy — fall back to PATH lookup
+  }
+
+  return 'supabase'
+}
+
+const supabaseBinary = resolveSupabaseBinary()
 const supabaseProbe = spawnSync(supabaseBinary, ['--version'], { stdio: 'ignore' })
-const hasSupabaseCli = !supabaseProbe.error || (supabaseProbe.error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT'
+const hasSupabaseCli = supabaseProbe.error == null && supabaseProbe.status === 0
+
+const dockerBinary = process.env.DOCKER_BIN ?? 'docker'
+const dockerProbe = spawnSync(dockerBinary, ['--version'], { stdio: 'ignore' })
+const dockerComposeProbe = spawnSync(dockerBinary, ['compose', 'version'], { stdio: 'ignore' })
+const dockerInfoProbe = spawnSync(dockerBinary, ['info'], { stdio: 'ignore' })
+const hasDocker =
+  dockerProbe.error == null &&
+  dockerProbe.status === 0 &&
+  dockerComposeProbe.error == null &&
+  dockerComposeProbe.status === 0 &&
+  dockerInfoProbe.error == null &&
+  dockerInfoProbe.status === 0
 
 if (!hasSupabaseCli) {
   console.warn(
-    '[remote-helper] skipping git e2e tests — Supabase CLI not found on PATH (set SUPABASE_BIN to override)',
+    '[remote-helper] skipping git e2e tests — Supabase CLI not found (set SUPABASE_BIN to the binary path)',
   )
 }
 
-const describeIfSupabase = hasSupabaseCli ? describe : describe.skip
+if (!hasDocker) {
+  console.warn(
+    '[remote-helper] skipping git e2e tests — Docker with compose plugin not available (set DOCKER_BIN to override)',
+  )
+}
+
+if (hasSupabaseCli) {
+  process.env.SUPABASE_BIN = supabaseBinary
+}
+
+if (hasDocker) {
+  process.env.DOCKER_BIN = dockerBinary
+}
+
+const describeIfSupabase = hasSupabaseCli && hasDocker ? describe : describe.skip
 
 async function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
   return execFileAsync('git', args, { cwd, env })
 }
 
-const requireForTests = createRequire(import.meta.url)
 const tsxEsmPath = requireForTests.resolve('tsx/esm')
 
 async function createHelperExecutable(dir: string): Promise<string> {

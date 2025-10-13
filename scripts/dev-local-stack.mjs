@@ -4,7 +4,8 @@ import { spawn, execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, relative } from 'node:path'
 import { writeFile, mkdir as mkdirAsync, readFile } from 'node:fs/promises'
-import { createWriteStream } from 'node:fs'
+import { createWriteStream, existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { createConnection } from 'node:net'
 import { inspect } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -23,6 +24,25 @@ const DEFAULT_SUPABASE_URL = `http://127.0.0.1:${SUPABASE_PORT}`
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const repoRoot = resolve(__dirname, '..')
+const requireForScript = createRequire(import.meta.url)
+
+function resolveSupabaseBinFromWorkspace() {
+  try {
+    const packagePath = requireForScript.resolve('@supabase/cli/package.json')
+    const packageDir = dirname(packagePath)
+    const candidate = resolve(packageDir, 'bin', 'supabase')
+    if (existsSync(candidate)) {
+      return candidate
+    }
+  } catch {
+    // ignored – fall back to system binary
+  }
+  return null
+}
+
+const DEFAULT_SUPABASE_BIN = resolveSupabaseBinFromWorkspace() ?? 'supabase'
+const SUPABASE_BIN = process.env.SUPABASE_BIN ?? DEFAULT_SUPABASE_BIN
+const DOCKER_BIN = process.env.DOCKER_BIN ?? 'docker'
 
 let cliOptions
 let logStream
@@ -382,7 +402,7 @@ async function supabaseStatusEnv() {
 
   try {
     const { stdout } = await new Promise((resolvePromise, rejectPromise) => {
-      execFile('supabase', ['status', '--output', 'env'], { cwd: repoRoot }, (error, out, err) => {
+      execFile(SUPABASE_BIN, ['status', '--output', 'env'], { cwd: repoRoot }, (error, out, err) => {
         if (error) {
           rejectPromise(Object.assign(error, { stderr: err }))
         } else {
@@ -509,6 +529,8 @@ function buildExportLines(env) {
     `export PS_DATABASE_URL=${JSON.stringify(env.psDatabaseUrl)}`,
     `export PS_STORAGE_URI=${JSON.stringify(env.psStorageUri)}`,
     `export PS_PORT=${JSON.stringify(env.psPort)}`,
+    `export SUPABASE_BIN=${JSON.stringify(SUPABASE_BIN)}`,
+    `export DOCKER_BIN=${JSON.stringify(DOCKER_BIN)}`,
   ]
 
   if (env.powersyncToken) {
@@ -640,7 +662,7 @@ async function ensurePowerSyncToken(env) {
 }
 
 async function startStack() {
-  await runCommand('supabase', ['start', '--ignore-health-check'])
+  await runCommand(SUPABASE_BIN, ['start', '--ignore-health-check'])
   const statusEnv = await supabaseStatusEnv()
   const env = buildStackEnv(statusEnv)
 
@@ -651,6 +673,8 @@ async function startStack() {
     PS_DATABASE_URL: env.psDatabaseUrl,
     PS_STORAGE_URI: env.psStorageUri,
     PS_PORT: env.psPort,
+    SUPABASE_BIN,
+    DOCKER_BIN,
   })
   Object.assign(process.env, hostEnvVars)
 
@@ -663,10 +687,10 @@ async function startStack() {
     PS_PORT: env.psPort,
   })
 
-  await runCommand('docker', ['compose', '-f', 'supabase/docker-compose.powersync.yml', 'up', '-d', '--wait'], {
+  await runCommand(DOCKER_BIN, ['compose', '-f', 'supabase/docker-compose.powersync.yml', 'up', '-d', '--wait'], {
     env: powersyncEnv,
   })
-  await runCommand('supabase', ['functions', 'deploy'], {
+  await runCommand(SUPABASE_BIN, ['functions', 'deploy'], {
     env: powersyncEnv,
   })
 
@@ -695,8 +719,8 @@ async function startStack() {
 }
 
 async function stopStack() {
-  await runCommand('docker', ['compose', '-f', 'supabase/docker-compose.powersync.yml', 'down'])
-  await runCommand('supabase', ['stop'])
+  await runCommand(DOCKER_BIN, ['compose', '-f', 'supabase/docker-compose.powersync.yml', 'down'])
+  await runCommand(SUPABASE_BIN, ['stop'])
   infoLog('✅ Supabase + PowerSync stack stopped.')
 }
 
