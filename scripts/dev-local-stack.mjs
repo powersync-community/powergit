@@ -288,6 +288,24 @@ async function runCommand(cmd, args, options = {}) {
   })
 }
 
+async function stopDaemonViaCli() {
+  const daemonUrl = process.env.POWERSYNC_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? 'http://127.0.0.1:5030'
+  const args = [
+    '--filter',
+    '@pkg/cli',
+    'cli',
+    'daemon',
+    'stop',
+    '--daemon-url',
+    daemonUrl,
+    '--wait',
+    '4000',
+    '--quiet',
+  ]
+
+  await runCommand('pnpm', args, { stdio: ['inherit', 'pipe', 'pipe'] })
+}
+
 async function fetchWithTimeout(url, timeoutMs) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -719,6 +737,9 @@ async function startStack() {
 }
 
 async function stopStack() {
+  await stopDaemonViaCli().catch((error) => {
+    warnLog('[dev:stack] Failed to stop PowerSync daemon via CLI', error?.message ?? error)
+  })
   await runCommand(DOCKER_BIN, ['compose', '-f', 'supabase/docker-compose.powersync.yml', 'down'])
   await runCommand(SUPABASE_BIN, ['stop'])
   infoLog('✅ Supabase + PowerSync stack stopped.')

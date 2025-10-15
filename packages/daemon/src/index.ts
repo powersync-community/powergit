@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { resolve as resolvePath } from 'node:path';
 import type { PowerSyncDatabase, SyncStreamSubscription } from '@powersync/node';
 import { DaemonAuthManager, type AuthStatusPayload } from './auth/index.js';
 import { DeviceAuthCoordinator } from './auth/device-flow.js';
@@ -112,7 +113,10 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   });
 
   let running = true;
+  let connectionReady = false;
   let streamCount = 0;
+  let connectedAt: Date | null = null;
+  let subscriptions: SyncStreamSubscription[] = [];
   const abortController = new AbortController();
   const requestShutdown = (reason: string) => {
     if (abortController.signal.aborted) return;
@@ -154,28 +158,12 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
 
   await ensureLocalSchema(database);
 
-  await connectWithSchemaRecovery(database, {
-    connector,
-    dbPath: config.dbPath,
-    includeDefaultStreams: false,
-  });
-
-  const connectedAt = new Date();
-  console.info('[powersync-daemon] connected to PowerSync backend');
-
-  const subscriptions = await subscribeToInitialStreams(config.initialStreams, database);
-  streamCount = subscriptions.length;
-
   const supabaseWriter = config.supabase
     ? new SupabaseWriter({
         database,
         config: config.supabase,
       })
     : null;
-  if (supabaseWriter) {
-    console.info('[powersync-daemon] enabling Supabase writer');
-    supabaseWriter.start();
-  }
 
   type AuthActionResponse = AuthStatusPayload & { httpStatus?: number };
 
@@ -376,8 +364,8 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     port: config.port,
     getStatus: () => ({
       startedAt: startedAt.toISOString(),
-      connected: running,
-      connectedAt: connectedAt.toISOString(),
+      connected: connectionReady,
+      connectedAt: connectedAt ? connectedAt.toISOString() : null,
       streamCount,
     }),
     getAuthStatus: () => authManager.getStatusPayload(),
@@ -447,6 +435,39 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     },
   });
 
+  const connectionTask = (async () => {
+    try {
+      await connectWithSchemaRecovery(database, {
+        connector,
+        dbPath: config.dbPath,
+        includeDefaultStreams: false,
+      });
+      if (!running && abortController.signal.aborted) {
+        return;
+      }
+      connectionReady = true;
+      connectedAt = new Date();
+      console.info('[powersync-daemon] connected to PowerSync backend');
+      if (subscriptions.length > 0) {
+        await closeSubscriptions(subscriptions).catch((error) => {
+          console.warn('[powersync-daemon] failed to resubscribe previous streams', error);
+        });
+      }
+      subscriptions = await subscribeToInitialStreams(config.initialStreams, database);
+      streamCount = subscriptions.length;
+      if (supabaseWriter) {
+        console.info('[powersync-daemon] enabling Supabase writer');
+        supabaseWriter.start();
+      }
+    } catch (error) {
+      if (abortController.signal.aborted) {
+        return;
+      }
+      console.error('[powersync-daemon] failed to establish PowerSync connection', error);
+      requestShutdown('powersync-connect');
+    }
+  })();
+
   const address = await server.listen();
   const listenHost = address.family === 'IPv6' ? `[${address.address}]` : address.address;
   console.info(`[powersync-daemon] listening on http://${listenHost}:${address.port}`);
@@ -465,6 +486,10 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   });
 
   await closeSubscriptions(subscriptions);
+  subscriptions = [];
+  streamCount = 0;
+  connectionReady = false;
+  connectedAt = null;
   if (supabaseWriter) {
     await supabaseWriter.stop().catch((error) => {
       console.warn('[powersync-daemon] failed to stop Supabase writer', error);
@@ -483,4 +508,13 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   }
 
   console.info('[powersync-daemon] shutdown complete');
+}
+
+const entryModulePath = fileURLToPath(import.meta.url);
+const invokedPath = process.argv?.[1] ? resolvePath(process.argv[1]) : null;
+if (invokedPath && entryModulePath === invokedPath) {
+  startDaemon().catch((error) => {
+    console.error('[powersync-daemon] failed to start', error);
+    process.exit(1);
+  });
 }

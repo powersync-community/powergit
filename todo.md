@@ -37,6 +37,12 @@ Create a development experience where every component—CLI, explorer, backgroun
 - Decision: finish the daemon-first architecture so the helper becomes authless. The daemon will own token refresh and can surface an interactive login when credentials are missing.
 - Immediate actions tracked below (add new workstream items): finish daemon RPC push/fetch, add interactive auth (browser/PKCE), remove helper’s Supabase dependency, and update CI harnesses.
 
+## Agent Notes (2025-10-15)
+- CLI now walks up from the package directory when resolving `.env.powersync-stack`, so `pnpm --filter @pkg/cli …` commands inherit the dev stack exports automatically.
+- Added `psgit daemon stop` to issue `/shutdown` requests and poll until the daemon exits; the helper no longer leaves orphaned `pnpm --filter @svc/daemon start` processes.
+- Guest login falls back to Supabase password auth when no token is provided, letting `pnpm --filter @pkg/cli cli login --guest` mint a JWT against the local stack without manual env tweaks.
+- `pnpm dev:stack:down` now calls the new CLI command to terminate the daemon before tearing down Supabase/PowerSync services.
+
 ## Agent Notes (2025-10-18)
 - Removed the remaining Supabase edge function clients (`invokeSupabaseEdgeFunction`, browser connector hooks, CLI login flow) and replaced them with env/daemon-based credential handling. CRUD uploads now hard-fail if a caller still expects the old functions so we surface unsupported write paths immediately.
 - Deleted all edge function assets (`supabase/functions/*`, smoke script) and disabled Supabase's edge runtime in the local stack. Updated `dev-local-stack` to stop deploying functions and refreshed docs (`DEV_SETUP.md`, `docs/supabase.md`, `docs/env.local.example`) to reflect the daemon-owned flow.

@@ -47,6 +47,35 @@ When you are done, run `pnpm dev:stack stop` (or `supabase stop`) to shut everyt
 - The daemon requires a Supabase service-role key (or service token) so it can persist refs, commits, and objects without exposing credentials to end users.
 - In CI or other headless contexts, set `POWERSYNC_SERVICE_KEY` (or equivalent) so the daemon can authenticate without launching an interactive browser flow.
 
+## Live Supabase Validation Run
+
+Once you have a remote Supabase project populated with the PowerSync schema, you can exercise the full CLI workflow against it:
+
+1. Export the following environment variables (their values should point at your hosted Supabase + PowerSync deployment):
+
+   | Variable | Description |
+   | --- | --- |
+   | `PSGIT_TEST_REMOTE_URL` | `powersync::https://…/orgs/<org>/repos/<repo>` remote used for the round-trip test. |
+   | `PSGIT_TEST_REMOTE_NAME` | Optional Git remote name override (defaults to `powersync`). |
+   | `PSGIT_TEST_SUPABASE_URL` | Supabase project URL. |
+   | `PSGIT_TEST_SUPABASE_EMAIL` | Supabase user email with permission to push refs. |
+   | `PSGIT_TEST_SUPABASE_PASSWORD` | Matching Supabase user password. |
+   | `PSGIT_TEST_ENDPOINT` | Optional PowerSync endpoint override (falls back to the one embedded in the remote URL). |
+
+2. Run the validation suite:
+
+   ```bash
+   pnpm live:validate
+   ```
+
+   The script verifies the required environment variables and then executes `pnpm --filter @pkg/cli test -- --run src/cli.e2e.test.ts`, exercising the daemon-mediated fetch/push path against your live Supabase project. The output lists each step (remote add, sync, logout) along with any failures.
+
+3. When you are finished, clear Supabase credentials if needed:
+
+   ```bash
+   pnpm --filter @pkg/cli logout
+   ```
+
 ## Rotating Supabase Auth to RS256 (Optional)
 
 The local stack and CLI default to Supabase’s HS256 tokens. If you later rotate your Supabase project to RS256, follow the official Supabase guidance and make sure PowerSync can fetch the new JWKS. After Supabase serves the RS256 keys, restart the PowerSync service so it reloads the configuration, then confirm that a fresh Supabase login works end-to-end.

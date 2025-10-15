@@ -21,6 +21,7 @@ export interface LoginOptions {
   supabasePassword?: string
   supabaseUrl?: string
   supabaseAnonKey?: string
+  persistSession?: boolean
 }
 
 export interface LoginResult {
@@ -101,7 +102,9 @@ export async function loginWithExplicitToken(options: LoginOptions): Promise<Log
     expiresAt: metadata.expiresAt,
     obtainedAt: metadata.issuedAt ?? new Date().toISOString(),
   }
-  await saveStoredCredentials(credentials, options.sessionPath)
+  if (options.persistSession ?? true) {
+    await saveStoredCredentials(credentials, options.sessionPath)
+  }
   return { credentials, source: 'manual' }
 }
 
@@ -152,7 +155,9 @@ export async function loginWithSupabasePassword(options: LoginOptions = {}): Pro
     obtainedAt: metadata.issuedAt ?? new Date().toISOString(),
   }
 
-  await saveStoredCredentials(credentials, options.sessionPath)
+  if (options.persistSession ?? true) {
+    await saveStoredCredentials(credentials, options.sessionPath)
+  }
   return { credentials, source: 'supabase-password' }
 }
 

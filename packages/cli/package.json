@@ -3,10 +3,12 @@
   "version": "0.0.4",
   "type": "module",
   "bin": {
-    "psgit": "dist/bin.js"
+    "psgit": "dist/cli/src/bin.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/cli/src/bin.js",
+    "cli": "tsx src/bin.ts",
+    "login": "tsx src/bin.ts login",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'stub'",
     "test": "vitest run"

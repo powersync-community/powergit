@@ -2,7 +2,7 @@
   "name": "powersync-git-monorepo",
   "private": true,
   "version": "0.4.0",
-  "packageManager": "pnpm@10.18.2",
+  "packageManager": "pnpm@10.18.3",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -17,7 +17,8 @@
     "lint": "pnpm -r run lint",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
-    "test:e2e": "pnpm --filter @app/explorer test:e2e"
+    "test:e2e": "pnpm --filter @app/explorer test:e2e",
+    "live:validate": "node ./scripts/run-live-validation.mjs"
   },
   "pnpm": {
     "overrides": {
@@ -48,8 +49,8 @@
     "tsx": "^4.20.6"
   },
   "dependencies": {
-    "@tanstack/db": "workspace:*",
     "@supabase/supabase-js": "^2.48.1",
+    "@tanstack/db": "workspace:*",
     "better-sqlite3": "^12.4.1",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.12.0",

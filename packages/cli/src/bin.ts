@@ -1,10 +1,13 @@
 #!/usr/bin/env node
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, isAbsolute, resolve } from 'node:path'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 import { addPowerSyncRemote, syncPowerSyncRepository, seedDemoRepository } from './index.js'
 import {
   loginWithDaemonDevice,
   loginWithDaemonGuest,
+  loginWithSupabasePassword,
   logout as logoutSession,
 } from './auth/login.js'
 
@@ -34,6 +37,219 @@ interface DemoSeedCommandArgs {
 interface LogoutCommandArgs {
   session?: string
   daemonUrl?: string
+}
+
+interface DaemonStopCommandArgs {
+  daemonUrl?: string
+  waitMs?: number
+  quiet?: boolean
+}
+
+interface ResolvedGuestCredentials {
+  token: string
+  endpoint?: string
+  expiresAt?: string | null
+  obtainedAt?: string | null
+  metadata?: Record<string, unknown> | null
+  source: 'flag' | 'env' | 'supabase-password'
+}
+
+const DEFAULT_STACK_ENV_PATH = '.env.powersync-stack'
+const PSGIT_STACK_ENV = process.env.PSGIT_STACK_ENV
+const STACK_ENV_DISABLED = (process.env.PSGIT_NO_STACK_ENV ?? '').toLowerCase() === 'true'
+const appliedStackEnvPaths = new Set<string>()
+
+function parseEnvValue(raw: string): string {
+  const trimmed = raw.trim()
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1)
+  }
+  return trimmed
+}
+
+function findStackEnvPath(path: string): string | null {
+  if (isAbsolute(path)) {
+    return existsSync(path) ? path : null
+  }
+  let current = process.cwd()
+  const visited = new Set<string>()
+  while (!visited.has(current)) {
+    visited.add(current)
+    const candidate = resolve(current, path)
+    if (existsSync(candidate)) {
+      return candidate
+    }
+    const parent = dirname(current)
+    if (parent === current) {
+      break
+    }
+    current = parent
+  }
+  return null
+}
+
+function applyStackEnv(path: string, { silent = false }: { silent?: boolean } = {}): boolean {
+  const resolvedPath = findStackEnvPath(path)
+  if (!resolvedPath) {
+    return false
+  }
+
+  if (appliedStackEnvPaths.has(resolvedPath)) {
+    return true
+  }
+
+  const raw = readFileSync(resolvedPath, 'utf8')
+  const lines = raw.split(/\r?\n/).map((line) => line.trim())
+  for (const line of lines) {
+    if (!line || line.startsWith('#')) continue
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(line)
+    if (!match) continue
+    const [, key, value] = match
+    process.env[key] = parseEnvValue(value)
+  }
+
+  appliedStackEnvPaths.add(resolvedPath)
+  if (!silent) {
+    console.info(`[psgit] Loaded stack environment from ${resolvedPath}`)
+  }
+  return true
+}
+
+function maybeApplyStackEnv({
+  explicitPath,
+  silent = false,
+  allowMissing = true,
+}: {
+  explicitPath?: string
+  silent?: boolean
+  allowMissing?: boolean
+} = {}) {
+  if (STACK_ENV_DISABLED) return
+
+  const candidates: Array<{ path: string; silent: boolean; allowMissing: boolean }> = []
+  if (explicitPath) {
+    candidates.push({ path: explicitPath, silent: false, allowMissing: false })
+  } else if (PSGIT_STACK_ENV) {
+    candidates.push({ path: PSGIT_STACK_ENV, silent, allowMissing: false })
+  }
+  candidates.push({ path: DEFAULT_STACK_ENV_PATH, silent, allowMissing })
+
+  for (const candidate of candidates) {
+    const loaded = applyStackEnv(candidate.path, { silent: candidate.silent })
+    if (loaded) return
+    if (!candidate.allowMissing) {
+      throw new Error(`Stack env file not found: ${candidate.path}`)
+    }
+  }
+}
+
+function firstNonEmpty(...candidates: Array<string | null | undefined>): string | undefined {
+  for (const value of candidates) {
+    if (typeof value !== 'string') continue
+    const trimmed = value.trim()
+    if (trimmed.length > 0) {
+      return trimmed
+    }
+  }
+  return undefined
+}
+
+function inferGuestTokenFromEnv(): { token: string; source: string } | null {
+  const sources: Array<{ key: string; value: string | undefined }> = [
+    { key: 'POWERSYNC_DAEMON_GUEST_TOKEN', value: process.env.POWERSYNC_DAEMON_GUEST_TOKEN },
+    { key: 'POWERSYNC_DAEMON_TOKEN', value: process.env.POWERSYNC_DAEMON_TOKEN },
+    { key: 'POWERSYNC_TOKEN', value: process.env.POWERSYNC_TOKEN },
+    { key: 'PSGIT_TEST_REMOTE_TOKEN', value: process.env.PSGIT_TEST_REMOTE_TOKEN },
+    { key: 'POWERSYNC_SERVICE_TOKEN', value: process.env.POWERSYNC_SERVICE_TOKEN },
+  ]
+
+  for (const candidate of sources) {
+    if (typeof candidate.value !== 'string') continue
+    const trimmed = candidate.value.trim()
+    if (trimmed.length > 0) {
+      return { token: trimmed, source: candidate.key }
+    }
+  }
+  return null
+}
+
+async function resolveGuestCredentials(args: LoginCommandArgs): Promise<ResolvedGuestCredentials | null> {
+  if (typeof args.token === 'string' && args.token.trim().length > 0) {
+    return {
+      token: args.token.trim(),
+      endpoint: args.endpoint,
+      source: 'flag',
+      metadata: { source: 'flag' },
+    }
+  }
+
+  const envToken = inferGuestTokenFromEnv()
+  if (envToken) {
+    return {
+      token: envToken.token,
+      endpoint: args.endpoint,
+      source: 'env',
+      metadata: { source: envToken.source },
+    }
+  }
+
+  const supabaseUrl = firstNonEmpty(args.supabaseUrl, process.env.POWERSYNC_SUPABASE_URL, process.env.PSGIT_TEST_SUPABASE_URL, process.env.SUPABASE_URL)
+  const supabaseAnonKey = firstNonEmpty(args.supabaseAnonKey, process.env.POWERSYNC_SUPABASE_ANON_KEY, process.env.PSGIT_TEST_SUPABASE_ANON_KEY, process.env.SUPABASE_ANON_KEY)
+  const supabaseEmail = firstNonEmpty(args.supabaseEmail, process.env.POWERSYNC_SUPABASE_EMAIL, process.env.PSGIT_TEST_SUPABASE_EMAIL)
+  const supabasePassword = firstNonEmpty(args.supabasePassword, process.env.POWERSYNC_SUPABASE_PASSWORD, process.env.PSGIT_TEST_SUPABASE_PASSWORD)
+  const endpoint = firstNonEmpty(args.endpoint, process.env.POWERSYNC_ENDPOINT, process.env.PSGIT_TEST_ENDPOINT)
+
+  if (supabaseUrl && supabaseAnonKey && supabaseEmail && supabasePassword && endpoint) {
+    try {
+      const result = await loginWithSupabasePassword({
+        endpoint,
+        supabaseUrl,
+        supabaseAnonKey,
+        supabaseEmail,
+        supabasePassword,
+        persistSession: false,
+      })
+
+      return {
+        token: result.credentials.token,
+        endpoint: result.credentials.endpoint,
+        expiresAt: result.credentials.expiresAt ?? null,
+        obtainedAt: result.credentials.obtainedAt ?? null,
+        metadata: { source: 'supabase-password' },
+        source: 'supabase-password',
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[psgit] Supabase password guest fallback failed: ${message}`)
+    }
+  }
+
+  return null
+}
+
+function normalizeDaemonBaseUrl(value: string): string {
+  return value.replace(/\/+$/, '')
+}
+
+async function isDaemonResponsiveLocal(baseUrl: string, timeoutMs = 2000): Promise<boolean> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    const response = await fetch(`${baseUrl}/health`, { signal: controller.signal })
+    clearTimeout(timeout)
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolvePromise) => {
+    setTimeout(resolvePromise, ms)
+  })
 }
 
 async function runRemoteAddCommand(args: { url: string; remote?: string | null }) {
@@ -111,10 +327,20 @@ async function runLoginCommand(args: LoginCommandArgs) {
   }
 
   if (mode === 'guest') {
+    const guestCredentials = await resolveGuestCredentials(args)
+    if (!guestCredentials) {
+      console.warn('[psgit] No guest token detected via flags or environment; requesting daemon fallback.')
+    } else if (guestCredentials.source === 'supabase-password') {
+      console.log('[psgit] Minted PowerSync token via Supabase password login for guest session.')
+    }
+
     const { baseUrl, status } = await loginWithDaemonGuest({
       daemonUrl: args.daemonUrl,
-      endpoint: args.endpoint,
-      token: args.token,
+      endpoint: guestCredentials?.endpoint ?? args.endpoint,
+      token: guestCredentials?.token,
+      expiresAt: guestCredentials?.expiresAt ?? null,
+      obtainedAt: guestCredentials?.obtainedAt ?? null,
+      metadata: guestCredentials?.metadata ?? null,
     })
     if (!status) {
       throw new Error(`Daemon at ${baseUrl} did not return an auth status.`)
@@ -123,6 +349,19 @@ async function runLoginCommand(args: LoginCommandArgs) {
       console.log('✅ Daemon joined as guest.')
       if (status.expiresAt) {
         console.log(`   Expires: ${status.expiresAt}`)
+      }
+      const metadataSource =
+        typeof guestCredentials?.metadata?.source === 'string'
+          ? guestCredentials.metadata.source
+          : guestCredentials?.source === 'supabase-password'
+            ? 'supabase-password'
+            : guestCredentials?.source === 'env'
+              ? 'environment'
+              : guestCredentials?.source === 'flag'
+                ? 'flag'
+                : null
+      if (metadataSource) {
+        console.log(`   Token source: ${metadataSource}`)
       }
       return
     }
@@ -209,12 +448,62 @@ async function runLogoutCommand(args: LogoutCommandArgs) {
   console.log('✅ Cleared stored PowerSync credentials.')
 }
 
+async function runDaemonStopCommand(args: DaemonStopCommandArgs) {
+  const defaultDaemonUrl =
+    process.env.POWERSYNC_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? 'http://127.0.0.1:5030'
+  const baseUrl = normalizeDaemonBaseUrl(args.daemonUrl ?? defaultDaemonUrl)
+  const responsive = await isDaemonResponsiveLocal(baseUrl)
+  if (!responsive) {
+    if (!args.quiet) {
+      console.log(`[psgit] PowerSync daemon not running at ${baseUrl}.`)
+    }
+    return
+  }
+
+  const waitMs = Number.isFinite(args.waitMs) && args.waitMs !== undefined ? Math.max(0, Number(args.waitMs)) : 5000
+  if (!args.quiet) {
+    console.log(`[psgit] Sending shutdown request to daemon at ${baseUrl}...`)
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/shutdown`, { method: 'POST' })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`shutdown endpoint returned ${response.status} ${response.statusText}${text ? `: ${text}` : ''}`)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`[psgit] Failed to request daemon shutdown: ${message}`)
+  }
+
+  if (!args.quiet) {
+    console.log('[psgit] Waiting for daemon to exit...')
+  }
+
+  const deadline = Date.now() + waitMs
+  while (Date.now() < deadline) {
+    await delay(200)
+    if (!(await isDaemonResponsiveLocal(baseUrl))) {
+      if (!args.quiet) {
+        console.log('✅ PowerSync daemon stopped.')
+      }
+      return
+    }
+  }
+
+  console.warn('[psgit] Daemon shutdown timed out; process may still be terminating.')
+  if (process.exitCode == null || process.exitCode === 0) {
+    process.exitCode = 1
+  }
+}
+
 function printUsage() {
   console.log('psgit commands:')
   console.log('  psgit remote add powersync powersync::https://<endpoint>/orgs/<org>/repos/<repo>')
   console.log('  psgit sync [--remote <name>]')
   console.log('  psgit demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo]')
   console.log('  psgit login [--guest] [--manual --token <jwt>] [--endpoint <url>] [--daemon-url <url>]')
+  console.log('  psgit daemon stop [--daemon-url <url>] [--wait <ms>]')
   console.log('  psgit logout [--daemon-url <url>]')
 }
 
@@ -229,8 +518,31 @@ function buildCli() {
         '  psgit sync [--remote <name>]\n' +
         '  psgit demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo]\n' +
         '  psgit login [--guest] [--manual --token <jwt>] [--endpoint <url>] [--daemon-url <url>]\n' +
+        '  psgit daemon stop [--daemon-url <url>] [--wait <ms>]\n' +
         '  psgit logout [--daemon-url <url>]',
     )
+    .option('stack-env', {
+      type: 'string',
+      describe: 'Path to stack env exports (defaults to .env.powersync-stack when present).',
+      global: true,
+    })
+    .option('no-stack-env', {
+      type: 'boolean',
+      describe: 'Disable automatic stack env loading.',
+      global: true,
+      default: false,
+    })
+    .middleware((argv) => {
+      if (argv.noStackEnv) {
+        return
+      }
+      const explicitPath = typeof argv.stackEnv === 'string' ? argv.stackEnv : undefined
+      maybeApplyStackEnv({
+        explicitPath,
+        silent: Boolean(explicitPath),
+        allowMissing: !explicitPath,
+      })
+    }, true)
     .command(
       'remote add powersync <url>',
       'Add or update a PowerSync remote',
@@ -374,6 +686,32 @@ function buildCli() {
       },
     )
     .command(
+      ['daemon stop', 'daemon-stop'],
+      'Request the running PowerSync daemon to shut down',
+      (y) =>
+        y
+          .option('daemon-url', {
+            type: 'string',
+            describe: 'PowerSync daemon base URL',
+          })
+          .option('wait', {
+            type: 'number',
+            describe: 'Milliseconds to wait for shutdown (default 5000).',
+          })
+          .option('quiet', {
+            type: 'boolean',
+            describe: 'Suppress informational output.',
+            default: false,
+          }),
+      async (argv) => {
+        await runDaemonStopCommand({
+          daemonUrl: argv['daemon-url'] as string | undefined,
+          waitMs: argv.wait as number | undefined,
+          quiet: argv.quiet as boolean | undefined,
+        })
+      },
+    )
+    .command(
       'logout',
       'Clear cached PowerSync credentials',
       (y) =>
@@ -405,7 +743,7 @@ function buildCli() {
     .strict()
     .wrap(null)
     .showHelpOnFail(false)
-    .help('help', false)
+    .help('help')
     .alias('h', 'help')
     .version(false)
     .fail((msg, err) => {

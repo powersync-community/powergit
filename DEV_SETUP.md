@@ -76,6 +76,16 @@ Open **Agents.md** for the architecture.
 
 7. **Stop everything** with <kbd>Ctrl</kbd>+<kbd>C</kbd> in both terminals when you wrap up.
 
+### Validate against a hosted Supabase instance
+
+Once you have configured a live Supabase + PowerSync environment, export the variables documented in `docs/supabase.md` (`PSGIT_TEST_REMOTE_URL`, `PSGIT_TEST_SUPABASE_*`, etc.) and run:
+
+```bash
+pnpm live:validate
+```
+
+The command performs the CLI end-to-end test suite against your live stack, confirming that daemon authentication, fetch, and push succeed without the local mock infrastructure.
+
 ## Day-to-day commands
 
 | Task | Command |
