@@ -7,7 +7,7 @@ import { execFile, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
-import { startStack, stopStack } from '../../../scripts/test-stack-hooks.js'
+import { startStack, stopStack } from '../../../scripts/test-stack-hooks.mjs'
 import { getServerSupabaseClient, parsePowerSyncUrl, buildRepoStreamTargets, formatStreamKey } from '@shared/core'
 
 const execFileAsync = promisify(execFile)

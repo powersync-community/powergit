@@ -87,21 +87,40 @@ Detailed breakdown:
    pnpm dev
    ```
 
-   The command auto-loads `.env.powersync-stack`, so the explorer connects to the local Supabase + PowerSync stack without extra setup. Vite serves `http://localhost:5783` and the home screen lists every org the daemon has replicated (including the demo seed above). Use `pnpm --filter @app/explorer dev:remote` if you need to point the explorer at a hosted Supabase project instead. Set `VITE_POWERSYNC_DISABLED=true` to work fully offline with cached data.
+   The script now loads the active `psgit` profile via `loadProfileEnvironment`, so the explorer connects to whichever stack your profile references. `pnpm dev` defaults to the `local-dev` profile; override with `STACK_PROFILE=staging pnpm dev` when testing against a remote environment. Vite serves `http://localhost:5783` and the home screen lists every org the daemon has replicated (including the demo seed above). Set `VITE_POWERSYNC_DISABLED=true` to work fully offline with cached data.
 
-   Sign in with the Supabase email/password exported by `pnpm dev:stack` (they are written to `.env.powersync-stack` as `POWERSYNC_SUPABASE_EMAIL` and `POWERSYNC_SUPABASE_PASSWORD`). The CLI hydrates the daemon with the same credentials (`~/.psgit/session.json` stores the cached JWT), so both the explorer and CLI share the exact Supabase user. If the header keeps reading “Offline · syncing…”, the daemon has not reported a ready status yet—rerun `pnpm --filter @pkg/cli cli login --guest` or check `http://127.0.0.1:5030/auth/status` to confirm it has a token.
+   Sign in with the Supabase email/password exported by `pnpm dev:stack` (the stack command syncs these into the `local-dev` profile automatically). The CLI hydrates the daemon with the same credentials (`~/.psgit/session.json` stores the cached JWT), so both the explorer and CLI share the exact Supabase user. If the header keeps reading “Offline · syncing…”, the daemon has not reported a ready status yet—rerun `pnpm --filter @pkg/cli cli login --guest` or check `http://127.0.0.1:5030/auth/status` to confirm it has a token.
 
 8. **Stop everything** with <kbd>Ctrl</kbd>+<kbd>C</kbd> in both terminals when you wrap up, then run `pnpm dev:stack stop` if you launched the services with `dev:stack:up`.
 
+### Switch between local and remote stacks
+
+The CLI bootstraps `~/.psgit/profiles.json` the first time you run it, pre-populating a `local-dev` profile that reads `.env.powersync-stack`. Profiles drive every tool:
+
+- `psgit profile list|show|set|use` inspect or update entries. Example for a staging stack:
+
+  ```bash
+  psgit profile set staging \
+    --set powersync.endpoint=https://powersync-staging.example.com \
+    --set powersync.token=<service-token-or-jwt> \
+    --set supabase.url=https://your-project.supabase.co \
+    --set supabase.anonKey=<anon-key>
+  ```
+
+  Use `--stack-env-path <file>` if you still rely on an env export file, or `--clear-stack-env` to remove it.
+
+- `psgit profile use staging` makes the profile the default for subsequent CLI runs. Set `STACK_PROFILE=staging` in front of a single command (for example, `STACK_PROFILE=staging pnpm --filter @app/explorer dev`) to override the active profile without mutating `profile.json`.
+- Convenience scripts exist for common paths: `pnpm --filter @app/explorer test:e2e:local` (default profile) and `pnpm --filter @app/explorer test:e2e:staging` (staging profile).
+
 ### Validate against a hosted Supabase instance
 
-Once you have configured a live Supabase + PowerSync environment, export the variables documented in `docs/supabase.md` (`PSGIT_TEST_REMOTE_URL`, `PSGIT_TEST_SUPABASE_*`, etc.) and run:
+Once you have a live Supabase + PowerSync environment, capture its credentials in a profile (see above or `docs/env.remote.example`) and run:
 
 ```bash
-pnpm live:validate
+STACK_PROFILE=staging pnpm live:validate
 ```
 
-The command performs the CLI end-to-end test suite against your live stack, confirming that daemon authentication, fetch, and push succeed without the local mock infrastructure.
+The command performs the CLI end-to-end test suite against your staged stack, confirming that daemon authentication, fetch, and push succeed without the local mock infrastructure.
 
 ## Day-to-day commands
 
@@ -115,6 +134,7 @@ The command performs the CLI end-to-end test suite against your live stack, conf
 | Cache PowerSync CLI credentials | `pnpm --filter @pkg/cli login` |
 | Start local Supabase + PowerSync stack | `pnpm dev:stack` |
 | Stop local stack | `pnpm dev:stack stop` |
+| Run command with a profile | `STACK_PROFILE=staging pnpm <script>` |
 
 > Top-level helpers mirror these: `pnpm dev` proxies to the explorer dev server and `pnpm dev:stack` starts the Supabase + PowerSync bootstrapper.
 

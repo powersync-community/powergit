@@ -4,11 +4,11 @@ import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { existsSync, readFileSync } from 'node:fs'
+import { loadProfileEnvironment } from '../../cli/src/profile-env.js'
 
 const resolveFromRoot = (p: string) => path.resolve(fileURLToPath(new URL('.', import.meta.url)), p)
 
-const stackEnvPath = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../../..', '.env.powersync-stack')
+const repoRoot = resolveFromRoot('../../..')
 
 const STACK_ENV_FALLBACKS: Record<string, string[]> = {
   VITE_SUPABASE_URL: ['POWERSYNC_SUPABASE_URL', 'PSGIT_TEST_SUPABASE_URL'],
@@ -20,32 +20,11 @@ const STACK_ENV_FALLBACKS: Record<string, string[]> = {
   POWERSYNC_DAEMON_DEVICE_URL: ['POWERSYNC_DAEMON_DEVICE_URL'],
 }
 
-function loadStackEnv(path: string): Record<string, string> {
-  if (!existsSync(path)) {
-    return {}
-  }
-  const output: Record<string, string> = {}
-  const raw = readFileSync(path, 'utf8')
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#') || !trimmed.startsWith('export ')) continue
-    const assignment = trimmed.slice('export '.length)
-    const eqIndex = assignment.indexOf('=')
-    if (eqIndex === -1) continue
-    const key = assignment.slice(0, eqIndex).trim()
-    let value = assignment.slice(eqIndex + 1).trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    output[key] = value
-  }
-  return output
-}
-
-const stackEnv = loadStackEnv(stackEnvPath)
+const profileEnv = loadProfileEnvironment({
+  startDir: repoRoot,
+  updateState: false,
+})
+const combinedEnv = profileEnv.combinedEnv
 
 const PLACEHOLDER_PATTERNS: Array<(value: string) => boolean> = [
   (value) => value.trim().length === 0,
@@ -53,7 +32,8 @@ const PLACEHOLDER_PATTERNS: Array<(value: string) => boolean> = [
   (value) => value.trim().toLowerCase() === 'anon-placeholder',
   (value) => value.trim().toLowerCase() === 'service-role-placeholder',
   (value) => value.trim().toLowerCase() === 'powersync-remote-placeholder',
-  (value) => /^https?:\/\/localhost(?::\d+)?\/?$/.test(value.trim().toLowerCase()) && value.includes('8090'),
+  (value) =>
+    /^https?:\/\/localhost(?::\d+)?\/?$/.test(value.trim().toLowerCase()) && value.includes('8090'),
 ]
 
 const isPlaceholder = (rawValue: string | undefined | null): boolean => {
@@ -63,7 +43,40 @@ const isPlaceholder = (rawValue: string | undefined | null): boolean => {
   return PLACEHOLDER_PATTERNS.some((pattern) => pattern(value))
 }
 
-function applyStackEnvFallbacks() {
+const valueFromCombined = (key: string): string | undefined => {
+  const value = combinedEnv[key]
+  if (typeof value === 'string' && !isPlaceholder(value)) {
+    return value.trim()
+  }
+  return undefined
+}
+
+function resolveEnvValue(key: string, fallbacks: string[], defaults: Record<string, string>): string | undefined {
+  const direct = process.env[key]
+  if (typeof direct === 'string' && !isPlaceholder(direct)) {
+    return direct.trim()
+  }
+
+  const profileValue = valueFromCombined(key)
+  if (profileValue) {
+    return profileValue
+  }
+
+  for (const fallback of fallbacks) {
+    const fallbackDirect = process.env[fallback]
+    if (typeof fallbackDirect === 'string' && !isPlaceholder(fallbackDirect)) {
+      return fallbackDirect.trim()
+    }
+    const fallbackProfile = valueFromCombined(fallback)
+    if (fallbackProfile) {
+      return fallbackProfile
+    }
+  }
+
+  return defaults[key]
+}
+
+function applyProfileEnv() {
   const defaults: Record<string, string> = {
     VITE_SUPABASE_URL: 'http://127.0.0.1:55431',
     VITE_SUPABASE_ANON_KEY:
@@ -74,21 +87,17 @@ function applyStackEnvFallbacks() {
     POWERSYNC_DAEMON_DEVICE_URL: 'http://localhost:5783/auth',
   }
 
-  for (const [target, fallbacks] of Object.entries(STACK_ENV_FALLBACKS)) {
-    const current = process.env[target]
-    if (!isPlaceholder(current)) {
-      continue
+  for (const [key, value] of Object.entries(combinedEnv)) {
+    const current = process.env[key]
+    if (typeof current !== 'string' || isPlaceholder(current)) {
+      process.env[key] = value
     }
-    const candidates = [
-      process.env[target],
-      stackEnv[target],
-      ...fallbacks.map((key) => process.env[key] ?? stackEnv[key]),
-    ].filter((value): value is string => typeof value === 'string' && !isPlaceholder(value))
-    const resolved = candidates.find(Boolean)
+  }
+
+  for (const [target, fallbacks] of Object.entries(STACK_ENV_FALLBACKS)) {
+    const resolved = resolveEnvValue(target, fallbacks, defaults)
     if (resolved) {
-      process.env[target] = resolved.trim()
-    } else if (defaults[target]) {
-      process.env[target] = defaults[target]
+      process.env[target] = resolved
     }
   }
 
@@ -97,7 +106,7 @@ function applyStackEnvFallbacks() {
   }
 }
 
-applyStackEnvFallbacks()
+applyProfileEnv()
 
 const repoBase = (() => {
   if (process.env.GITHUB_PAGES?.toLowerCase() === 'true') {

@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, isAbsolute, resolve } from 'node:path'
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 import { addPowerSyncRemote, syncPowerSyncRepository, seedDemoRepository } from './index.js'
@@ -10,6 +8,16 @@ import {
   loginWithSupabasePassword,
   logout as logoutSession,
 } from './auth/login.js'
+import {
+  resolveProfile,
+  listProfiles,
+  getProfile,
+  setActiveProfile,
+  saveProfile,
+  type ProfileConfig,
+  type ResolvedProfile,
+} from './profile-manager.js'
+import { loadStackEnv } from './stack-env.js'
 
 interface LoginCommandArgs {
   manual?: boolean
@@ -59,57 +67,39 @@ const DEFAULT_STACK_ENV_PATH = '.env.powersync-stack'
 const PSGIT_STACK_ENV = process.env.PSGIT_STACK_ENV
 const STACK_ENV_DISABLED = (process.env.PSGIT_NO_STACK_ENV ?? '').toLowerCase() === 'true'
 const appliedStackEnvPaths = new Set<string>()
+const stackProfileOverride = process.env.STACK_PROFILE
+const activeProfileContext: ResolvedProfile = resolveProfile({
+  name: stackProfileOverride ?? null,
+  updateState: !stackProfileOverride,
+  strict: Boolean(stackProfileOverride),
+})
 
-function parseEnvValue(raw: string): string {
-  const trimmed = raw.trim()
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1)
-  }
-  return trimmed
+process.env.STACK_PROFILE = activeProfileContext.name
+process.env.PSGIT_ACTIVE_PROFILE = activeProfileContext.name
+for (const [key, value] of Object.entries(activeProfileContext.env)) {
+  if (typeof value !== 'string') continue
+  process.env[key] = value
 }
 
-function findStackEnvPath(path: string): string | null {
-  if (isAbsolute(path)) {
-    return existsSync(path) ? path : null
-  }
-  let current = process.cwd()
-  const visited = new Set<string>()
-  while (!visited.has(current)) {
-    visited.add(current)
-    const candidate = resolve(current, path)
-    if (existsSync(candidate)) {
-      return candidate
-    }
-    const parent = dirname(current)
-    if (parent === current) {
-      break
-    }
-    current = parent
-  }
-  return null
+if (stackProfileOverride) {
+  console.info(`[psgit] Using profile "${activeProfileContext.name}" (via STACK_PROFILE)`)
+} else if (activeProfileContext.name !== 'local-dev' || activeProfileContext.source === 'file') {
+  console.info(`[psgit] Using profile "${activeProfileContext.name}"`)
 }
 
 function applyStackEnv(path: string, { silent = false }: { silent?: boolean } = {}): boolean {
-  const resolvedPath = findStackEnvPath(path)
-  if (!resolvedPath) {
+  const loaded = loadStackEnv(path)
+  if (!loaded) {
     return false
   }
 
+  const resolvedPath = loaded.path
   if (appliedStackEnvPaths.has(resolvedPath)) {
     return true
   }
 
-  const raw = readFileSync(resolvedPath, 'utf8')
-  const lines = raw.split(/\r?\n/).map((line) => line.trim())
-  for (const line of lines) {
-    if (!line || line.startsWith('#')) continue
-    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(line)
-    if (!match) continue
-    const [, key, value] = match
-    process.env[key] = parseEnvValue(value)
+  for (const [key, value] of Object.entries(loaded.values)) {
+    process.env[key] = value
   }
 
   appliedStackEnvPaths.add(resolvedPath)
@@ -132,7 +122,9 @@ function maybeApplyStackEnv({
 
   const candidates: Array<{ path: string; silent: boolean; allowMissing: boolean }> = []
   if (explicitPath) {
-    candidates.push({ path: explicitPath, silent: false, allowMissing: false })
+    const allowMissingExplicit =
+      activeProfileContext.stackEnvPath !== undefined && explicitPath === activeProfileContext.stackEnvPath
+    candidates.push({ path: explicitPath, silent: false, allowMissing: allowMissingExplicit })
   } else if (PSGIT_STACK_ENV) {
     candidates.push({ path: PSGIT_STACK_ENV, silent, allowMissing: false })
   }
@@ -156,6 +148,80 @@ function firstNonEmpty(...candidates: Array<string | null | undefined>): string 
     }
   }
   return undefined
+}
+
+function parseKeyPath(input: string): string[] {
+  const segments = input
+    .split('.')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+  if (segments.length === 0) {
+    throw new Error(`Invalid key path "${input}". Use dot notation, e.g. "powersync.endpoint".`)
+  }
+  return segments
+}
+
+function setConfigValue(target: Record<string, unknown>, path: string[], value: unknown): void {
+  let cursor: Record<string, unknown> = target
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const segment = path[i]
+    const existing = cursor[segment]
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+      const next: Record<string, unknown> = {}
+      cursor[segment] = next
+      cursor = next
+    } else {
+      cursor = existing as Record<string, unknown>
+    }
+  }
+  const finalKey = path[path.length - 1]
+  cursor[finalKey] = value
+}
+
+function unsetConfigValue(target: Record<string, unknown>, path: string[]): void {
+  if (path.length === 0) return
+  const stack: Array<{ parent: Record<string, unknown>; key: string }> = []
+  let cursor: unknown = target
+  for (let i = 0; i < path.length - 1; i += 1) {
+    if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor)) {
+      return
+    }
+    const parent = cursor as Record<string, unknown>
+    const key = path[i]
+    const next = parent[key]
+    if (!next || typeof next !== 'object' || Array.isArray(next)) {
+      return
+    }
+    stack.push({ parent, key })
+    cursor = next
+  }
+
+  if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor)) {
+    return
+  }
+
+  const container = cursor as Record<string, unknown>
+  const finalKey = path[path.length - 1]
+  if (!(finalKey in container)) {
+    return
+  }
+
+  delete container[finalKey]
+
+  for (let i = stack.length - 1; i >= 0; i -= 1) {
+    const { parent, key } = stack[i]
+    const child = parent[key]
+    if (
+      child &&
+      typeof child === 'object' &&
+      !Array.isArray(child) &&
+      Object.keys(child as Record<string, unknown>).length === 0
+    ) {
+      delete parent[key]
+    } else {
+      break
+    }
+  }
 }
 
 function parseJwtPayload(token: string): Record<string, unknown> | null {
@@ -619,6 +685,7 @@ function printUsage() {
   console.log('  psgit login [--guest] [--manual --token <jwt>] [--endpoint <url>] [--daemon-url <url>]')
   console.log('  psgit daemon stop [--daemon-url <url>] [--wait <ms>]')
   console.log('  psgit logout [--daemon-url <url>]')
+  console.log('  psgit profile list|show|set|use …')
 }
 
 function buildCli() {
@@ -650,13 +717,230 @@ function buildCli() {
       if (argv.noStackEnv) {
         return
       }
-      const explicitPath = typeof argv.stackEnv === 'string' ? argv.stackEnv : undefined
+      const explicitPath =
+        typeof argv.stackEnv === 'string'
+          ? argv.stackEnv
+          : activeProfileContext.stackEnvPath ?? undefined
       maybeApplyStackEnv({
         explicitPath,
-        silent: Boolean(explicitPath),
-        allowMissing: !explicitPath,
+        silent: Boolean(explicitPath && explicitPath === activeProfileContext.stackEnvPath),
+        allowMissing: !explicitPath || explicitPath === activeProfileContext.stackEnvPath,
       })
     }, true)
+    .command(
+      'profile <action>',
+      'Manage psgit environment profiles',
+      (profileYargs) =>
+        profileYargs
+          .command(
+            'list',
+            'List available profiles',
+            (y) =>
+              y.option('json', {
+                type: 'boolean',
+                describe: 'Output JSON instead of human-readable text.',
+                default: false,
+              }),
+            (argv) => {
+              const items = listProfiles()
+              if (argv.json) {
+                console.log(
+                  JSON.stringify(
+                    {
+                      active: activeProfileContext.name,
+                      profiles: items,
+                    },
+                    null,
+                    2,
+                  ),
+                )
+                return
+              }
+              if (items.length === 0) {
+                console.log('No profiles defined.')
+                return
+              }
+              for (const entry of items) {
+                const marker = entry.name === activeProfileContext.name ? '*' : ' '
+                console.log(`${marker} ${entry.name}`)
+              }
+            },
+          )
+          .command(
+            'show <name>',
+            'Show profile configuration',
+            (y) =>
+              y
+                .positional('name', {
+                  type: 'string',
+                  describe: 'Profile name',
+                })
+                .option('json', {
+                  type: 'boolean',
+                  describe: 'Output JSON (default).',
+                  default: true,
+                }),
+            (argv) => {
+              const name = argv.name as string
+              const profile = getProfile(name)
+              if (!profile) {
+                console.error(`Profile "${name}" not found.`)
+                process.exitCode = 1
+                return
+              }
+              if (argv.json !== false) {
+                console.log(JSON.stringify(profile, null, 2))
+              } else {
+                console.log(profile)
+              }
+            },
+          )
+          .command(
+            'set <name>',
+            'Create or update a profile',
+            (y) =>
+              y
+                .positional('name', {
+                  type: 'string',
+                  describe: 'Profile name',
+                })
+                .option('set', {
+                  type: 'string',
+                  array: true,
+                  describe: 'Set key=value pairs (dot notation, e.g. powersync.endpoint=https://example).',
+                })
+                .option('unset', {
+                  type: 'string',
+                  array: true,
+                  describe: 'Unset nested values (dot notation).',
+                  default: [],
+                })
+                .option('stack-env-path', {
+                  type: 'string',
+                  describe: 'Set stack env file path (relative or absolute).',
+                })
+                .option('clear-stack-env', {
+                  type: 'boolean',
+                  describe: 'Remove stack env path from the profile.',
+                  default: false,
+                })
+                .option('json', {
+                  type: 'boolean',
+                  describe: 'Print updated profile as JSON.',
+                  default: false,
+                }),
+            (argv) => {
+              const name = argv.name as string
+              const setArgs = Array.isArray(argv.set) ? (argv.set as string[]) : []
+              const unsetArgs = Array.isArray(argv.unset) ? (argv.unset as string[]) : []
+              const stackEnvPathArg =
+                typeof argv.stackEnvPath === 'string' ? (argv.stackEnvPath as string) : undefined
+              const clearStackEnv = Boolean(argv.clearStackEnv)
+
+              if (stackEnvPathArg && clearStackEnv) {
+                console.error('Use either --stack-env or --clear-stack-env, not both.')
+                process.exitCode = 1
+                return
+              }
+
+              if (
+                setArgs.length === 0 &&
+                unsetArgs.length === 0 &&
+                !stackEnvPathArg &&
+                !clearStackEnv
+              ) {
+                console.error(
+                  'No changes specified. Use --set, --unset, --stack-env, or --clear-stack-env.',
+                )
+                process.exitCode = 1
+                return
+              }
+
+              const existing = getProfile(name)
+              const working: ProfileConfig = existing
+                ? (JSON.parse(JSON.stringify(existing)) as ProfileConfig)
+                : {}
+              const mutable = working as unknown as Record<string, unknown>
+              let mutated = false
+
+              for (const entry of setArgs) {
+                const eqIndex = entry.indexOf('=')
+                if (eqIndex === -1) {
+                  console.error(`Invalid --set entry "${entry}". Use key=value syntax.`)
+                  process.exitCode = 1
+                  return
+                }
+                const rawKey = entry.slice(0, eqIndex).trim()
+                const rawValue = entry.slice(eqIndex + 1)
+                try {
+                  const path = parseKeyPath(rawKey)
+                  setConfigValue(mutable, path, rawValue)
+                } catch (error) {
+                  console.error(error instanceof Error ? error.message : String(error))
+                  process.exitCode = 1
+                  return
+                }
+                mutated = true
+              }
+
+              for (const rawKey of unsetArgs) {
+                try {
+                  const path = parseKeyPath(rawKey)
+                  unsetConfigValue(mutable, path)
+                } catch (error) {
+                  console.error(error instanceof Error ? error.message : String(error))
+                  process.exitCode = 1
+                  return
+                }
+                mutated = true
+              }
+
+              if (stackEnvPathArg) {
+                working.stackEnvPath = stackEnvPathArg
+                mutated = true
+              } else if (clearStackEnv) {
+                if (working.stackEnvPath) {
+                  delete working.stackEnvPath
+                  mutated = true
+                }
+              }
+
+              if (!mutated) {
+                console.log('No changes applied.')
+                return
+              }
+
+              saveProfile(name, working)
+              console.log(`Profile "${name}" updated.`)
+              if (argv.json) {
+                console.log(JSON.stringify(working, null, 2))
+              }
+            },
+          )
+          .command(
+            'use <name>',
+            'Switch active profile (takes effect on next command)',
+            (y) =>
+              y.positional('name', {
+                type: 'string',
+                describe: 'Profile name',
+              }),
+            (argv) => {
+              const name = argv.name as string
+              try {
+                setActiveProfile(name)
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error)
+                console.error(message)
+                process.exitCode = 1
+                return
+              }
+              console.log(`Active profile set to "${name}". Run your next command to use the new environment.`)
+            },
+          )
+          .demandCommand(1, 'Specify a profile subcommand.')
+          .strict(),
+    )
     .command(
       'remote add powersync <url>',
       'Add or update a PowerSync remote',

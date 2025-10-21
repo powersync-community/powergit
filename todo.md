@@ -11,7 +11,7 @@
   - The disable function is exported/registered inside the extension.
   - Browser + daemon both take the dependency through the pnpm patch pipeline.
 - Reapplying the patched binaries workflow: `pnpm patch @powersync/web` → copy `third_party/powersync-sqlite-core/libpowersync*.wasm` into `dist/` → `pnpm patch-commit ...` (repeat for `@powersync/node` with the dylib/static lib) → `pnpm install --force` → restart Vite/daemon so the new `@powersync/web` symlink refreshes (it should point at a patch hash whose wasm contains `powersync_disable_drop_view`).
-- Dev stack bootstrap now writes `POWERSYNC_DAEMON_ENDPOINT`/`POWERSYNC_DAEMON_TOKEN` to `.env.powersync-stack`; source that file (or export both vars) before running CLI live tests so the daemon auto-start retains credentials.
+- Dev stack bootstrap now writes `POWERSYNC_DAEMON_ENDPOINT`/`POWERSYNC_DAEMON_TOKEN` to `.env.powersync-stack`; source that file (or export both vars) before running CLI live tests so the daemon auto-start retains credentials. For remote stacks we need a profile-aware alternative so the CLI/explorer stop relying on manual exports.
 - Remaining sync gaps are upstream (PowerSync service still needs to populate control-plane tables); once the service streams bucket snapshots, the Playwright suite should match manual results.
 - Live Playwright spec now fails fast if PowerSync stays disconnected for ~20s (tunable via `POWERSYNC_E2E_FAIL_FAST_MS`) so iteration remains quick while we stabilise the backend.
 - Branch assertions in the live CLI e2e now cap wait time at the same fail-fast window (20s by default) so we bail quickly when branches never arrive instead of sitting on the full 5‑minute test timeout.
@@ -23,6 +23,13 @@
 - Investigated `third_party/react-supabase-chat-e2ee`'s `SystemProvider`: it builds a `PowerSyncDatabase` with the standard `@powersync/web` Rust client, layers Supabase auth via a `TokenConnector`, and installs/enforces encrypted table DDL with `ensurePairsDDL`; it still traps `powersync_drop_view` errors by clearing the local DB rather than bypassing the runtime logic.
 - Confirmed the workspace now targets `@powersync/{common,web,react,node}` release builds (see package overrides) instead of the previous dev snapshot so we align with the sample chat app’s raw-table support.
 - Added a kill switch in `third_party/powersync-sqlite-core` (`powersync_disable_drop_view()`) that skips the drop-view helper, registered it in the extension, rebuilt the wasm/dylib, and patched `@powersync/{web,node}` again. Explorer now calls `SELECT powersync_disable_drop_view()` before raw-table migration so we can toggle the new behavior without rebuilding upstream.
+
+## Profile / Environment Switching (2025-10-23)
+- CLI now materialises `~/.psgit/profiles.json` with a `local-dev` baseline, tracks the active profile in `~/.psgit/profile.json`, and injects profile env vars on startup; `psgit profile list/show/use/set` ship alongside the `STACK_PROFILE` override.
+- Configs/scripts now read profiles directly via `packages/cli/src/profile-env.js`, so setting `STACK_PROFILE=<name>` before a command (e.g., `STACK_PROFILE=staging pnpm --filter @app/explorer dev`) hydrates the correct environment without wrappers.
+- Stack orchestration leans on the shared loader (`scripts/dev-with-stack.mjs`, Playwright/Vitest configs, live CLI spec/setup, stack harness). `pnpm dev:stack` still writes `.env.powersync-stack` and synchronises the `local-dev` profile.
+- Follow-up: finish Playwright compatibility when running with `STACK_PROFILE` overrides—the third_party `powersync-tanstack-db` packages still trip Vitest/TS loaders during Playwright startup; update their test hooks (or exclude them from the explorer run) so `playwright test --list` and staged runs succeed.
+- Docs highlight the profile workflow (`DEV_SETUP.md`, `docs/env.remote.example`); follow up with Supabase doc updates once the daemon-auth rewrite lands.
 
 ## Vision
 Create a development experience where every component—CLI, explorer, background jobs—operates purely through PowerSync replicas. Supabase and object storage are written through the daemon’s integrated bridge layer (running locally for dev and configurable for shared environments), so no developer tooling ever needs direct credentials.

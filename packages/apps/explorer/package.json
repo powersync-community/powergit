@@ -12,6 +12,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:local": "pnpm test:e2e",
+    "test:e2e:staging": "STACK_PROFILE=staging pnpm test:e2e",
+    "test:e2e:staging:ci": "STACK_PROFILE=staging pnpm exec playwright test",
     "dev:local": "VITE_POWERSYNC_USE_DAEMON=true vite",
     "dev:prod": "VITE_POWERSYNC_USE_DAEMON=false vite --mode production --port 5784"
   },

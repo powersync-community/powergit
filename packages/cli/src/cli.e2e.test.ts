@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile, spawn, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { parsePowerSyncUrl, PowerSyncRemoteClient, buildRepoStreamTargets, formatStreamKey } from '@shared/core'
-import { startStack, stopStack } from '../../../scripts/test-stack-hooks.js'
+import { startStack, stopStack } from '../../../scripts/test-stack-hooks.mjs'
 import { seedDemoRepository } from './index.js'
 import { loadStoredCredentials } from './auth/session.js'
 

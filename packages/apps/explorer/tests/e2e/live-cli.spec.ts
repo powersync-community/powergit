@@ -1,11 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import type { Page } from '@playwright/test'
 import { test, expect } from './diagnostics'
-import { BASE_URL } from 'playwright.config'
+import { BASE_URL } from '../../playwright.config'
 import { parsePowerSyncUrl } from '@shared/core'
+import { loadProfileEnvironment } from '../../../../cli/src/profile-env.js'
 
 const WAIT_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_E2E_WAIT_MS ?? '300000', 10)
 const WAIT_INTERVAL_MS = Number.parseInt(process.env.POWERSYNC_E2E_POLL_MS ?? '1500', 10)
@@ -29,8 +29,26 @@ const REQUIRED_ENV_VARS = [
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-const repoRoot = resolve(process.cwd(), '../../..')
-const STACK_ENV_PATH = process.env.POWERSYNC_STACK_ENV_PATH ?? resolve(repoRoot, '.env.powersync-stack')
+const repoRoot = resolve(__dirname, '..', '..', '..', '..')
+
+function hydrateProfileEnv() {
+  const profileOverride = process.env.STACK_PROFILE ?? null
+  const explicitStackEnv = process.env.POWERSYNC_STACK_ENV_PATH ?? null
+  const profileResult = loadProfileEnvironment({
+    profile: profileOverride,
+    startDir: repoRoot,
+    updateState: false,
+    strict: Boolean(profileOverride),
+    stackEnvPaths: explicitStackEnv ? [explicitStackEnv] : undefined,
+    stackEnvPathsAllowMissing: true,
+  })
+  for (const [key, value] of Object.entries(profileResult.combinedEnv)) {
+    const current = process.env[key]
+    if (!current || !current.trim()) {
+      process.env[key] = value
+    }
+  }
+}
 
 function sanitizeBranchList(rows: Array<Record<string, unknown>> | undefined | null): DaemonBranch[] {
   if (!rows || rows.length === 0) return []
@@ -55,29 +73,6 @@ function sanitizeBranchList(rows: Array<Record<string, unknown>> | undefined | n
   return branches
 }
 
-function applyStackEnvExports() {
-  if (!existsSync(STACK_ENV_PATH)) return
-  const raw = readFileSync(STACK_ENV_PATH, 'utf8')
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed || !trimmed.startsWith('export ')) continue
-    const assignment = trimmed.slice('export '.length)
-    const eqIndex = assignment.indexOf('=')
-    if (eqIndex === -1) continue
-    const key = assignment.slice(0, eqIndex).trim()
-    let value = assignment.slice(eqIndex + 1).trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith('\'') && value.endsWith('\''))
-    ) {
-      value = value.slice(1, -1)
-    }
-    const current = process.env[key]
-    if (!current || !current.trim()) {
-      process.env[key] = value
-    }
-  }
-}
 
 async function fetchDaemonBranches(baseUrl: string, orgId: string, repoId: string): Promise<DaemonBranch[]> {
   const url = `${normalizeBaseUrl(baseUrl)}/orgs/${encodeURIComponent(orgId)}/repos/${encodeURIComponent(repoId)}/refs`
@@ -242,7 +237,7 @@ test.describe('CLI-seeded repo (live PowerSync)', () => {
   })
 
   test.beforeAll(async () => {
-    applyStackEnvExports()
+    hydrateProfileEnv()
     REQUIRED_ENV_VARS.forEach(requireEnv)
 
     supabaseEmail = requireEnv('POWERSYNC_SUPABASE_EMAIL')

@@ -25,19 +25,15 @@ The PowerSync-first architecture stores Git metadata in Supabase while the Power
    ```bash
    pnpm dev:stack
    ```
-   The script launches the Supabase containers, bootstraps the PowerSync services, ensures a development Supabase user exists, and writes connection details to `.env.powersync-stack`.
-3. Export the generated environment variables:
-   ```bash
-   source .env.powersync-stack
-   ```
-   or `pnpm dev:stack -- --print-exports` if you prefer to inspect them first.
+   The script launches the Supabase containers, bootstraps the PowerSync services, ensures a development Supabase user exists, and writes connection details to `.env.powersync-stack`. It also keeps the `local-dev` profile in `~/.psgit/profiles.json` up to date so tools can pick up the new endpoints automatically.
+3. Profiles are refreshed automatically. Run `psgit profile list` to confirm the active profile (default is `local-dev`). Override ad‑hoc with `STACK_PROFILE=staging pnpm --filter @pkg/cli sync` (or similar) when targeting a remote environment.
 4. Start the device flow so `psgit` and the daemon can reuse a Supabase-issued JWT:
    ```bash
    pnpm --filter @pkg/cli login
    ```
    The CLI prints a device code and, when `POWERSYNC_DAEMON_DEVICE_URL` is set, a ready-to-click URL. Visit the URL in a browser (the explorer exposes `/auth?device_code=…` for development at `http://localhost:5783`), sign in with the Supabase credentials exported by `pnpm dev:stack`, and the daemon will persist the resulting token.
 
-5. Launch the explorer (`pnpm dev`) or other clients. The explorer dev script now loads `.env.powersync-stack` automatically, so Supabase credentials and the PowerSync endpoint are injected without extra configuration. Use `pnpm --filter @app/explorer dev:remote` if you need to point at a hosted environment instead. The explorer automatically completes pending device challenges when the user signs in, so you can re-run `psgit login` later without leaving the browser.
+5. Launch the explorer with the desired profile (`pnpm dev` for local, `STACK_PROFILE=staging pnpm --filter @app/explorer dev` for remote). Playwright helpers are available via `pnpm --filter @app/explorer test:e2e:local` or `pnpm --filter @app/explorer test:e2e:staging`. The explorer automatically completes pending device challenges when the user signs in, so you can re-run `psgit login` later without leaving the browser.
 
 When you are done, run `pnpm dev:stack stop` (or `supabase stop`) to shut everything down.
 

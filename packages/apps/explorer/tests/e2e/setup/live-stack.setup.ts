@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process'
 import net from 'node:net'
-import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from '@playwright/test'
+import { loadProfileEnvironment } from '../../../../../cli/src/profile-env.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -19,11 +19,9 @@ if (!START_COMMAND[0]) {
 if (!STOP_COMMAND[0]) {
   throw new Error('Invalid POWERSYNC_STACK_STOP command.')
 }
-const STACK_ENV_PATH = process.env.POWERSYNC_STACK_ENV_PATH ?? resolve(repoRoot, '.env.powersync-stack')
-
 const TCP_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_STACK_PROBE_TIMEOUT_MS ?? '1000', 10)
 const TCP_RETRY_DELAY_MS = Number.parseInt(process.env.POWERSYNC_STACK_RETRY_DELAY_MS ?? '1000', 10)
-const STACK_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_STACK_START_TIMEOUT_MS ?? '60000', 10)
+const STACK_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_STACK_START_TIMEOUT_MS ?? '120000', 10)
 
 async function delay(ms: number) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
@@ -73,42 +71,49 @@ function runCommand(command: string, args: string[], label: string): void {
   }
 }
 
-function applyStackEnvExports(): void {
-  if (!existsSync(STACK_ENV_PATH)) {
-    return
-  }
-  const raw = readFileSync(STACK_ENV_PATH, 'utf8')
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed || !trimmed.startsWith('export ')) continue
-    const assignment = trimmed.slice('export '.length)
-    const eqIndex = assignment.indexOf('=')
-    if (eqIndex === -1) continue
-    const key = assignment.slice(0, eqIndex).trim()
-    let value = assignment.slice(eqIndex + 1).trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
+function applyProfileEnvironment(): void {
+  const profileOverride = process.env.STACK_PROFILE ?? null
+  const explicitStackEnv = process.env.POWERSYNC_STACK_ENV_PATH ?? null
+  const profileResult = loadProfileEnvironment({
+    profile: profileOverride,
+    startDir: repoRoot,
+    updateState: false,
+    strict: Boolean(profileOverride),
+    stackEnvPaths: explicitStackEnv ? [explicitStackEnv] : undefined,
+    stackEnvPathsAllowMissing: true,
+  })
+  for (const [key, value] of Object.entries(profileResult.combinedEnv)) {
     if (!(key in process.env)) {
       process.env[key] = value
     }
   }
 }
 
+function shouldManageLocalStack(): boolean {
+  const profileName = process.env.STACK_PROFILE ?? 'local-dev'
+  if (profileName === 'local-dev') return true
+  const supabaseUrl = (process.env.POWERSYNC_SUPABASE_URL ?? '').toLowerCase()
+  if (supabaseUrl.includes('127.0.0.1') || supabaseUrl.includes('localhost')) {
+    return true
+  }
+  return false
+}
+
 test.describe('PowerSync dev stack (live)', () => {
   let startedBySuite = false
 
   test('ensure stack is running', async () => {
+    applyProfileEnvironment()
+
+    if (!shouldManageLocalStack()) {
+      return
+    }
+
     if (!(await isStackRunning())) {
       runCommand(START_COMMAND[0]!, START_COMMAND.slice(1), 'start dev stack')
       await waitForStackReady(STACK_START_TIMEOUT_MS)
       startedBySuite = true
     }
-
-    applyStackEnvExports()
   })
 
   test.afterAll(async () => {

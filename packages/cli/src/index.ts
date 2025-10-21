@@ -14,6 +14,7 @@ import {
   buildRepoStreamTargets,
   type RepoStreamTarget,
 } from '@shared/core'
+export { loadProfileEnvironment, resolveProfileDirectory, resolveProfilesPath } from './profile-env.js'
 
 type StreamSuffix = RepoStreamSuffix
 type StreamSubscriptionRequest = RepoStreamTarget

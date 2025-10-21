@@ -32,7 +32,7 @@ See **README.md** for how to install directly from the PR branch during developm
 ## Agent workflow
 - While you work, keep `todo.md` up to date with progress, blockers, and next steps so the next agent has continuity.
 - Any time you rebuild the PowerSync core (`third_party/powersync-sqlite-core`), reapply the pnpm patches so the fresh `libpowersync*.wasm`/`libpowersync*.dylib` land in consumers: `pnpm patch @powersync/web`, copy the new wasm artifacts into the patch workspace, `pnpm patch-commit …`, repeat for `@powersync/node`, then `pnpm install --force` and restart dev servers so the explorer picks up the new binaries (check the symlink under `packages/apps/explorer/node_modules/@powersync/web` if in doubt).
-- The dev stack now exports `POWERSYNC_DAEMON_ENDPOINT` + `POWERSYNC_DAEMON_TOKEN` alongside the existing PowerSync env vars; source `.env.powersync-stack` (or re-run `pnpm dev:stack -- --print-exports`) before invoking any CLI/daemon flows so the auto-started daemon authenticates correctly.
+- The dev stack now exports `POWERSYNC_DAEMON_ENDPOINT` + `POWERSYNC_DAEMON_TOKEN` alongside the existing PowerSync env vars; it also keeps the `local-dev` profile in sync. Set `STACK_PROFILE` before invoking CLI/daemon flows so the auto-started daemon authenticates correctly when targeting alternative stacks.
 
 ## Remote helper (unchanged)
 Our `git-remote-powersync` supports the Git remote‑helper protocol (`capabilities`, `list`, `fetch`, `push`, `option`). It parses the org/repo slugs, resolves to IDs, and scopes all operations by `{org_id, repo_id}`.

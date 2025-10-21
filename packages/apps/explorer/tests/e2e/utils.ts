@@ -25,7 +25,7 @@ function stripQuotes(value: string): string {
 function getEnv(name: string): string {
   const raw = process.env[name]?.trim()
   if (raw) return stripQuotes(raw)
-  throw new Error(`Missing required environment variable ${name}. Did you run pnpm dev:stack and source .env.powersync-stack?`)
+  throw new Error(`Missing required environment variable ${name}. Ensure the active profile provides it (for example, run "STACK_PROFILE=local-dev pnpm --filter @app/explorer test:e2e").`)
 }
 
 let cachedClient: SupabaseClient | null = null

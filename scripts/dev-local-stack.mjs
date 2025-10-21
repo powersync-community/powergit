@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve, relative } from 'node:path'
 import { writeFile, mkdir as mkdirAsync, readFile } from 'node:fs/promises'
 import { createWriteStream, existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
 import { createConnection } from 'node:net'
 import { inspect } from 'node:util'
@@ -630,7 +631,63 @@ async function writeStackEnvFile(env, authUser) {
   await writeFile(filePath, lines.join('\n'))
   infoLog(`💾 Wrote stack environment exports to ${STACK_ENV_FILENAME}`)
   infoLog(`   source ${STACK_ENV_FILENAME}  # apply in your current shell (zsh/bash/fish)`)
+  await syncLocalProfile(env, authUser).catch((error) => {
+    warnLog(`[dev:stack] Failed to sync local-dev profile: ${error?.message ?? error}`)
+  })
   return lines
+}
+
+async function syncLocalProfile(env, authUser) {
+  const profileDir = resolve(homedir(), '.psgit')
+  const profilesPath = resolve(profileDir, 'profiles.json')
+
+  let profiles = {}
+  try {
+    const raw = await readFile(profilesPath, 'utf8')
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      profiles = parsed
+    }
+  } catch {}
+
+  const existing = profiles['local-dev'] && typeof profiles['local-dev'] === 'object' ? profiles['local-dev'] : {}
+  const existingPowerSync = existing.powersync && typeof existing.powersync === 'object' ? existing.powersync : {}
+  const existingSupabase = existing.supabase && typeof existing.supabase === 'object' ? existing.supabase : {}
+
+  const nextPowerSync = {
+    ...existingPowerSync,
+    ...(env.powersyncEndpoint ? { endpoint: env.powersyncEndpoint } : {}),
+    ...(env.daemonUrl ? { daemonUrl: env.daemonUrl } : {}),
+    ...(env.daemonDeviceUrl ? { deviceUrl: env.daemonDeviceUrl } : {}),
+  }
+
+  const nextSupabase = {
+    ...existingSupabase,
+    ...(env.supabaseUrl ? { url: env.supabaseUrl } : {}),
+    ...(env.anonKey ? { anonKey: env.anonKey } : {}),
+    ...(env.serviceRoleKey ? { serviceRoleKey: env.serviceRoleKey } : {}),
+  }
+
+  if (authUser) {
+    if (authUser.email) {
+      nextSupabase.email = authUser.email
+    }
+    if (authUser.password) {
+      nextSupabase.password = authUser.password
+    }
+  }
+
+  const nextProfile = {
+    ...existing,
+    stackEnvPath: STACK_ENV_FILENAME,
+    powersync: nextPowerSync,
+    supabase: nextSupabase,
+  }
+
+  profiles['local-dev'] = nextProfile
+  await mkdirAsync(profileDir, { recursive: true })
+  await writeFile(profilesPath, `${JSON.stringify(profiles, null, 2)}\n`)
+  infoLog(`🔁 Synced local-dev profile with ${STACK_ENV_FILENAME}`)
 }
 
 async function seedSyncRules(env) {
@@ -749,7 +806,7 @@ async function startStack() {
   infoLog('✨ Supabase + PowerSync stack is ready.')
   infoLog(`   Remote name: ${DEFAULT_REMOTE_NAME}`)
   infoLog(`   Remote URL: ${env.remoteUrl}`)
-  infoLog('   Use source .env.powersync-stack before running CLI e2e tests.')
+  infoLog('   Use "STACK_PROFILE=local-dev pnpm <command>" (or source .env.powersync-stack) before running CLI e2e tests.')
 
   if (cliOptions.printExports) {
     exportLines.forEach((line) => process.stdout.write(`${line}\n`))

@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { existsSync, readFileSync } from 'node:fs'
+import { loadProfileEnvironment } from '../../cli/src/profile-env.js'
 
 // Use a dedicated port to avoid clashing with local dev server defaults
 const PORT = Number(process.env.PORT || 5191)
@@ -10,27 +10,20 @@ const BASE_HTTP = `http://${HOST}:${PORT}`
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const repoRoot = resolve(__dirname, '..', '..', '..')
-const STACK_ENV_PATH = process.env.POWERSYNC_STACK_ENV_PATH ?? resolve(repoRoot, '.env.powersync-stack')
+const profileEnv = loadProfileEnvironment({
+  startDir: repoRoot,
+  updateState: false,
+})
+const combinedEnv = profileEnv.combinedEnv
 
-if (existsSync(STACK_ENV_PATH)) {
-  const raw = readFileSync(STACK_ENV_PATH, 'utf8')
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed || !trimmed.startsWith('export ')) continue
-    const eqIndex = trimmed.indexOf('=')
-    if (eqIndex === -1) continue
-    const key = trimmed.slice('export '.length, eqIndex).trim()
-    let value = trimmed.slice(eqIndex + 1).trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith('\'') && value.endsWith('\''))
-    ) {
-      value = value.slice(1, -1)
-    }
-    const current = process.env[key]
-    if (!current || !current.trim()) {
-      process.env[key] = value
-    }
+const isPlaceholder = (value?: string | null) => {
+  if (typeof value !== 'string') return true
+  return value.trim().length === 0
+}
+
+for (const [key, value] of Object.entries(combinedEnv)) {
+  if (isPlaceholder(process.env[key])) {
+    process.env[key] = value
   }
 }
 
@@ -45,7 +38,13 @@ const stripQuotes = (value?: string) => {
 const getEnvOrEmpty = (...keys: string[]) => {
   for (const key of keys) {
     const value = stripQuotes(process.env[key])
-    if (value) return value
+    if (value && !isPlaceholder(value)) {
+      return value
+    }
+    const profileValue = stripQuotes(combinedEnv[key])
+    if (profileValue && !isPlaceholder(profileValue)) {
+      return profileValue
+    }
   }
   return ''
 }
@@ -60,6 +59,7 @@ export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
   timeout: TEST_TIMEOUT_MS,
+  testIgnore: ['../third_party/**'],
 
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'list',
