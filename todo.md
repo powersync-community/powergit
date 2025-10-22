@@ -1,8 +1,13 @@
 # PowerSync-First Architecture Roadmap
 
 ## Active Focus (2025-10-21)
-- Raw tables are only partially migrated: `persistPush` no longer assigns stable `id` values (see `packages/daemon/src/queries.ts`) even though `supabase/schema.sql` and `RAW_TABLE_SPECS` still declare `id TEXT PRIMARY KEY`. Every daemon insert will violate the NOT NULL constraint. Decide whether to 1) restore the `refId`/`commitId`/`fileChangeId` helpers and keep single-column PKs, or 2) finish the composite-key migration (update schema specs, Supabase writer conflict targets, triggers, migrations, and PowerSync rules) before shipping anything else.
-- `ensureLocalSchema` is currently unused in the daemon bootstrap and the Supabase writer loop is never started. Without the triggers or the poller, mutations never flow into `powersync_crud`, so Supabase never sees Git updates and replicas stay empty.
+- Raw table writes now target the `id` primary key again (`persistPush` uses `refId`/`commitId`/`fileChangeId` + `ON CONFLICT(id)` and stops pruning untouched refs). Monitor Supabase to confirm refs remain populated after new pushes before tackling any composite-key migration follow-up.
+- Supabase writer now piggybacks on the daemon’s Supabase JWT (or `POWERSYNC_SUPABASE_ACCESS_TOKEN`) instead of requiring the service-role secret; once RLS allows authenticated writes we can drop `POWERSYNC_SUPABASE_SERVICE_ROLE_KEY` from `.env.powersync-stack` entirely.
+- `ensureLocalSchema` was previously skipped in the daemon bootstrap and the Supabase writer loop never started; the current daemon entrypoint now calls both, so keep an eye on the logs (`Supabase writer started…`) to confirm the poller stays healthy on fresh stacks.
+- Daemon start now preflights the bind host/port (`assertPortAvailable`) so reruns fail fast with a friendly `[powersync-daemon] port ... is already in use` message instead of hanging; make sure automation stops any previous daemon before spawning a new one or set `POWERSYNC_DAEMON_PORT` to an alternate value.
+- Live Playwright suite now reaches the explorer but still times out waiting for branch data (`branch-heading` never renders); Supabase isn’t ingesting refs even with `previousValues` merging, so continue debugging the control-plane write path before re-running.
+- Supabase writer now merges `previousValues` with `opData` so partial updates keep `org_id`/`repo_id`/`name` populated; rerun the live suites to confirm Supabase starts receiving refs again, and watch for follow-up schema errors if any columns are still missing.
+- Postinstall script (`scripts/ensure-powersync-core.mjs`) now copies `third_party/powersync-sqlite-core/libpowersync_aarch64.macos.dylib` into `@powersync/node/lib` and drops a `.dylib.dylib` alias, so fresh installs pick up the rebuilt core automatically without manual copying.
 - Stream orchestration needs a refresh: the explorer and sync rules now pass `{ org_id, repo_id }` parameters for each stream, but the daemon server still exposes plain string lists and `startDaemon` doesn’t wire `subscribeStreams`/`unsubscribeStreams`. Git helper / CLI can’t resubscribe, leaving raw tables empty client-side.
 - Rebuilt the PowerSync core (wasm + macos dylib) so `powersync_disable_drop_view()` is registered; the patched `@powersync/{web,node}` packages now bundle the updated binaries and the drop helper only no-ops when the flag is set.
 - Explorer e2e (`live-cli.spec.ts`) now seeds via the daemon; manual browser runs show refs/commits rendering once the patched core is active. Playwright still flakes because the control plane occasionally serves empty buckets, so shepherding real data through PowerSync remains a follow-up.
@@ -10,8 +15,12 @@
   - `powersync_drop_view` short-circuits when the flag is set.
   - The disable function is exported/registered inside the extension.
   - Browser + daemon both take the dependency through the pnpm patch pipeline.
+- Daemon streaming e2e now fetches fresh credentials from `/auth/status` after `psgit login --guest`, so the connector avoids the static stack token without an `iat` claim that previously left `waitForFirstSync` hanging.
+- `pnpm dev:stack` refreshes the daemon guest token during bootstrap, rewrites `.env.powersync-stack` with the new JWT (including `iat`), and syncs the updated endpoint for downstream tools—future agents no longer inherit the stale service-role token that PowerSync rejects. The profile manager now persists the refreshed token so `STACK_PROFILE` environments get the same credentials.
+- `psgit login --guest` now falls back to `/auth/status` when the daemon response isn’t ready, guaranteeing the saved session (and subsequent tests) capture the daemon’s issued token instead of a placeholder.
 - Reapplying the patched binaries workflow: `pnpm patch @powersync/web` → copy `third_party/powersync-sqlite-core/libpowersync*.wasm` into `dist/` → `pnpm patch-commit ...` (repeat for `@powersync/node` with the dylib/static lib) → `pnpm install --force` → restart Vite/daemon so the new `@powersync/web` symlink refreshes (it should point at a patch hash whose wasm contains `powersync_disable_drop_view`).
 - Dev stack bootstrap now writes `POWERSYNC_DAEMON_ENDPOINT`/`POWERSYNC_DAEMON_TOKEN` to `.env.powersync-stack`; source that file (or export both vars) before running CLI live tests so the daemon auto-start retains credentials. For remote stacks we need a profile-aware alternative so the CLI/explorer stop relying on manual exports.
+- Added `pnpm dev:daemon` wrapper (`scripts/start-daemon-with-profile.mjs`) so local runs launch the daemon with the active `psgit` profile + stack env without manual sourcing; CLI auto-start and explorer dev script both route through this entrypoint. Daemon bootstrap defers the PowerSync connect loop until credentials arrive so `psgit login --guest` can bring an unauthenticated daemon online. Playwright live stack setup now authenticates the daemon via the CLI helper and uses a temp `.env.powersync-stack` copy so Vite stops restarting mid-test; live GitHub import spec clicks through to `Branches` before asserting on streamed data.
 - Remaining sync gaps are upstream (PowerSync service still needs to populate control-plane tables); once the service streams bucket snapshots, the Playwright suite should match manual results.
 - Live Playwright spec now fails fast if PowerSync stays disconnected for ~20s (tunable via `POWERSYNC_E2E_FAIL_FAST_MS`) so iteration remains quick while we stabilise the backend.
 - Branch assertions in the live CLI e2e now cap wait time at the same fail-fast window (20s by default) so we bail quickly when branches never arrive instead of sitting on the full 5‑minute test timeout.
@@ -311,3 +320,38 @@ With this, we hit the “maximum PowerSync” goal: every mutation flows through
 - Deleted Supabase’s automatic `20251017055214_remote_schema.sql` snapshot so future pulls won’t drag in Storage triggers we don’t use.
 - PowerSync config now references `sync-rules.yaml`; sync rule SQL lives beside the config file and the seeding script tolerates `sync_rules.path` (skips inline seeding when rules are external).
 - Explorer mitigates `powersync_drop_view` schema mismatches by clearing the local PowerSync DB, rerunning the raw-table migration, and reconnecting automatically (mirrors the E2EE chat example’s recovery flow).
+
+## Agent Notes (2025-10-23)
+- Added a daemon-side GitHub import queue (`POST /repos/import`, `GET /repos/import/:id`, `GET /repos/import`) with an in-memory job manager that clones public repos, pushes via the PowerSync remote helper, subscribes org streams, and surfaces per-step status/logs back to the UI.
+- Explorer home screen now exposes a polished “Import GitHub repository” card (auto-slugs org/repo, shows live step progress, links to the repo on completion); it polls the daemon for job updates so the UX stays responsive without reloading.
+- Daemon import flow currently clones full history and pushes all branches/tags; private repos & credential flows still TODO, and the job queue is ephemeral (reset on daemon restart). Consider persisting job state and surfacing richer progress (e.g., clone percentage) before wider demos.
+- Next steps for import flow:
+  - [ ] Persist import job metadata in the daemon (SQLite) so restarts retain history and in-flight status.
+  - [ ] Stream live progress events (clone %, push counts) to the explorer so the status card updates continuously.
+  - [ ] Add negative-path coverage (invalid URL, GitHub rate limit) via mocked tests and document required recovery steps.
+- Hardened `connectWithSchemaRecovery` with configurable timeouts for the initial `database.connect` and `waitForReady` calls so the daemon surfaces backend hangs (defaults 30s; override via `POWERSYNC_CONNECT_TIMEOUT_MS` / `POWERSYNC_READY_TIMEOUT_MS`).
+
+## Agent Notes (2025-10-24)
+- Sketched a daemon-first streaming e2e (`packages/daemon/src/__tests__/daemon-stream.e2e.test.ts`) that seeds a fresh repo via `psgit demo-seed`, spins up a standalone `PowerSyncDatabase`, subscribes the four org streams, and asserts `refs/heads/main` lands without relying on the explorer UI.
+- The suite auto-skips when the patched `@powersync/better-sqlite3` native module mismatches the host Node version (current local run hits `NODE_MODULE_VERSION 137` vs. `127`), so rebuild the PowerSync sqlite core before enabling the test on CI/dev laptops.
+- Once the binary issue is cleared, remove the skip guard to catch regressions in the daemon → Supabase → PowerSync streaming path independently of Playwright.
+- Added `scripts/ensure-powersync-core.mjs` and wired it to root `postinstall`; it asserts the patched `@powersync/{web,node}` artifacts still export `powersync_disable_drop_view()` anytime dependencies reinstall, so we get an immediate failure instead of silent regressions when the pnpm patch pipeline needs to be rerun.
+
+## Agent Notes (2025-10-26)
+- Reproduced the live GitHub import stall: the explorer never saw branches because Supabase still held stale refs after the daemon’s `--tags` push. Calls to `/refs` showed only tags; PowerSync dutifully streamed emptiness.
+- Patched the remote helper’s `collectPushSummary` to merge the full `git show-ref` inventory before persisting updates; a tags-only push no longer prunes branches. Re-imported `quantleaf/probly-search` and confirmed `refs/heads/master` survives in Supabase.
+- Added permissive Supabase RLS policies that allow any session to insert/update/delete `refs`, `commits`, `file_changes`, and `objects`; this keeps the pipeline working when only anon/auth tokens are available (strictly temporary for local dev).
+- Supabase writer fallback: if no service-role key is provided, the daemon now boots in an UNSAFE mode that uses the anon/public key (backed by permissive RLS). Loud warnings remind us to tighten this once the daemon-owned push path is ready; configure `POWERSYNC_DISABLE_SUPABASE_WRITER=true` to opt out entirely.
+- Identified token expiry as the new flake: the daemon will happily cache an expired PowerSync JWT, so clients spin on `PSYNC_S2103`. For now, rerun `psgit login --guest` (or restart the daemon) before live tests. Longer-term we need token refresh.
+- Auth/Streaming roadmap: keep the service-role writer for now, but plan to migrate control-plane writes into a daemon-owned path. Next steps:
+  1. Introduce a daemon push RPC that persists refs/commits locally and exposes them via PowerSync/Supabase without requiring the helper to touch Supabase.
+  2. Add token refresh so the daemon renews Supabase-issued PowerSync tokens automatically.
+  3. Prototype a Supabase Edge Function (or equivalent) that accepts the daemon’s scoped token for upserts—no embedding the service-role key in the sidecar.
+  4. Once the RPC + auth plumbing exist, retire the direct service-role writer and shift Playwright/CLI tests to the new flow.
+- TODO for follow-up: document the temporary workaround (rerun guest login before e2e), sketch the daemon RPC schema, capture decision notes about Edge Function vs. local writer approaches, and remove the permissive policies once the authenticated pipeline lands.
+
+## Agent Notes (2025-10-27)
+- Rebuilt `third_party/powersync-sqlite-core` (macOS + wasm) and re-applied the `@powersync/{web,node}` patch pipeline. Confirmed the installed artifacts match the freshly built binaries (`shasum` parity for `libpowersync{,-async}.wasm` and `libpowersync.dylib`), so the daemon and explorer now load the updated PowerSync core.
+- `ensureLocalSchema` now routes raw-table triggers through the `powersync_crud` virtual table instead of writing to `ps_crud` directly; added `local-schema.test.ts` + the daemon streaming e2e asserts to catch regressions when the vtable contract changes.
+- Daemon streaming e2e now force-cleans the dev stack before/after runs (`stopStack({ force: true })`) so the Supabase CLI/docker ports stay available; start failures trigger an immediate teardown retry.
+- CLI e2e harness provisions Supabase credentials on the fly (`loginWithSupabasePassword` + `loginWithDaemonGuest`), persists them to `~/.psgit/session.json`, and waits for daemon sync propagation before asserting counts (refs/commits). The suite cleans up credentials and force-stops the local stack when it’s done.

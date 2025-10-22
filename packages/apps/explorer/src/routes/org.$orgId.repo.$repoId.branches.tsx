@@ -37,11 +37,15 @@ function Branches() {
 
   const branches = fixture?.branches?.length ? fixture.branches : liveBranches
   return (
-    <div className="space-y-3">
-      <h3 className="font-semibold text-lg">Branches ({orgId}/{repoId})</h3>
-      <ul className="space-y-1">
+    <div className="space-y-3" data-testid="branch-view">
+      <h3 className="font-semibold text-lg" data-testid="branch-heading">
+        Branches ({orgId}/{repoId})
+      </h3>
+      <ul className="space-y-1" data-testid="branch-list">
         {branches.map((b) => (
-          <li key={b.name ?? ''} className="border rounded p-2 bg-white">{b.name ?? '(unnamed)'} — <span className="font-mono text-xs">{b.target_sha ?? '—'}</span></li>
+          <li key={b.name ?? ''} className="border rounded p-2 bg-white" data-testid="branch-item">
+            {b.name ?? '(unnamed)'} — <span className="font-mono text-xs">{b.target_sha ?? '—'}</span>
+          </li>
         ))}
       </ul>
     </div>

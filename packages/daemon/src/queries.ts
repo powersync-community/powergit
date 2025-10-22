@@ -155,8 +155,10 @@ export async function persistPush(database: PowerSyncDatabase, options: PersistP
       await tx.execute(
         `INSERT INTO objects (id, org_id, repo_id, pack_oid, pack_bytes, created_at)
          VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(org_id, repo_id, pack_oid)
-         DO UPDATE SET id = excluded.id,
+         ON CONFLICT(id)
+         DO UPDATE SET org_id = excluded.org_id,
+                       repo_id = excluded.repo_id,
+                       pack_oid = excluded.pack_oid,
                        pack_bytes = excluded.pack_bytes,
                        created_at = excluded.created_at`,
         [id, orgId, repoId, resolvedPackOid, packBase64, createdAt],
@@ -239,14 +241,12 @@ async function applyRefUpdates(
   head?: string,
 ): Promise<void> {
   const nowIso = new Date().toISOString();
-  const seenNames: string[] = [];
 
   for (const ref of refs) {
     const name = typeof ref.name === 'string' ? ref.name : '';
     if (!name) continue;
     const target = typeof ref.target === 'string' ? ref.target : '';
     const rowId = refId(orgId, repoId, name);
-    seenNames.push(rowId);
 
     if (!target || isZeroSha(target)) {
       await tx.execute('DELETE FROM refs WHERE id = ?', [rowId]);
@@ -256,8 +256,10 @@ async function applyRefUpdates(
     await tx.execute(
       `INSERT INTO refs (id, org_id, repo_id, name, target_sha, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(org_id, repo_id, name)
-       DO UPDATE SET id = excluded.id,
+       ON CONFLICT(id)
+       DO UPDATE SET org_id = excluded.org_id,
+                     repo_id = excluded.repo_id,
+                     name = excluded.name,
                      target_sha = excluded.target_sha,
                      updated_at = excluded.updated_at`,
       [rowId, orgId, repoId, name, target, nowIso],
@@ -266,25 +268,16 @@ async function applyRefUpdates(
 
   if (head && head.length > 0) {
     const headId = refId(orgId, repoId, 'HEAD');
-    if (!seenNames.includes(headId)) {
-      seenNames.push(headId);
-    }
     await tx.execute(
       `INSERT INTO refs (id, org_id, repo_id, name, target_sha, updated_at)
        VALUES (?, ?, ?, 'HEAD', ?, ?)
-       ON CONFLICT(org_id, repo_id, name)
-       DO UPDATE SET id = excluded.id,
+       ON CONFLICT(id)
+       DO UPDATE SET org_id = excluded.org_id,
+                     repo_id = excluded.repo_id,
+                     name = excluded.name,
                      target_sha = excluded.target_sha,
                      updated_at = excluded.updated_at`,
       [headId, orgId, repoId, head, nowIso],
-    );
-  }
-
-  if (seenNames.length > 0) {
-    const placeholders = seenNames.map(() => '?').join(', ');
-    await tx.execute(
-      `DELETE FROM refs WHERE id NOT IN (${placeholders}) AND org_id = ? AND repo_id = ?`,
-      [...seenNames, orgId, repoId],
     );
   }
 }
@@ -306,47 +299,52 @@ async function applyCommitUpdates(
 
   for (const commit of commits) {
     if (!commit || !commit.sha) continue;
-        const commitRowId = commitId(orgId, repoId, commit.sha);
-        await tx.execute(
-          `INSERT INTO commits (id, org_id, repo_id, sha, author_name, author_email, authored_at, message, tree_sha)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(org_id, repo_id, sha)
-           DO UPDATE SET id = excluded.id,
-                         author_name = excluded.author_name,
-                         author_email = excluded.author_email,
-                         authored_at = excluded.authored_at,
-                         message = excluded.message,
-                         tree_sha = excluded.tree_sha`,
-          [
-            commitRowId,
-            orgId,
-            repoId,
-            commit.sha,
-            commit.author_name ?? '',
-            commit.author_email ?? '',
-            commit.authored_at ?? new Date().toISOString(),
-            commit.message ?? '',
-            commit.tree ?? '',
-          ],
-        );
+    const commitRowId = commitId(orgId, repoId, commit.sha);
+    await tx.execute(
+      `INSERT INTO commits (id, org_id, repo_id, sha, author_name, author_email, authored_at, message, tree_sha)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id)
+       DO UPDATE SET org_id = excluded.org_id,
+                     repo_id = excluded.repo_id,
+                     sha = excluded.sha,
+                     author_name = excluded.author_name,
+                     author_email = excluded.author_email,
+                     authored_at = excluded.authored_at,
+                     message = excluded.message,
+                     tree_sha = excluded.tree_sha`,
+      [
+        commitRowId,
+        orgId,
+        repoId,
+        commit.sha,
+        commit.author_name ?? '',
+        commit.author_email ?? '',
+        commit.authored_at ?? new Date().toISOString(),
+        commit.message ?? '',
+        commit.tree ?? '',
+      ],
+    );
 
-        if (Array.isArray(commit.files)) {
-          for (const file of commit.files) {
-            if (!file || !file.path) continue;
-            const additions = Number.isFinite(file.additions) ? Number(file.additions) : 0;
-            const deletions = Number.isFinite(file.deletions) ? Number(file.deletions) : 0;
-            const fileRowId = fileChangeId(orgId, repoId, commit.sha, file.path);
+    if (Array.isArray(commit.files)) {
+      for (const file of commit.files) {
+        if (!file || !file.path) continue;
+        const additions = Number.isFinite(file.additions) ? Number(file.additions) : 0;
+        const deletions = Number.isFinite(file.deletions) ? Number(file.deletions) : 0;
+        const fileRowId = fileChangeId(orgId, repoId, commit.sha, file.path);
         await tx.execute(
           `INSERT INTO file_changes (id, org_id, repo_id, commit_sha, path, additions, deletions)
            VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(org_id, repo_id, commit_sha, path)
-           DO UPDATE SET id = excluded.id,
+           ON CONFLICT(id)
+           DO UPDATE SET org_id = excluded.org_id,
+                         repo_id = excluded.repo_id,
+                         commit_sha = excluded.commit_sha,
+                         path = excluded.path,
                          additions = excluded.additions,
                          deletions = excluded.deletions`,
           [fileRowId, orgId, repoId, commit.sha, file.path, additions, deletions],
         );
-          }
-        }
+      }
+    }
   }
 }
 

@@ -65,11 +65,19 @@ export async function startStack(options = {}) {
   return { ...envFromStack }
 }
 
-export async function stopStack() {
+export async function stopStack(options = {}) {
+  const force = options.force === true
   await stopDaemon()
 
-  if (stackStarted) {
-    await runStackManager(['stop'], 'stop stack')
+  if (stackStarted || force) {
+    try {
+      await runStackManager(['stop'], 'stop stack')
+    } catch (error) {
+      if (!force) {
+        throw error
+      }
+      console.warn(`[dev-stack] stop stack failed during forced cleanup: ${error.message}`)
+    }
     stackStarted = false
     cachedEnv = null
   }

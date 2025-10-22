@@ -54,3 +54,28 @@ create unique index if not exists file_changes_commit_path_idx on public.file_ch
 
 create index if not exists objects_recent_idx on public.objects (org_id, repo_id, created_at desc);
 create unique index if not exists objects_oid_idx on public.objects (org_id, repo_id, pack_oid);
+
+alter table public.refs enable row level security;
+alter table public.commits enable row level security;
+alter table public.file_changes enable row level security;
+alter table public.objects enable row level security;
+
+create policy allow_all_refs_rw on public.refs
+  for all
+  using (true)
+  with check (true);
+
+create policy allow_all_commits_rw on public.commits
+  for all
+  using (true)
+  with check (true);
+
+create policy allow_all_file_changes_rw on public.file_changes
+  for all
+  using (true)
+  with check (true);
+
+create policy allow_all_objects_rw on public.objects
+  for all
+  using (true)
+  with check (true);

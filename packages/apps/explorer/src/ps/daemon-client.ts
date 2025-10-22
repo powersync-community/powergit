@@ -1,3 +1,4 @@
+import type { PowerSyncImportJob } from '@shared/core'
 import { getAccessToken } from './supabase'
 
 const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8787'
@@ -119,6 +120,28 @@ async function postJson(path: string, body?: Record<string, unknown>): Promise<b
   }
 }
 
+async function fetchDaemonJson<T>(path: string, init?: RequestInit): Promise<{ status: number; data: T | null }> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(`${daemonBaseUrl}${path}`, { ...init, signal: controller.signal })
+    const status = res.status
+    let data: T | null = null
+    try {
+      data = (await res.json()) as T
+    } catch {
+      data = null
+    }
+    return { status, data }
+  } catch (error) {
+    console.warn('[Explorer][daemon] request failed', error)
+    return { status: 0, data: null }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export async function fetchDaemonAuthStatus(): Promise<DaemonAuthStatus | null> {
   if (!daemonEnabled) {
     return null
@@ -213,4 +236,75 @@ export async function completeDaemonDeviceLogin(payload: {
     obtainedAt: payload.obtainedAt ?? null,
     metadata: payload.metadata ?? null,
   })
+}
+
+export interface DaemonGithubImportRequest {
+  repoUrl: string
+  orgId?: string | null
+  repoId?: string | null
+  branch?: string | null
+}
+
+export async function requestGithubImport(payload: DaemonGithubImportRequest): Promise<PowerSyncImportJob> {
+  if (!daemonEnabled) {
+    throw new Error('PowerSync daemon integration is disabled in this environment.')
+  }
+  const { status, data } = await fetchDaemonJson<{ job?: PowerSyncImportJob; error?: string }>('/repos/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      repoUrl: payload.repoUrl,
+      orgId: payload.orgId ?? null,
+      repoId: payload.repoId ?? null,
+      branch: payload.branch ?? null,
+    }),
+  })
+
+  if (status === 202 || status === 200) {
+    const job = data?.job ?? null
+    if (!job) {
+      throw new Error('Daemon did not return an import job payload.')
+    }
+    return job
+  }
+
+  if (status === 400) {
+    const message = typeof data?.error === 'string' && data.error.trim().length > 0 ? data.error : 'Invalid GitHub repository details.'
+    throw new Error(message)
+  }
+
+  if (status === 0) {
+    throw new Error('PowerSync daemon is unreachable. Ensure it is running locally.')
+  }
+
+  throw new Error(`Daemon import request failed (${status}).`)
+}
+
+export async function fetchGithubImportJob(jobId: string): Promise<PowerSyncImportJob | null> {
+  if (!daemonEnabled) {
+    return null
+  }
+  const { status, data } = await fetchDaemonJson<{ job?: PowerSyncImportJob }>(`/repos/import/${encodeURIComponent(jobId)}`, {
+    method: 'GET',
+  })
+  if (status === 200) {
+    return data?.job ?? null
+  }
+  if (status === 404 || status === 0) {
+    return null
+  }
+  return null
+}
+
+export async function listGithubImportJobs(): Promise<PowerSyncImportJob[]> {
+  if (!daemonEnabled) {
+    return []
+  }
+  const { status, data } = await fetchDaemonJson<{ jobs?: PowerSyncImportJob[] }>('/repos/import', {
+    method: 'GET',
+  })
+  if (status === 200 && Array.isArray(data?.jobs)) {
+    return data.jobs
+  }
+  return []
 }

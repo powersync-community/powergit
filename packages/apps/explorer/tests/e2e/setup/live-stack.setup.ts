@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process'
 import net from 'node:net'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { test } from '@playwright/test'
 import { loadProfileEnvironment } from '../../../../../cli/src/profile-env.js'
 
@@ -71,6 +73,27 @@ function runCommand(command: string, args: string[], label: string): void {
   }
 }
 
+async function loginDaemonIfNeeded(): Promise<void> {
+  const daemonUrl =
+    process.env.POWERSYNC_DAEMON_URL ??
+    process.env.POWERSYNC_DAEMON_ENDPOINT ??
+    'http://127.0.0.1:5030'
+  const status = await fetch(`${daemonUrl.replace(/\/+$/, '')}/auth/status`)
+    .then(async (res) => (res.ok ? ((await res.json()) as { status?: string }) : null))
+    .catch(() => null)
+  if (status?.status === 'ready') {
+    return
+  }
+  const loginResult = spawnSync('pnpm', ['--filter', '@pkg/cli', 'exec', 'tsx', 'src/bin.ts', 'login', '--guest'], {
+    cwd: repoRoot,
+    env: { ...process.env },
+    stdio: 'inherit',
+  })
+  if (loginResult.status !== 0) {
+    throw new Error('Command failed (authenticate daemon guest): pnpm --filter @pkg/cli exec tsx src/bin.ts login --guest')
+  }
+}
+
 function applyProfileEnvironment(): void {
   const profileOverride = process.env.STACK_PROFILE ?? null
   const explicitStackEnv = process.env.POWERSYNC_STACK_ENV_PATH ?? null
@@ -86,6 +109,23 @@ function applyProfileEnvironment(): void {
     if (!(key in process.env)) {
       process.env[key] = value
     }
+  }
+
+  const stackEnvPath = profileResult.stackEnvPath
+  const alreadyScoped = Boolean(explicitStackEnv || process.env.__POWERSYNC_E2E_STACK_ENV_SCOPED__)
+  if (!alreadyScoped && stackEnvPath) {
+    const tempDir = mkdtempSync(join(tmpdir(), 'psgit-stack-env-'))
+    const tempPath = join(tempDir, 'stack.env')
+    let content = ''
+    try {
+      content = readFileSync(stackEnvPath, 'utf8')
+    } catch {
+      content = ''
+    }
+    writeFileSync(tempPath, content, 'utf8')
+    process.env.POWERSYNC_STACK_ENV_PATH = tempPath
+    process.env.__POWERSYNC_E2E_STACK_ENV_SCOPED__ = 'true'
+    process.env.__POWERSYNC_E2E_STACK_ENV_PATH__ = tempPath
   }
 }
 
@@ -104,6 +144,7 @@ test.describe('PowerSync dev stack (live)', () => {
 
   test('ensure stack is running', async () => {
     applyProfileEnvironment()
+    await loginDaemonIfNeeded()
 
     if (!shouldManageLocalStack()) {
       return
@@ -119,5 +160,17 @@ test.describe('PowerSync dev stack (live)', () => {
   test.afterAll(async () => {
     if (!startedBySuite) return
     runCommand(STOP_COMMAND[0]!, STOP_COMMAND.slice(1), 'stop dev stack')
+    const tempPath = process.env.__POWERSYNC_E2E_STACK_ENV_PATH__
+    if (tempPath) {
+      try {
+        rmSync(tempPath, { force: true })
+        rmSync(resolve(tempPath, '..'), { recursive: true, force: true })
+      } catch {
+        // ignore cleanup errors
+      } finally {
+        delete process.env.__POWERSYNC_E2E_STACK_ENV_PATH__
+        delete process.env.__POWERSYNC_E2E_STACK_ENV_SCOPED__
+      }
+    }
   })
 })

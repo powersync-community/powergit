@@ -1,3 +1,5 @@
+import { Socket } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import type { PowerSyncDatabase, SyncStreamSubscription } from '@powersync/node';
 import { resolveDaemonConfig, type ResolveDaemonConfigOptions } from './config.js';
@@ -14,6 +16,7 @@ import type { PersistPushResult, PushUpdateRow } from './queries.js';
 import { ensureRawTables } from './raw-table-migration.js';
 import { ensureLocalSchema } from './local-schema.js';
 import { SupabaseWriter } from './supabase-writer.js';
+import { GithubImportManager } from './importer.js';
 
 function normalizePackBytes(raw: unknown): { base64: string; size: number } | null {
   if (typeof raw !== 'string' || raw.length === 0) return null;
@@ -80,6 +83,49 @@ function buildStreamKey(target: NormalizedStreamTarget): string {
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value ?? ''))}`)
     .join('&');
   return `${target.id}?${query}`;
+}
+
+async function assertPortAvailable(host: string, port: number): Promise<void> {
+  const probeHost = host === '0.0.0.0' ? '127.0.0.1' : host === '::' ? '::1' : host;
+  await new Promise<void>((resolve, reject) => {
+    const socket = new Socket();
+    const cleanup = () => {
+      socket.removeAllListeners();
+      socket.destroy();
+    };
+    const fail = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    socket.setTimeout(300);
+    socket.once('connect', () => {
+      const friendly = new Error(
+        `[powersync-daemon] port ${port} on ${host} is already in use. Stop the existing daemon or set POWERSYNC_DAEMON_PORT to a free port.`,
+      ) as NodeJS.ErrnoException;
+      friendly.code = 'EADDRINUSE';
+      fail(friendly);
+    });
+    socket.once('timeout', () => {
+      cleanup();
+      resolve();
+    });
+    socket.once('error', (rawError) => {
+      const error = rawError as NodeJS.ErrnoException;
+      if (error?.code === 'ECONNREFUSED' || error?.code === 'EHOSTUNREACH' || error?.code === 'ENETUNREACH') {
+        cleanup();
+        resolve();
+      } else {
+        fail(error ?? new Error('Port probe failed'));
+      }
+    });
+
+    try {
+      socket.connect(port, probeHost);
+    } catch (error) {
+      fail(error as Error);
+    }
+  });
 }
 
 class StreamSubscriptionManager {
@@ -177,6 +223,7 @@ class StreamSubscriptionManager {
 
 export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Promise<void> {
   const config = await resolveDaemonConfig(options);
+  await assertPortAvailable(config.host, config.port);
   console.info(`[powersync-daemon] starting (db: ${config.dbPath})`);
 
   let authToken: string | null = config.token ?? null;
@@ -200,26 +247,66 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   await ensureRawTables(database, { verbose: true });
   await ensureLocalSchema(database);
   const subscriptionManager = new StreamSubscriptionManager(database);
+  const daemonBaseUrl = `http://127.0.0.1:${config.port}`;
+  const importManager = new GithubImportManager({
+    daemonBaseUrl,
+    subscribeStreams: async (targets) => {
+      await subscriptionManager.subscribe(targets);
+    },
+  });
 
   const supabaseUrl = process.env.POWERSYNC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? null;
   const supabaseServiceRole =
     process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? null;
+  const supabaseAnonKey =
+    process.env.POWERSYNC_SUPABASE_ANON_KEY ?? process.env.POWERSYNC_SUPABASE_PUBLIC_KEY ?? process.env.SUPABASE_ANON_KEY ?? null;
   const supabaseSchema = process.env.POWERSYNC_SUPABASE_SCHEMA ?? process.env.SUPABASE_DB_SCHEMA ?? undefined;
+  const supabaseWriterDisabled = (process.env.POWERSYNC_DISABLE_SUPABASE_WRITER ?? '').toLowerCase() === 'true';
 
   let supabaseWriter: SupabaseWriter | null = null;
-  if (supabaseUrl && supabaseServiceRole) {
+  if (!supabaseWriterDisabled) {
+    if (!supabaseUrl) {
+      throw new Error(
+        '[powersync-daemon] Supabase writer requires POWERSYNC_SUPABASE_URL (or SUPABASE_URL). Set POWERSYNC_DISABLE_SUPABASE_WRITER=true to run without Supabase replication.',
+      );
+    }
+
+    const supabaseApiKey = supabaseServiceRole ?? supabaseAnonKey;
+    if (!supabaseApiKey) {
+      throw new Error(
+        '[powersync-daemon] Supabase writer requires either POWERSYNC_SUPABASE_SERVICE_ROLE_KEY or POWERSYNC_SUPABASE_ANON_KEY. Set POWERSYNC_DISABLE_SUPABASE_WRITER=true to run without Supabase replication.',
+      );
+    }
+
+    const usingServiceRole = Boolean(supabaseServiceRole);
+    if (!usingServiceRole) {
+      console.warn(
+        '[powersync-daemon] Supabase writer running in UNSAFE mode — using anon/public key for writes. Configure POWERSYNC_SUPABASE_SERVICE_ROLE_KEY to lock this down.',
+      );
+    }
+
     supabaseWriter = new SupabaseWriter({
       database,
       config: {
         url: supabaseUrl,
-        serviceRoleKey: supabaseServiceRole,
+        apiKey: supabaseApiKey,
         schema: supabaseSchema,
+        accessToken: authToken ?? undefined,
       },
     });
-    supabaseWriter.start();
-    console.info('[powersync-daemon] Supabase writer started');
+    supabaseWriter.setAccessToken(authToken);
+    if (authToken) {
+      supabaseWriter.start();
+      console.info(
+        `[powersync-daemon] Supabase writer started (${usingServiceRole ? 'service-role key' : 'anon/public key'})`,
+      );
+    } else {
+      console.info(
+        `[powersync-daemon] Supabase writer initialised (${usingServiceRole ? 'service-role key' : 'anon/public key'}) — waiting for PowerSync auth before starting`,
+      );
+    }
   } else {
-    console.info('[powersync-daemon] Supabase writer disabled (missing POWERSYNC_SUPABASE_URL or POWERSYNC_SUPABASE_SERVICE_ROLE_KEY)');
+    console.info('[powersync-daemon] Supabase writer explicitly disabled (POWERSYNC_DISABLE_SUPABASE_WRITER=true)');
   }
   const connector = new DaemonPowerSyncConnector({
     credentialsProvider: async () => {
@@ -230,24 +317,71 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     },
   });
 
-  await connectWithSchemaRecovery(database, {
-    connector,
-    dbPath: config.dbPath,
-    includeDefaultStreams: false,
-  });
-  await ensureRawTables(database, { verbose: true });
-  await ensureLocalSchema(database);
-
-  const connectedAt = new Date();
-  console.info('[powersync-daemon] connected to PowerSync backend');
-
   let running = true;
+  let connected = false;
+  let connectedAt: Date | null = null;
+  let connectPromise: Promise<void> | null = null;
   const abortController = new AbortController();
   const requestShutdown = (reason: string) => {
     if (abortController.signal.aborted) return;
     running = false;
     console.info(`[powersync-daemon] shutdown requested (${reason}); shutting down`);
     abortController.abort();
+  };
+
+  const scheduleConnect = (reason: string) => {
+    if (!authEndpoint || !authToken) {
+      console.warn(`[powersync-daemon] skipping PowerSync connect (${reason}) — credentials missing`);
+      connected = false;
+      return;
+    }
+    if (connectPromise) {
+      return;
+    }
+    console.info(`[powersync-daemon] connecting to PowerSync backend (${reason})`);
+    connected = false;
+    const task = (async () => {
+      try {
+        await connectWithSchemaRecovery(database, {
+          connector,
+          dbPath: config.dbPath,
+          includeDefaultStreams: false,
+        });
+        await ensureRawTables(database, { verbose: true });
+        await ensureLocalSchema(database);
+        connected = true;
+        connectedAt = new Date();
+        console.info('[powersync-daemon] connected to PowerSync backend');
+      } catch (error) {
+        connected = false;
+        console.error('[powersync-daemon] failed to connect to PowerSync backend', error);
+        throw error;
+      }
+    })();
+    connectPromise = task.finally(() => {
+      connectPromise = null;
+    });
+    task.catch(() => undefined);
+  };
+
+  const waitForConnection = async (timeoutMs: number): Promise<boolean> => {
+    if (connected) {
+      return true;
+    }
+    const pending = connectPromise;
+    if (!pending) {
+      return connected;
+    }
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      await pending.catch(() => undefined);
+      return connected;
+    }
+    try {
+      await Promise.race([pending, delay(timeoutMs)]);
+    } catch {
+      // ignore race rejections
+    }
+    return connected;
   };
 
   if (config.initialStreams.length > 0) {
@@ -270,8 +404,8 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     port: config.port,
     getStatus: () => ({
       startedAt: startedAt.toISOString(),
-      connected: running,
-      connectedAt: connectedAt.toISOString(),
+      connected,
+      connectedAt: connectedAt?.toISOString(),
       streamCount: subscriptionManager.getActiveCount(),
     }),
     onShutdownRequested: () => {
@@ -284,8 +418,17 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     },
     getAuthStatus: () => {
       if (authEndpoint && authToken) {
+        if (connected) {
+          return {
+            status: 'ready',
+            token: authToken,
+            expiresAt: authExpiresAt,
+            context: buildAuthContext(),
+          };
+        }
         return {
-          status: 'ready',
+          status: 'pending',
+          reason: 'PowerSync connection pending; retry shortly.',
           token: authToken,
           expiresAt: authExpiresAt,
           context: buildAuthContext(),
@@ -312,6 +455,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
 
       if (tokenCandidate) {
         authToken = tokenCandidate;
+        supabaseWriter?.setAccessToken(authToken);
       }
       if (endpointCandidate) {
         authEndpoint = endpointCandidate;
@@ -335,6 +479,23 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       }
 
       console.info('[powersync-daemon] accepted guest credentials');
+      supabaseWriter?.setAccessToken(authToken);
+      supabaseWriter?.start();
+      scheduleConnect('guest-auth');
+      const readyTimeoutMs = Number.parseInt(
+        process.env.POWERSYNC_DAEMON_AUTH_READY_TIMEOUT_MS ?? '10000',
+        10,
+      );
+      const connectedNow = await waitForConnection(readyTimeoutMs);
+      if (!connectedNow) {
+        return {
+          status: 'pending',
+          reason: 'PowerSync connection pending; retry shortly.',
+          token: authToken,
+          expiresAt: authExpiresAt,
+          context: buildAuthContext(),
+        };
+      }
       return {
         status: 'ready',
         token: authToken,
@@ -347,6 +508,12 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       authEndpoint = null;
       authExpiresAt = null;
       authMetadata = null;
+      supabaseWriter?.setAccessToken(null);
+      if (supabaseWriter) {
+        await supabaseWriter.stop().catch(() => undefined);
+      }
+      connected = false;
+      connectedAt = null;
       return {
         status: 'auth_required',
         reason: 'Daemon logged out.',
@@ -362,6 +529,9 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       const result = await subscriptionManager.unsubscribe(streams);
       return result;
     },
+    listImportJobs: () => importManager.listJobs(),
+    getImportJob: (id) => importManager.getJob(id),
+    importGithubRepo: async (payload) => importManager.enqueue(payload),
     fetchRefs: ({ orgId, repoId, limit }) => listRefs(database, { orgId, repoId, limit }),
     listRepos: ({ orgId, limit }) => listRepos(database, { orgId, limit }),
     getRepoSummary: ({ orgId, repoId }) => getRepoSummary(database, { orgId, repoId }),
@@ -425,6 +595,8 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   const address = await server.listen();
   const listenHost = address.family === 'IPv6' ? `[${address.address}]` : address.address;
   console.info(`[powersync-daemon] listening on http://${listenHost}:${address.port}`);
+
+  scheduleConnect('initial-start');
 
   process.once('SIGINT', () => requestShutdown('SIGINT'));
   process.once('SIGTERM', () => requestShutdown('SIGTERM'));

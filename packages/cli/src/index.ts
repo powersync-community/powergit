@@ -51,12 +51,12 @@ export const DEFAULT_DAEMON_URL =
   process.env.POWERSYNC_DAEMON_URL ??
   process.env.POWERSYNC_DAEMON_ENDPOINT ??
   'http://127.0.0.1:5030'
-const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm --filter @svc/daemon start'
+const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm dev:daemon'
 const DAEMON_AUTOSTART_DISABLED = (process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
 const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000', 10)
 const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000', 10)
 const DAEMON_START_HINT =
-  'PowerSync daemon unreachable — start it with "pnpm --filter @svc/daemon start" or point POWERSYNC_DAEMON_URL at a running instance.'
+  'PowerSync daemon unreachable — start it with "pnpm dev:daemon" or point POWERSYNC_DAEMON_URL at a running instance.'
 
 export interface SeedDemoOptions {
   remoteUrl?: string

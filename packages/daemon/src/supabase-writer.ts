@@ -4,8 +4,9 @@ import type { AbstractPowerSyncDatabase, PowerSyncDatabase } from '@powersync/no
 
 export interface SupabaseWriterConfig {
   url: string;
-  serviceRoleKey: string;
+  apiKey: string;
   schema?: string;
+  accessToken?: string;
 }
 
 export interface SupabaseWriterOptions {
@@ -14,6 +15,7 @@ export interface SupabaseWriterOptions {
   pollIntervalMs?: number;
   retryDelayMs?: number;
   batchSize?: number;
+  failureThreshold?: number;
 }
 
 interface TableMetadata {
@@ -31,25 +33,51 @@ const TABLES: Record<string, TableMetadata> = {
 export class SupabaseWriter {
   private readonly database?: PowerSyncDatabase;
   private readonly supabase: SupabaseClient;
+  private readonly apiKey: string;
+  private readonly schema: string;
+  private accessToken: string | null;
   private readonly pollIntervalMs: number;
   private readonly retryDelayMs: number;
+  private readonly failureThreshold: number;
   private pollTimer: NodeJS.Timeout | null = null;
   private running = false;
   private inFlight: Promise<void> | null = null;
+  private consecutiveFailures = 0;
 
   constructor(options: SupabaseWriterOptions) {
     this.database = options.database;
-    this.supabase = createClient(options.config.url, options.config.serviceRoleKey, {
-      auth: { persistSession: false },
-      db: { schema: options.config.schema ?? 'public' },
+    const { apiKey, accessToken } = options.config;
+    this.apiKey = apiKey;
+    this.schema = options.config.schema ?? 'public';
+    this.accessToken = accessToken && accessToken.trim().length > 0 ? accessToken.trim() : null;
+
+    const scopedFetch = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const headers = new Headers((init && init.headers) ?? {});
+      headers.set('apikey', this.apiKey);
+      const bearer = this.accessToken ?? this.apiKey;
+      headers.set('Authorization', `Bearer ${bearer}`);
+      if (this.schema && this.schema !== 'public') {
+        headers.set('Accept-Profile', this.schema);
+        headers.set('Content-Profile', this.schema);
+      }
+      return fetch(input, { ...init, headers });
+    };
+
+    this.supabase = createClient(options.config.url, apiKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      db: { schema: this.schema },
       global: {
-        headers: {
-          Authorization: `Bearer ${options.config.serviceRoleKey}`,
-        },
+        fetch: scopedFetch,
       },
     }) as SupabaseClient;
     this.pollIntervalMs = options.pollIntervalMs ?? 1_000;
     this.retryDelayMs = options.retryDelayMs ?? 5_000;
+    this.failureThreshold = Math.max(1, options.failureThreshold ?? 5);
+  }
+
+  setAccessToken(token: string | null | undefined): void {
+    const trimmed = typeof token === 'string' ? token.trim() : '';
+    this.accessToken = trimmed.length > 0 ? trimmed : null;
   }
 
   start(): void {
@@ -82,11 +110,20 @@ export class SupabaseWriter {
       const execute = async () => {
         try {
           await this.uploadPending();
+          this.consecutiveFailures = 0;
           if (this.running) {
             this.scheduleNext(this.pollIntervalMs);
           }
         } catch (error) {
           console.error('[powersync-daemon] supabase upload loop failed', error);
+          this.consecutiveFailures += 1;
+          if (this.consecutiveFailures >= this.failureThreshold) {
+            console.error(
+              `[powersync-daemon] supabase writer aborting after ${this.consecutiveFailures} consecutive failures`,
+            );
+            this.running = false;
+            throw error;
+          }
           if (this.running) {
             this.scheduleNext(this.retryDelayMs);
           }
@@ -165,16 +202,27 @@ export class SupabaseWriter {
   }
 
   private buildRow(entry: CrudEntry): Record<string, unknown> | null {
-    const source =
-      entry.op === 'DELETE'
-        ? entry.previousValues ?? entry.opData
-        : entry.opData ?? entry.previousValues;
-    const base: Record<string, unknown> = source && typeof source === 'object' ? { ...source } : {};
-    if (typeof base.id !== 'string' && entry.id) {
-      base.id = entry.id;
+    const merged: Record<string, unknown> = {};
+    const merge = (value: unknown) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+      Object.assign(merged, value as Record<string, unknown>);
+    };
+    if (entry.op === 'DELETE') {
+      merge(entry.previousValues);
+      merge(entry.opData);
+    } else {
+      merge(entry.previousValues);
+      merge(entry.opData);
     }
-    if (typeof base.id !== 'string') return null;
-    return base;
+    if (typeof merged.id !== 'string' || merged.id.length === 0) {
+      if (entry.id && typeof entry.id === 'string' && entry.id.length > 0) {
+        merged.id = entry.id;
+      }
+    }
+    if (typeof merged.id !== 'string' || merged.id.length === 0) {
+      return null;
+    }
+    return merged;
   }
 
   private async applyUpserts(table: string, conflictTarget: string, rows: Record<string, unknown>[]): Promise<void> {
@@ -189,9 +237,13 @@ export class SupabaseWriter {
       return copy;
     });
 
-    const { error } = await this.supabase.from(table).upsert(sanitized, { onConflict: conflictTarget });
-    if (error) {
-      throw new Error(`Supabase upsert failed for ${table}: ${error.message}`);
+    const maxRowsPerBatch = table === 'objects' ? 1 : 25;
+    for (let index = 0; index < sanitized.length; index += maxRowsPerBatch) {
+      const slice = sanitized.slice(index, index + maxRowsPerBatch);
+      const { error } = await this.supabase.from(table).upsert(slice, { onConflict: conflictTarget });
+      if (error) {
+        throw new Error(`Supabase upsert failed for ${table}: ${error.message}`);
+      }
     }
   }
 
@@ -204,12 +256,35 @@ export class SupabaseWriter {
       return;
     }
 
-    const { error } = await this.supabase
-      .from(table)
-      .delete()
-      .in('id', ids);
-    if (error) {
-      throw new Error(`Supabase delete failed for ${table}: ${error.message}`);
+    const maxEncodedLength = 1200;
+    let currentBatch: string[] = [];
+    let currentLength = 0;
+
+    const flush = async () => {
+      if (currentBatch.length === 0) return;
+      const { error } = await this.supabase
+        .from(table)
+        .delete()
+        .in('id', currentBatch);
+      if (error) {
+        throw new Error(`Supabase delete failed for ${table}: ${error.message}`);
+      }
+      currentBatch = [];
+      currentLength = 0;
+    };
+
+    for (const id of ids) {
+      const encodedLength = encodeURIComponent(id).length + 1;
+      const projected = currentLength + encodedLength;
+      if (currentBatch.length > 0 && projected > maxEncodedLength) {
+        await flush();
+      }
+      currentBatch.push(id);
+      currentLength += encodedLength;
+    }
+
+    if (currentBatch.length > 0) {
+      await flush();
     }
   }
 }

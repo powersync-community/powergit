@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import os from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -31,6 +33,14 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const repoRoot = resolve(__dirname, '..', '..', '..', '..')
 
+const DAEMON_TOKEN_ENV_VARS = [
+  'POWERSYNC_DAEMON_GUEST_TOKEN',
+  'POWERSYNC_DAEMON_TOKEN',
+  'POWERSYNC_SERVICE_TOKEN',
+  'POWERSYNC_TOKEN',
+  'PSGIT_TEST_REMOTE_TOKEN',
+]
+
 function hydrateProfileEnv() {
   const profileOverride = process.env.STACK_PROFILE ?? null
   const explicitStackEnv = process.env.POWERSYNC_STACK_ENV_PATH ?? null
@@ -44,7 +54,7 @@ function hydrateProfileEnv() {
   })
   for (const [key, value] of Object.entries(profileResult.combinedEnv)) {
     const current = process.env[key]
-    if (!current || !current.trim()) {
+    if ((!current || !current.trim()) && !DAEMON_TOKEN_ENV_VARS.includes(key)) {
       process.env[key] = value
     }
   }
@@ -93,14 +103,80 @@ function requireEnv(name: string): string {
   return value.trim()
 }
 
-function runCliCommand(args: string[], label: string) {
+type CliCommandOptions = {
+  tolerateFailure?: boolean
+}
+
+function runCliCommand(args: string[], label: string, options: CliCommandOptions = {}) {
   const result = spawnSync('pnpm', ['--filter', '@pkg/cli', 'exec', 'tsx', 'src/bin.ts', ...args], {
     cwd: repoRoot,
     env: { ...process.env },
     stdio: 'inherit',
   })
   if (result.status !== 0) {
+    if (options.tolerateFailure) {
+      return
+    }
     throw new Error(`CLI command failed (${label}): pnpm --filter @pkg/cli exec tsx src/bin.ts ${args.join(' ')}`)
+  }
+}
+
+function clearDaemonTokenEnvVars() {
+  const env = process.env as Record<string, string | undefined>
+  for (const key of DAEMON_TOKEN_ENV_VARS) {
+    if (env[key]) {
+      delete env[key]
+    }
+  }
+}
+
+function scrubStackEnvFile() {
+  const stackEnvPath =
+    process.env.POWERSYNC_STACK_ENV_PATH ?? resolve(repoRoot, '.env.powersync-stack')
+  if (!existsSync(stackEnvPath)) return
+  try {
+    const original = readFileSync(stackEnvPath, 'utf8')
+    const filtered = original
+      .split('\n')
+      .filter((line) => !DAEMON_TOKEN_ENV_VARS.some((key) => line.includes(key)))
+      .join('\n')
+    if (filtered !== original) {
+      writeFileSync(stackEnvPath, filtered)
+    }
+  } catch (error) {
+    console.warn('[live-cli] failed to scrub stack env file', error)
+  }
+}
+
+function scrubProfileToken() {
+  const profilesPath = resolve(os.homedir(), '.psgit', 'profiles.json')
+  if (!existsSync(profilesPath)) return
+  try {
+    const raw = readFileSync(profilesPath, 'utf8')
+    const data = JSON.parse(raw) as Record<string, any>
+    let mutated = false
+    for (const profile of Object.values(data ?? {}) as any[]) {
+      if (profile && typeof profile === 'object' && profile.powersync && profile.powersync.token) {
+        delete profile.powersync.token
+        mutated = true
+      }
+    }
+    if (mutated) {
+      writeFileSync(profilesPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
+    }
+  } catch (error) {
+    console.warn('[live-cli] failed to scrub psgit profile token', error)
+  }
+}
+
+function resetDaemonGuestSession() {
+  scrubStackEnvFile()
+  scrubProfileToken()
+  clearDaemonTokenEnvVars()
+  try {
+    runCliCommand(['logout'], 'clear daemon session', { tolerateFailure: true })
+  } catch {
+    // ignore failures when daemon already logged out
   }
 }
 
@@ -238,6 +314,7 @@ test.describe('CLI-seeded repo (live PowerSync)', () => {
 
   test.beforeAll(async () => {
     hydrateProfileEnv()
+    resetDaemonGuestSession()
     REQUIRED_ENV_VARS.forEach(requireEnv)
 
     supabaseEmail = requireEnv('POWERSYNC_SUPABASE_EMAIL')
@@ -273,7 +350,7 @@ test.describe('CLI-seeded repo (live PowerSync)', () => {
     await page.waitForURL(/\/$/, { timeout: WAIT_TIMEOUT_MS })
 
     await page.goto(`${BASE_URL}/org/${orgId}/repo/${repoId}/branches`)
-    await expect(page.getByText(new RegExp(`Branches \\(${orgId}/${repoId}\\)`))).toBeVisible({ timeout: WAIT_TIMEOUT_MS })
+    await expect(page.getByTestId('branch-heading')).toBeVisible({ timeout: WAIT_TIMEOUT_MS })
     const powerSyncStatus = await readPowerSyncStatus(page)
     console.log('[live-cli] PowerSync status snapshot:', powerSyncStatus)
     const failFastTimeout = Math.min(FAIL_FAST_TIMEOUT_MS, WAIT_TIMEOUT_MS)
@@ -329,10 +406,10 @@ test.describe('CLI-seeded repo (live PowerSync)', () => {
       }
     })
     console.log('[live-cli] PowerSync refs query:', powerSyncRefs)
-    const branchItems = page.locator('ul.space-y-1 li')
+    const branchItems = page.getByTestId('branch-item')
     await page.waitForFunction(
       (names) => {
-        const items = Array.from(document.querySelectorAll('ul.space-y-1 li'))
+        const items = Array.from(document.querySelectorAll('[data-testid="branch-item"]'))
         return names.every((name) => items.some((item) => item.textContent?.includes(name)))
       },
       expectedBranches.map((branch) => branch.name ?? ''),
@@ -370,11 +447,11 @@ test.describe('CLI-seeded repo (live PowerSync)', () => {
     expect(fixtureStore).toBeNull()
 
     await page.goto(`${BASE_URL}/org/${orgId}/repo/${repoId}/commits`)
-    await expect(page.getByText(new RegExp(`Commits \\(${orgId}/${repoId}\\)`))).toBeVisible({ timeout: WAIT_TIMEOUT_MS })
-    const commitItems = page.locator('ul.space-y-2 li')
+    await expect(page.getByTestId('commit-heading')).toBeVisible({ timeout: WAIT_TIMEOUT_MS })
+    const commitItems = page.getByTestId('commit-item')
     await page.waitForFunction(
       () => {
-        return Array.from(document.querySelectorAll('ul.space-y-2 li')).some((item) =>
+        return Array.from(document.querySelectorAll('[data-testid="commit-item"]')).some((item) =>
           item.textContent?.includes('Import demo template content')
         )
       },

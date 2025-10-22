@@ -3,6 +3,7 @@ import * as React from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useLiveQuery } from '@tanstack/react-db'
 import { useCollections } from '@tsdb/collections'
+import { GithubImportCard } from '../components/GithubImportCard'
 import type { Database } from '@ps/schema'
 
 export const Route = createFileRoute('/' as any)({
@@ -80,6 +81,8 @@ export function Home() {
           authentication to populate a sample repo.
         </p>
       </header>
+
+      <GithubImportCard />
 
       {isEmpty ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 px-6 py-8 text-center text-slate-500">

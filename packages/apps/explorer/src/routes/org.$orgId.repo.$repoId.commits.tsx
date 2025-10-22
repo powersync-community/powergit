@@ -34,11 +34,13 @@ function Commits() {
   const commits = fixture?.commits?.length ? fixture.commits : liveCommits
 
   return (
-    <div className="space-y-3">
-      <h3 className="font-semibold text-lg">Commits ({orgId}/{repoId})</h3>
-      <ul className="space-y-2">
+    <div className="space-y-3" data-testid="commit-view">
+      <h3 className="font-semibold text-lg" data-testid="commit-heading">
+        Commits ({orgId}/{repoId})
+      </h3>
+      <ul className="space-y-2" data-testid="commit-list">
         {commits.map((c) => (
-          <li key={c.sha ?? ''} className="border rounded p-2 bg-white">
+          <li key={c.sha ?? ''} className="border rounded p-2 bg-white" data-testid="commit-item">
             <div className="text-sm text-gray-500">
               {c.authored_at ?? 'unknown'} —{' '}
               <span className="font-mono">{c.sha?.slice(0, 7) ?? '———'}</span>

@@ -65,8 +65,8 @@ test.describe('Explorer repo lists', () => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/branches`)
     await setRepoFixture(page, REPO_FIXTURE)
 
-    await expect(page.getByText('Branches (acme/infra)')).toBeVisible()
-    const branchItems = page.locator('ul.space-y-1 li')
+    await expect(page.getByTestId('branch-heading')).toBeVisible()
+    const branchItems = page.getByTestId('branch-item')
     await expect(branchItems).toHaveCount(2)
     await expect(branchItems.nth(0)).toContainText('main')
     await expect(branchItems.nth(1)).toContainText('develop')
@@ -79,8 +79,8 @@ test.describe('Explorer repo lists', () => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/commits`)
     await setRepoFixture(page, REPO_FIXTURE)
 
-    await expect(page.getByText('Commits (acme/infra)')).toBeVisible()
-    const commitItems = page.locator('ul.space-y-2 li')
+    await expect(page.getByTestId('commit-heading')).toBeVisible()
+    const commitItems = page.getByTestId('commit-item')
     await expect(commitItems).toHaveCount(2)
 
     const firstCommit = commitItems.first()
@@ -97,8 +97,8 @@ test.describe('Explorer repo lists', () => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/files`)
     await setRepoFixture(page, REPO_FIXTURE)
 
-    await expect(page.getByText('Recent file changes (acme/infra)')).toBeVisible()
-    const changeItems = page.locator('ul.space-y-1 li')
+    await expect(page.getByTestId('file-change-heading')).toBeVisible()
+    const changeItems = page.getByTestId('file-change-item')
     await expect(changeItems).toHaveCount(2)
     await expect(changeItems.nth(0)).toContainText('src/replication.ts')
     await expect(changeItems.nth(0)).toContainText('+120')
@@ -112,7 +112,7 @@ test.describe('Explorer repo lists', () => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/branches`)
     await setRepoFixture(page, REPO_FIXTURE)
 
-    const branchItems = page.locator('ul.space-y-1 li')
+    const branchItems = page.getByTestId('branch-item')
     await expect(branchItems).toHaveCount(2)
     await expect(branchItems.first()).toContainText('main')
 

@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { loadProfileEnvironment } from '../../../cli/src/profile-env.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -56,7 +57,95 @@ function applyDefaults(env) {
   }
 }
 
-function main() {
+let daemonProcess = null
+
+function normalizeBaseUrl(value) {
+  return value.replace(/\/+$/, '')
+}
+
+async function isDaemonResponsive(baseUrl) {
+  const target = `${normalizeBaseUrl(baseUrl)}/health`
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 2000)
+  try {
+    const response = await fetch(target, { signal: controller.signal })
+    clearTimeout(timeout)
+    return response.ok
+  } catch {
+    clearTimeout(timeout)
+    return false
+  }
+}
+
+async function startDaemonIfNeeded(env, profileName) {
+  const autostart =
+    (env.POWERSYNC_DAEMON_AUTOSTART ?? process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() !== 'false'
+  if (!autostart) {
+    return
+  }
+
+  const baseUrl =
+    env.POWERSYNC_DAEMON_URL ??
+    env.POWERSYNC_DAEMON_ENDPOINT ??
+    process.env.POWERSYNC_DAEMON_URL ??
+    process.env.POWERSYNC_DAEMON_ENDPOINT ??
+    'http://127.0.0.1:5030'
+
+  if (await isDaemonResponsive(baseUrl)) {
+    console.info(`[explorer] daemon already running at ${baseUrl}`)
+    return
+  }
+
+  const args = ['dev:daemon']
+  if (profileName) {
+    args.push('--profile', profileName)
+  }
+
+  daemonProcess = spawn('pnpm', args, {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    env,
+  })
+
+  daemonProcess.on('error', (error) => {
+    console.error('[explorer] failed to launch daemon:', error)
+  })
+
+  const startTimeoutMs = Number.parseInt(env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '10000', 10)
+  const deadline = Date.now() + startTimeoutMs
+
+  while (Date.now() < deadline) {
+    if (daemonProcess.exitCode !== null) {
+      throw new Error('Daemon process exited before becoming ready.')
+    }
+    if (await isDaemonResponsive(baseUrl)) {
+      console.info('[explorer] daemon reported healthy')
+      return
+    }
+    await delay(200)
+  }
+
+  throw new Error('Daemon did not become ready in time.')
+}
+
+function attachCleanup() {
+  const cleanup = () => {
+    if (daemonProcess && daemonProcess.exitCode === null) {
+      daemonProcess.kill('SIGTERM')
+    }
+  }
+  process.once('exit', cleanup)
+  process.once('SIGINT', () => {
+    cleanup()
+    process.exit(130)
+  })
+  process.once('SIGTERM', () => {
+    cleanup()
+    process.exit(143)
+  })
+}
+
+async function main() {
   const options = parseOptions(process.argv.slice(2))
   let profileResult
   try {
@@ -76,6 +165,14 @@ function main() {
   applyDefaults(mergedEnv)
 
   if (!options.printEnv) {
+    try {
+      await startDaemonIfNeeded(mergedEnv, profileResult.profile?.name)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[explorer] ${message}`)
+      process.exit(1)
+    }
+
     console.info('[explorer] dev server starting with:')
     console.info(`  profile=${profileResult.profile.name}`)
     if (profileResult.stackEnvPath) {
@@ -94,6 +191,8 @@ function main() {
     return
   }
 
+  attachCleanup()
+
   const child = spawn(
     'vite',
     options.passthrough,
@@ -104,6 +203,9 @@ function main() {
   )
 
   child.on('close', (code, signal) => {
+    if (daemonProcess && daemonProcess.exitCode === null) {
+      daemonProcess.kill('SIGTERM')
+    }
     if (signal) {
       process.kill(process.pid, signal)
     } else {
@@ -117,4 +219,8 @@ function main() {
   })
 }
 
-main()
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error('[explorer] unexpected error:', message)
+  process.exit(1)
+})

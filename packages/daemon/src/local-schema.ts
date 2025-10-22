@@ -9,9 +9,9 @@ export async function ensureLocalSchema(database: PowerSyncDatabase): Promise<vo
       }
     }
 
-    // Git metadata tables require triggers to forward local writes into powersync_crud so that
-    // PowerSync can upload mutations to the backend. We recreate the triggers on each
-    // bootstrap to ensure schema drift is handled.
+    // Git metadata tables require triggers to forward local writes into the powersync_crud
+    // virtual table so PowerSync can upload mutations to the backend. We recreate the triggers
+    // on each bootstrap to ensure schema drift is handled.
     const triggerSpecs: Array<{ drop: string; create: string }> = [
       {
         drop: 'DROP TRIGGER IF EXISTS ps_refs_insert',

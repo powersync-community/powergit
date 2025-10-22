@@ -576,9 +576,31 @@ async function collectPushSummary(updates: PushRequest[]): Promise<GitPushSummar
     normalizedRefs.push({ name: 'HEAD', target: headTarget })
   }
 
+  const refMap = new Map<string, { name: string; target: string }>()
+  for (const ref of normalizedRefs) {
+    if (!ref.name) continue
+    refMap.set(ref.name, ref)
+  }
+
+  const localRefs = await listLocalRefs().catch((error) => {
+    console.warn('[powersync] failed to enumerate local refs', error)
+    return [] as Array<{ name: string; target: string }>
+  })
+  for (const ref of localRefs) {
+    if (!ref.name) continue
+    if (!refMap.has(ref.name)) {
+      refMap.set(ref.name, ref)
+    }
+    if (!refMap.get(ref.name)?.target && ref.target) {
+      refMap.set(ref.name, { name: ref.name, target: ref.target })
+    }
+  }
+
+  const combinedRefs = Array.from(refMap.values())
+
   return {
     head: headTarget && headTarget !== ZERO_SHA ? headTarget : undefined,
-    refs: normalizedRefs,
+    refs: combinedRefs,
     commits: commitSummaries,
   }
 }
@@ -644,6 +666,23 @@ function parseGitStat(value: string): number {
   if (!value || value === '-' || value === 'binary') return 0
   const parsed = Number.parseInt(value, 10)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+async function listLocalRefs(): Promise<Array<{ name: string; target: string }>> {
+  const output = await execGit(['show-ref']).catch((error) => {
+    console.warn('[powersync] git show-ref failed', error)
+    return ''
+  })
+  if (!output) return []
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [sha, name] = line.split(/\s+/, 2)
+      return { name: name ?? '', target: sha ?? '' }
+    })
+    .filter((entry) => entry.name.startsWith('refs/heads/') || entry.name.startsWith('refs/tags/'))
 }
 
 async function execGit(args: string[]): Promise<string> {

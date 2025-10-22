@@ -85,6 +85,26 @@ describe('daemon auth helpers', () => {
     expect(result.status).toEqual({ status: 'ready', token: 'guest-token', expiresAt: null, context: null })
   })
 
+  it('fetches auth status when guest response lacks ready token', async () => {
+    mocks.postDaemonAuthGuestMock.mockResolvedValueOnce({ status: 'pending', reason: 'waiting', context: null })
+    mocks.fetchDaemonAuthStatusMock.mockResolvedValueOnce({
+      status: 'ready',
+      token: 'refreshed-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      context: null,
+    })
+
+    const result = await loginWithDaemonGuest({})
+    expect(mocks.postDaemonAuthGuestMock).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchDaemonAuthStatusMock).toHaveBeenCalledTimes(1)
+    expect(result.status).toEqual({
+      status: 'ready',
+      token: 'refreshed-token',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      context: null,
+    })
+  })
+
   it('polls daemon device flow until ready', async () => {
     mocks.fetchDaemonAuthStatusMock.mockResolvedValueOnce({ status: 'pending', reason: 'waiting', context: null })
     mocks.fetchDaemonAuthStatusMock.mockResolvedValueOnce({

@@ -17,6 +17,9 @@ const WORKER_MODULE = (() => {
   }
 })();
 
+const DEFAULT_CONNECT_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_CONNECT_TIMEOUT_MS ?? '30000', 10);
+const DEFAULT_READY_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_READY_TIMEOUT_MS ?? '30000', 10);
+
 export interface CreateDatabaseOptions {
   dbPath: string;
   readWorkerCount?: number;
@@ -27,6 +30,8 @@ export interface ConnectOptions {
   dbPath: string;
   includeDefaultStreams?: boolean;
   reconnectDelayMs?: number;
+  connectTimeoutMs?: number;
+  readyTimeoutMs?: number;
 }
 
 function isSchemaMismatchError(error: unknown): boolean {
@@ -35,9 +40,36 @@ function isSchemaMismatchError(error: unknown): boolean {
   return message.includes('schema mismatch') || message.includes('schema differences');
 }
 
+class PowerSyncTimeoutError extends Error {
+  readonly stage: string;
+
+  constructor(stage: string, timeoutMs: number) {
+    super(`PowerSync ${stage} timed out after ${timeoutMs}ms`);
+    this.name = 'PowerSyncTimeoutError';
+    this.stage = stage;
+  }
+}
+
 async function removeLocalReplica(dbPath: string): Promise<void> {
   await fs.rm(dbPath, { force: true });
   await fs.mkdir(dirname(dbPath), { recursive: true });
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, stage: string): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return promise;
+  }
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new PowerSyncTimeoutError(stage, timeoutMs)), timeoutMs);
+    });
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 export async function createPowerSyncDatabase(options: CreateDatabaseOptions): Promise<PowerSyncDatabase> {
@@ -71,12 +103,23 @@ export async function createPowerSyncDatabase(options: CreateDatabaseOptions): P
 
 export async function connectWithSchemaRecovery(
   database: PowerSyncDatabase,
-  { connector, dbPath, includeDefaultStreams = false, reconnectDelayMs = 1_000 }: ConnectOptions,
+  {
+    connector,
+    dbPath,
+    includeDefaultStreams = false,
+    reconnectDelayMs = 1_000,
+    connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
+    readyTimeoutMs = DEFAULT_READY_TIMEOUT_MS,
+  }: ConnectOptions,
 ): Promise<void> {
   while (true) {
     try {
-      await database.connect(connector, { clientImplementation: SyncClientImplementation.RUST, includeDefaultStreams });
-      await database.waitForReady();
+      await withTimeout(
+        database.connect(connector, { clientImplementation: SyncClientImplementation.RUST, includeDefaultStreams }),
+        connectTimeoutMs,
+        'connect',
+      );
+      await withTimeout(database.waitForReady(), readyTimeoutMs, 'waitForReady');
       return;
     } catch (error) {
       if (isSchemaMismatchError(error)) {
@@ -90,7 +133,14 @@ export async function connectWithSchemaRecovery(
         continue;
       }
 
-      console.error('[powersync-daemon] failed to connect to PowerSync backend', error);
+      if (error instanceof PowerSyncTimeoutError) {
+        console.error(`[powersync-daemon] ${error.message}`);
+      } else {
+        console.error('[powersync-daemon] failed to connect to PowerSync backend', error);
+      }
+
+      await database.close({ disconnect: true }).catch(() => undefined);
+      await database.init().catch(() => undefined);
       await delay(reconnectDelayMs).catch(() => undefined);
     }
   }

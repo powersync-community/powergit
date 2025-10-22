@@ -164,13 +164,21 @@ export async function loginWithSupabasePassword(options: LoginOptions = {}): Pro
 
 export async function loginWithDaemonGuest(options: DaemonGuestLoginOptions = {}): Promise<DaemonGuestLoginResult> {
   const baseUrl = await resolveDaemonBaseUrl({ daemonUrl: options.daemonUrl })
-  const status = await postDaemonAuthGuest(baseUrl, {
+  let status = await postDaemonAuthGuest(baseUrl, {
     token: options.token,
     endpoint: options.endpoint,
     expiresAt: options.expiresAt ?? null,
     obtainedAt: options.obtainedAt ?? null,
     metadata: options.metadata ?? null,
   })
+
+  if (!status || status.status !== 'ready' || !status.token) {
+    const refreshed = await fetchDaemonAuthStatus(baseUrl)
+    if (refreshed && refreshed.status === 'ready' && refreshed.token) {
+      status = refreshed
+    }
+  }
+
   return { baseUrl, status }
 }
 

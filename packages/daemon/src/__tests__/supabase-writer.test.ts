@@ -154,7 +154,7 @@ describe('SupabaseWriter', () => {
 
     const writer = new SupabaseWriter({
       database: database as unknown as PowerSyncDatabase,
-      config: { url: 'http://example.local', serviceRoleKey: 'service-key' },
+      config: { url: 'http://example.local', apiKey: 'service-key' },
       pollIntervalMs: 10,
       retryDelayMs: 50,
       batchSize: 4,
@@ -200,5 +200,55 @@ describe('SupabaseWriter', () => {
     });
 
     expect(createClientMock).toHaveBeenCalledWith('http://example.local', 'service-key', expect.any(Object));
+  });
+
+  it('merges previous values when upserting partial updates', async () => {
+    const partialUpdate = createEntry({
+      table: 'refs',
+      op: UpdateType.PUT,
+      id: 'demo/infra/refs/heads/dev',
+      opData: {
+        id: 'demo/infra/refs/heads/dev',
+        target_sha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        updated_at: '2024-01-02T00:00:00Z',
+      },
+      previousValues: {
+        id: 'demo/infra/refs/heads/dev',
+        org_id: 'demo',
+        repo_id: 'infra',
+        name: 'refs/heads/dev',
+        target_sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
+    });
+
+    const { tx, complete } = createTransaction([partialUpdate]);
+    const database = new FakeDatabase([tx]);
+
+    const writer = new SupabaseWriter({
+      database: database as unknown as PowerSyncDatabase,
+      config: { url: 'http://example.local', apiKey: 'service-key' },
+      pollIntervalMs: 5,
+    });
+
+    writer.start();
+
+    await waitForExpect(() => {
+      expect(complete).toHaveBeenCalledTimes(1);
+    });
+
+    await writer.stop();
+
+    const refUpsert = currentSupabaseStub.upsertCalls.find((call) => call.table === 'refs');
+    expect(refUpsert).toBeTruthy();
+    expect(refUpsert?.rows).toHaveLength(1);
+    expect(refUpsert?.rows[0]).toMatchObject({
+      id: 'demo/infra/refs/heads/dev',
+      org_id: 'demo',
+      repo_id: 'infra',
+      name: 'refs/heads/dev',
+      target_sha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      updated_at: '2024-01-02T00:00:00Z',
+    });
   });
 });

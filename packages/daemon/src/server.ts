@@ -1,8 +1,9 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import busboy from 'busboy';
-import type { GitPushSummary, RefRow, RepoSummaryRow } from '@shared/core';
+import type { GitPushSummary, PowerSyncImportJob, RefRow, RepoSummaryRow } from '@shared/core';
 import type { PersistPushResult, PushUpdateRow } from './queries.js';
+import { ImportValidationError } from './importer.js';
 
 export interface DaemonStatusSnapshot {
   startedAt: string;
@@ -36,6 +37,13 @@ export interface StreamSubscriptionTarget {
   parameters?: Record<string, unknown> | null;
 }
 
+export interface GithubImportPayload {
+  repoUrl: string;
+  orgId?: string | null;
+  repoId?: string | null;
+  branch?: string | null;
+}
+
 export interface DaemonServerCorsOptions {
   origins?: string[];
   allowHeaders?: string[];
@@ -60,6 +68,9 @@ export interface DaemonServerOptions {
   listStreams?: () => Promise<string[]> | string[];
   subscribeStreams?: (streams: StreamSubscriptionTarget[]) => Promise<SubscribeStreamsResult> | SubscribeStreamsResult;
   unsubscribeStreams?: (streams: StreamSubscriptionTarget[]) => Promise<UnsubscribeStreamsResult> | UnsubscribeStreamsResult;
+  listImportJobs?: () => Promise<PowerSyncImportJob[]> | PowerSyncImportJob[];
+  getImportJob?: (id: string) => Promise<PowerSyncImportJob | null> | PowerSyncImportJob | null;
+  importGithubRepo?: (payload: GithubImportPayload) => Promise<PowerSyncImportJob>;
   cors?: DaemonServerCorsOptions;
 }
 
@@ -115,6 +126,10 @@ export interface DaemonPushRequest {
 export type DaemonPushResponse = PersistPushResult & { message?: string };
 
 function allowedMethodsForPath(pathname: string, options: DaemonServerOptions): string[] | null {
+  if (/^\/repos\/import\/[^/]+$/.test(pathname)) {
+    return options.getImportJob ? ['GET'] : null;
+  }
+
   switch (pathname) {
     case '/auth/status':
       return options.getAuthStatus ? ['GET'] : null;
@@ -126,6 +141,12 @@ function allowedMethodsForPath(pathname: string, options: DaemonServerOptions): 
       return options.handleAuthLogout ? ['POST'] : null;
     case '/streams':
       return ['GET', 'POST', 'DELETE'];
+    case '/repos/import': {
+      const methods: string[] = [];
+      if (options.listImportJobs) methods.push('GET');
+      if (options.importGithubRepo) methods.push('POST');
+      return methods.length > 0 ? methods : null;
+    }
     default:
       return null;
   }
@@ -434,6 +455,72 @@ export function createDaemonServer(options: DaemonServerOptions): DaemonServer {
           }
         }
         return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/repos/import' && options.listImportJobs) {
+        try {
+          const jobs = await options.listImportJobs();
+          applyCorsHeaders(res, originHeader);
+          sendJson(res, 200, { jobs: jobs ?? [] });
+        } catch (error) {
+          console.error('[powersync-daemon] failed to list import jobs', error);
+          res.statusCode = 500;
+          res.end();
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/repos/import' && options.importGithubRepo) {
+        try {
+          const body = await readJsonBody<GithubImportPayload>(req);
+          if (!body || typeof body.repoUrl !== 'string' || body.repoUrl.trim().length === 0) {
+            applyCorsHeaders(res, originHeader);
+            sendJson(res, 400, { error: 'repoUrl is required' });
+            return;
+          }
+          const payload: GithubImportPayload = {
+            repoUrl: body.repoUrl,
+            orgId: typeof body.orgId === 'string' ? body.orgId : null,
+            repoId: typeof body.repoId === 'string' ? body.repoId : null,
+            branch: typeof body.branch === 'string' ? body.branch : null,
+          };
+          const job = await options.importGithubRepo(payload);
+          applyCorsHeaders(res, originHeader);
+          sendJson(res, 202, { job });
+        } catch (error) {
+          if (error instanceof ImportValidationError) {
+            applyCorsHeaders(res, originHeader);
+            sendJson(res, 400, { error: error.message });
+            return;
+          }
+          console.error('[powersync-daemon] failed to enqueue GitHub import', error);
+          res.statusCode = 500;
+          res.end();
+        }
+        return;
+      }
+
+      if (req.method === 'GET' && options.getImportJob) {
+        const match = /^\/repos\/import\/([^/]+)$/.exec(url.pathname);
+        if (match) {
+          const [, rawJobId] = match;
+          const jobId = decodeURIComponent(rawJobId);
+          try {
+            const job = await options.getImportJob(jobId);
+            if (!job) {
+              res.statusCode = 404;
+              res.end();
+              return;
+            }
+            applyCorsHeaders(res, originHeader);
+            sendJson(res, 200, { job });
+          } catch (error) {
+            console.error('[powersync-daemon] failed to fetch import job', error);
+            res.statusCode = 500;
+            res.end();
+          }
+          return;
+        }
       }
 
       if (req.method === 'POST' && options.fetchPack) {
