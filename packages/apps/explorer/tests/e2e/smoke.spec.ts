@@ -93,20 +93,27 @@ test.describe('Explorer repo lists', () => {
     await expect(secondCommit).toContainText('Ada Lovelace')
   })
 
-  test('renders file changes summary with counts', async ({ page }) => {
-    await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/files`)
-    await setRepoFixture(page, REPO_FIXTURE)
-
-    await expect(page.getByTestId('file-change-heading')).toBeVisible()
-    const changeItems = page.getByTestId('file-change-item')
-    await expect(changeItems).toHaveCount(2)
-    await expect(changeItems.nth(0)).toContainText('src/replication.ts')
-    await expect(changeItems.nth(0)).toContainText('+120')
-    await expect(changeItems.nth(0)).toContainText('-8')
-    await expect(changeItems.nth(1)).toContainText('README.md')
-    await expect(changeItems.nth(1)).toContainText('+10')
-    await expect(changeItems.nth(1)).toContainText('-2')
+test('renders file explorer tree with preview placeholder', async ({ page }) => {
+  await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/files`)
+  await page.route('https://raw.githubusercontent.com/**', async (route) => {
+    await route.abort('failed')
   })
+  await setRepoFixture(page, REPO_FIXTURE)
+
+  await expect(page.getByTestId('file-explorer-heading')).toBeVisible()
+  await expect(page.getByTestId('file-explorer-tree')).toBeVisible()
+  await expect(page.getByTestId('file-viewer-placeholder')).toBeVisible()
+
+  const directoryItems = page.getByTestId('file-tree-directory')
+  await expect(directoryItems.filter({ hasText: 'src' })).toHaveCount(1)
+
+  const fileItems = page.getByTestId('file-tree-file')
+  await expect(fileItems.filter({ hasText: 'replication.ts' })).toHaveCount(1)
+  await expect(fileItems.filter({ hasText: 'README.md' })).toHaveCount(1)
+
+  await fileItems.filter({ hasText: 'replication.ts' }).first().click()
+  await expect(page.getByTestId('file-viewer-status')).toContainText('Unable to load file content')
+})
 
   test('updates branch list when fixture changes', async ({ page }) => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/branches`)

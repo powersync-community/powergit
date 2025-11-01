@@ -74,6 +74,7 @@ Create a development experience where every component—CLI, explorer, backgroun
 - `StreamSubscriptionManager` now waits for the database to be ready before subscribing and reports queued targets when subscriptions fail; remote helper logs deferred targets from `/streams`.
 - Added a reusable daemon stub harness (`packages/remote-helper/src/__tests__/daemon-stub.ts`) plus coverage to assert stream subscriptions, refs, and fetch interactions without starting the full Supabase stack.
 - `seed-sync-rules` now creates the `powersync` replication publication automatically so local stacks don't stall with `[PSYNC_S1141] Publication 'powersync' does not exist`.
+- Explorer repo view now ships a VS Code-style file tree with a Monaco-based preview (GitHub raw fallback), so teams can browse files without leaving the app.
 
 ## Agent Notes (2025-10-09)
 - CLI e2e suite now boots the local Supabase stack via the shared `test-stack-hooks` helper, seeds refs/commits directly into the Postgres raw tables, and runs the compiled CLI binary so worker paths resolve correctly.
