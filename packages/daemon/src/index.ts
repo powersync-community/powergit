@@ -157,6 +157,12 @@ class StreamSubscriptionManager {
     const alreadyActive: string[] = [];
     const queued: string[] = [];
 
+    try {
+      await this.database.waitForReady();
+    } catch (error) {
+      console.warn('[powersync-daemon] database not ready before subscribing streams', error);
+    }
+
     for (const rawTarget of targets) {
       const normalized = this.normalize(rawTarget);
       if (!normalized) continue;
@@ -174,6 +180,7 @@ class StreamSubscriptionManager {
         console.info(`[powersync-daemon] subscribed stream ${key}`);
       } catch (error) {
         console.error(`[powersync-daemon] failed to subscribe stream ${key}`, error);
+        queued.push(key);
       }
     }
 

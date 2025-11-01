@@ -228,7 +228,17 @@ async function ensureDaemonSubscribed(): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ streams }),
     })
-    if (!res.ok && res.status !== 503) {
+    if (res.ok) {
+      const payload = (await res.json().catch(() => null)) as
+        | { added?: unknown; queued?: unknown }
+        | null
+        | undefined
+      if (payload && Array.isArray(payload.queued) && payload.queued.length > 0) {
+        console.warn(
+          `[powersync] daemon deferred stream subscriptions for ${payload.queued.length} target(s); retrying later may be necessary.`,
+        )
+      }
+    } else if (res.status !== 503) {
       console.warn(`[powersync] daemon stream subscription returned ${res.status} ${res.statusText}`)
     }
   } catch (error) {

@@ -2,6 +2,7 @@
 import { mkdtemp, rm, writeFile, mkdir, cp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import simpleGit from 'simple-git'
 import {
@@ -57,6 +58,9 @@ const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_STA
 const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000', 10)
 const DAEMON_START_HINT =
   'PowerSync daemon unreachable — start it with "pnpm dev:daemon" or point POWERSYNC_DAEMON_URL at a running instance.'
+const DAEMON_WORKSPACE_DIR =
+  process.env.PNPM_WORKSPACE_DIR ??
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 
 export interface SeedDemoOptions {
   remoteUrl?: string
@@ -312,6 +316,10 @@ function launchDaemon(): void {
     detached: true,
     stdio: 'ignore',
     env: process.env,
+    cwd: DAEMON_WORKSPACE_DIR,
+  })
+  child.on('error', (error) => {
+    console.warn('[psgit] failed to launch PowerSync daemon', error)
   })
   child.unref()
 }

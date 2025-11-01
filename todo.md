@@ -66,6 +66,15 @@ Create a development experience where every component—CLI, explorer, backgroun
 - Wired Vitest to load `@shared/core` directly from sources and skip the Supabase-dependent git e2e helper suite when the CLI isn't available; refreshed daemon writer tests to assert raw table upserts instead of legacy `git_packs`/`refs` names so both packages' test suites pass locally.
 - Added Docker + Supabase CLI autodiscovery so the git e2e suite can launch the real local stack when the binaries (and daemon) are available, exporting `SUPABASE_BIN`/`DOCKER_BIN` via `pnpm dev:stack` for manual runs.
 
+## Agent Notes (2025-10-21 Codex)
+- Re-run the explorer against the daemon, verify Supabase writer logs (`[powersync-daemon] supabase upload`) to ensure refs populate; capture failing payloads if tables stay empty.
+- Patch daemon stream routing to hook `subscribeStreams`/`unsubscribeStreams` with `{ org_id, repo_id }` so explorer and remote-helper resubscribe correctly.
+- Expand remote-helper RPC integration tests with a stub daemon service to cover fetch/push flows under the daemon-first auth path.
+- Instrumented `SupabaseWriter` with opt-in debug logs (`POWERSYNC_SUPABASE_WRITER_DEBUG=true`) to sample row IDs, flag missing IDs, and trace upsert/delete batches.
+- `StreamSubscriptionManager` now waits for the database to be ready before subscribing and reports queued targets when subscriptions fail; remote helper logs deferred targets from `/streams`.
+- Added a reusable daemon stub harness (`packages/remote-helper/src/__tests__/daemon-stub.ts`) plus coverage to assert stream subscriptions, refs, and fetch interactions without starting the full Supabase stack.
+- `seed-sync-rules` now creates the `powersync` replication publication automatically so local stacks don't stall with `[PSYNC_S1141] Publication 'powersync' does not exist`.
+
 ## Agent Notes (2025-10-09)
 - CLI e2e suite now boots the local Supabase stack via the shared `test-stack-hooks` helper, seeds refs/commits directly into the Postgres raw tables, and runs the compiled CLI binary so worker paths resolve correctly.
 - Live CLI sync test auto-detects missing Docker/Supabase binaries or native `better-sqlite3` bindings and skips gracefully instead of hard failing; skip reason is logged for visibility.

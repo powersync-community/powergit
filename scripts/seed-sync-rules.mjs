@@ -156,19 +156,40 @@ async function verifyRequiredTables(client) {
   }
 }
 
+async function ensurePublication(client, publicationName) {
+  const { rows } = await client.query('SELECT 1 FROM pg_publication WHERE pubname = $1', [publicationName])
+  if (rows.length > 0) {
+    return false
+  }
+  await client.query(`CREATE PUBLICATION ${publicationName} FOR ALL TABLES`)
+  return true
+}
+
 async function run() {
   const rules = await loadYamlRules()
-  if (rules === null) {
-    console.info('ℹ️ PowerSync config provides inline SQL sync rules; skipping database seeding.')
-    return
-  }
-  const desired = new Map(
-    rules.map(({ stream, tableName, rule, ruleHash }) => [stream, { stream, tableName, rule, ruleHash }]),
-  )
   const client = new Client({ connectionString: supabaseDbUrl })
   await client.connect()
 
   try {
+    const createdPublication = await ensurePublication(client, 'powersync').catch((error) => {
+      console.warn(
+        `[seed-sync-rules] failed to ensure publication "powersync" automatically: ${error instanceof Error ? error.message : error}`,
+      )
+      return false
+    })
+    if (createdPublication) {
+      console.info('[seed-sync-rules] created replication publication "powersync" (FOR ALL TABLES)')
+    }
+
+    if (rules === null) {
+      console.info('ℹ️ PowerSync config provides inline SQL sync rules; skipping database seeding.')
+      return
+    }
+
+    const desired = new Map(
+      rules.map(({ stream, tableName, rule, ruleHash }) => [stream, { stream, tableName, rule, ruleHash }]),
+    )
+
     await client.query('CREATE SCHEMA IF NOT EXISTS powersync')
     await client.query(`
       CREATE TABLE IF NOT EXISTS powersync.streams (

@@ -39,6 +39,7 @@ export class SupabaseWriter {
   private readonly pollIntervalMs: number;
   private readonly retryDelayMs: number;
   private readonly failureThreshold: number;
+  private readonly debug: boolean;
   private pollTimer: NodeJS.Timeout | null = null;
   private running = false;
   private inFlight: Promise<void> | null = null;
@@ -50,6 +51,7 @@ export class SupabaseWriter {
     this.apiKey = apiKey;
     this.schema = options.config.schema ?? 'public';
     this.accessToken = accessToken && accessToken.trim().length > 0 ? accessToken.trim() : null;
+    this.debug = (process.env.POWERSYNC_SUPABASE_WRITER_DEBUG ?? 'false').toLowerCase() === 'true';
 
     const scopedFetch = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const headers = new Headers((init && init.headers) ?? {});
@@ -101,6 +103,22 @@ export class SupabaseWriter {
         this.inFlight = null;
       }
     }
+  }
+
+  private debugLog(message: string, details?: Record<string, unknown>): void {
+    if (!this.debug) return;
+    if (details) {
+      console.debug('[powersync-daemon] supabase writer debug:', message, details);
+    } else {
+      console.debug('[powersync-daemon] supabase writer debug:', message);
+    }
+  }
+
+  private sampleIds(rows: Record<string, unknown>[]): string[] {
+    return rows
+      .map((row) => (typeof row.id === 'string' ? row.id : row.id != null ? String(row.id) : null))
+      .filter((id): id is string => Boolean(id))
+      .slice(0, 5);
   }
 
   private scheduleNext(delayMs: number): void {
@@ -191,12 +209,36 @@ export class SupabaseWriter {
 
       const upsertRows = Array.from(upserts.values());
       if (upsertRows.length > 0) {
-        await this.applyUpserts(metadata.table, metadata.conflictTarget, upsertRows);
+        this.debugLog(`upserting ${upsertRows.length} rows`, {
+          table: metadata.table,
+          ids: this.sampleIds(upsertRows),
+        });
+        try {
+          await this.applyUpserts(metadata.table, metadata.conflictTarget, upsertRows);
+        } catch (error) {
+          this.debugLog('upsert failed', {
+            table: metadata.table,
+            ids: this.sampleIds(upsertRows),
+          });
+          throw error;
+        }
       }
 
       const deleteRows = Array.from(deletes.values());
       if (deleteRows.length > 0) {
-        await this.applyDeletes(metadata.table, deleteRows);
+        this.debugLog(`deleting ${deleteRows.length} rows`, {
+          table: metadata.table,
+          ids: this.sampleIds(deleteRows),
+        });
+        try {
+          await this.applyDeletes(metadata.table, deleteRows);
+        } catch (error) {
+          this.debugLog('delete failed', {
+            table: metadata.table,
+            ids: this.sampleIds(deleteRows),
+          });
+          throw error;
+        }
       }
     }
   }
@@ -220,8 +262,18 @@ export class SupabaseWriter {
       }
     }
     if (typeof merged.id !== 'string' || merged.id.length === 0) {
+      this.debugLog('skipping entry without id', {
+        table: entry.table ?? null,
+        op: entry.op,
+        entryId: entry.id ?? null,
+      });
       return null;
     }
+    this.debugLog('built row', {
+      table: entry.table ?? null,
+      id: merged.id,
+      op: entry.op,
+    });
     return merged;
   }
 
