@@ -1,12 +1,15 @@
+import { randomBytes } from 'node:crypto';
 import { Socket } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import type { PowerSyncDatabase, SyncStreamSubscription } from '@powersync/node';
+import { createClient, type Session } from '@supabase/supabase-js';
 import { resolveDaemonConfig, type ResolveDaemonConfigOptions } from './config.js';
 import { DaemonPowerSyncConnector } from './connector.js';
 import { connectWithSchemaRecovery, createPowerSyncDatabase } from './database.js';
 import {
   createDaemonServer,
+  type DaemonAuthResponse,
   type StreamSubscriptionTarget,
   type SubscribeStreamsResult,
   type UnsubscribeStreamsResult,
@@ -17,6 +20,8 @@ import { ensureRawTables } from './raw-table-migration.js';
 import { ensureLocalSchema } from './local-schema.js';
 import { SupabaseWriter } from './supabase-writer.js';
 import { GithubImportManager } from './importer.js';
+import { resolveSessionPath } from './auth/index.js';
+import { createSupabaseFileStorage, resolveSupabaseSessionPath } from '@shared/core';
 
 function normalizeAuthToken(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
@@ -283,19 +288,155 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   await assertPortAvailable(config.host, config.port);
   console.info(`[powersync-daemon] starting (db: ${config.dbPath})`);
 
-  let authToken: string | null = normalizeAuthToken(config.token);
+  let authToken: string | null = null;
   let authEndpoint: string | null = normalizeAuthEndpoint(config.endpoint);
   let authExpiresAt: string | null = null;
+  let authObtainedAt: string | null = null;
   let authMetadata: Record<string, unknown> | null = null;
 
-  if (authToken) {
-    authExpiresAt = formatJwtExpirationIso(authToken);
-    if (isJwtExpired(authToken, 5_000)) {
-      console.warn('[powersync-daemon] cached PowerSync token is expired; clearing saved credentials.');
-      authToken = null;
-      authExpiresAt = null;
-    }
+  const sessionPathOverrideCandidates = [
+    process.env.POWERSYNC_DAEMON_SESSION_PATH,
+    process.env.POWERSYNC_SESSION_PATH,
+  ];
+  const sessionPathOverride =
+    sessionPathOverrideCandidates.find((value) => typeof value === 'string' && value.trim().length > 0) ?? undefined;
+  const sessionPath = resolveSessionPath(sessionPathOverride);
+  const supabaseAuthPath = resolveSupabaseSessionPath(sessionPath);
+  const supabaseUrl = process.env.POWERSYNC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? null;
+  const supabaseServiceRole =
+    process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? null;
+  const supabaseAnonKey =
+    process.env.POWERSYNC_SUPABASE_ANON_KEY ?? process.env.POWERSYNC_SUPABASE_PUBLIC_KEY ?? process.env.SUPABASE_ANON_KEY ?? null;
+  const supabaseSchema = process.env.POWERSYNC_SUPABASE_SCHEMA ?? process.env.SUPABASE_DB_SCHEMA ?? undefined;
+  const supabaseWriterDisabled = (process.env.POWERSYNC_DISABLE_SUPABASE_WRITER ?? '').toLowerCase() === 'true';
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error(
+      '[powersync-daemon] Supabase URL and anon key are required. Configure POWERSYNC_SUPABASE_URL and POWERSYNC_SUPABASE_ANON_KEY.',
+    );
   }
+
+  const supabaseStorage = createSupabaseFileStorage(supabaseAuthPath);
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      storage: supabaseStorage,
+      storageKey: 'psgit',
+    },
+    db: {
+      schema: supabaseSchema ?? undefined,
+    },
+  });
+
+  let supabaseSession: Session | null = null;
+  let supabaseAuthSubscription: { unsubscribe: () => void } | null = null;
+  let supabaseWriter: SupabaseWriter | null = null;
+
+  const deviceChallengeTtlMs = Number.parseInt(
+    process.env.POWERSYNC_DAEMON_DEVICE_CHALLENGE_TTL_MS ?? '300000',
+    10,
+  );
+  type DeviceChallengeRecord = {
+    id: string;
+    createdAt: number;
+    expiresAt: number;
+    endpointHint?: string | null;
+    mode?: string | null;
+  };
+  const deviceChallenges = new Map<string, DeviceChallengeRecord>();
+
+  const resolveVerificationBaseUrl = () =>
+    process.env.POWERSYNC_DAEMON_DEVICE_URL ?? process.env.POWERSYNC_EXPLORER_URL ?? null;
+
+  const buildVerificationUrl = (challengeId: string): string | null => {
+    const base = resolveVerificationBaseUrl();
+    if (!base) return null;
+    const separator = base.includes('?') ? '&' : '?';
+    return `${base}${separator}device_code=${encodeURIComponent(challengeId)}`;
+  };
+
+  const cleanupExpiredChallenges = () => {
+    const now = Date.now();
+    for (const [id, record] of deviceChallenges.entries()) {
+      if (now > record.expiresAt) {
+        deviceChallenges.delete(id);
+      }
+    }
+  };
+
+  const clearSupabaseAuthSubscription = () => {
+    if (supabaseAuthSubscription) {
+      supabaseAuthSubscription.unsubscribe();
+      supabaseAuthSubscription = null;
+    }
+  };
+
+  let connected = false;
+  let connectedAt: Date | null = null;
+
+  const handleSupabaseSignOut = async (reason: string) => {
+    supabaseSession = null;
+    authToken = null;
+    authExpiresAt = null;
+    authObtainedAt = null;
+    authMetadata = { source: 'supabase', reason, status: 'signed_out' };
+    supabaseWriter?.setAccessToken(null);
+    if (supabaseWriter) {
+      await supabaseWriter.stop().catch(() => undefined);
+    }
+    connected = false;
+    connectedAt = null;
+    deviceChallenges.clear();
+  };
+
+  const applySupabaseSession = async (session: Session | null, source: string) => {
+    if (!session || typeof session.access_token !== 'string' || session.access_token.trim().length === 0) {
+      await handleSupabaseSignOut(`empty-session-${source}`);
+      return;
+    }
+    supabaseSession = session;
+    const accessToken = session.access_token.trim();
+    authToken = accessToken;
+    authExpiresAt =
+      typeof session.expires_at === 'number'
+        ? new Date(session.expires_at * 1000).toISOString()
+        : formatJwtExpirationIso(accessToken);
+    authObtainedAt = new Date().toISOString();
+    authMetadata = {
+      source: 'supabase',
+      event: source,
+      user: session.user ? { id: session.user.id, email: session.user.email } : null,
+    };
+    supabaseWriter?.setAccessToken(accessToken);
+    if (authToken && !isJwtExpired(authToken, 5_000)) {
+      supabaseWriter?.start();
+    }
+    scheduleConnect(`supabase-${source}`);
+  };
+
+  const initialSessionResult = await supabase.auth.getSession();
+  if (initialSessionResult.error) {
+    console.warn('[powersync-daemon] failed to read Supabase session', initialSessionResult.error);
+  }
+  await applySupabaseSession(initialSessionResult.data.session ?? null, 'initial');
+
+  supabaseAuthSubscription = supabase.auth.onAuthStateChange(async (event, session) => {
+    switch (event) {
+      case 'SIGNED_IN':
+      case 'TOKEN_REFRESHED':
+      case 'USER_UPDATED': {
+        await applySupabaseSession(session, event.toLowerCase());
+        break;
+      }
+      case 'SIGNED_OUT':
+      case 'PASSWORD_RECOVERY':
+        await handleSupabaseSignOut(event.toLowerCase());
+        break;
+      default:
+        break;
+    }
+  }).data.subscription;
 
   const buildAuthContext = (): Record<string, unknown> | null => {
     const context: Record<string, unknown> = {};
@@ -320,16 +461,6 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       await subscriptionManager.subscribe(targets);
     },
   });
-
-  const supabaseUrl = process.env.POWERSYNC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? null;
-  const supabaseServiceRole =
-    process.env.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? null;
-  const supabaseAnonKey =
-    process.env.POWERSYNC_SUPABASE_ANON_KEY ?? process.env.POWERSYNC_SUPABASE_PUBLIC_KEY ?? process.env.SUPABASE_ANON_KEY ?? null;
-  const supabaseSchema = process.env.POWERSYNC_SUPABASE_SCHEMA ?? process.env.SUPABASE_DB_SCHEMA ?? undefined;
-  const supabaseWriterDisabled = (process.env.POWERSYNC_DISABLE_SUPABASE_WRITER ?? '').toLowerCase() === 'true';
-
-  let supabaseWriter: SupabaseWriter | null = null;
   if (!supabaseWriterDisabled) {
     if (!supabaseUrl) {
       throw new Error(
@@ -378,6 +509,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   } else {
     console.info('[powersync-daemon] Supabase writer explicitly disabled (POWERSYNC_DISABLE_SUPABASE_WRITER=true)');
   }
+
   const connector = new DaemonPowerSyncConnector({
     credentialsProvider: async () => {
       if (authEndpoint && authToken) {
@@ -388,8 +520,6 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   });
 
   let running = true;
-  let connected = false;
-  let connectedAt: Date | null = null;
   let connectPromise: Promise<void> | null = null;
   const abortController = new AbortController();
   const requestShutdown = (reason: string) => {
@@ -509,107 +639,146 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
           context: buildAuthContext(),
         };
       }
-      if (authEndpoint || authToken) {
+      if (authEndpoint && !authToken) {
         return {
           status: 'pending',
-          reason: 'PowerSync credentials are incomplete; supply both endpoint and token.',
+          reason: 'Awaiting Supabase authentication; run `psgit login` to continue.',
           context: buildAuthContext(),
         };
       }
       return {
         status: 'auth_required',
-        reason: 'PowerSync credentials missing; run `psgit login --guest`.',
+        reason: 'PowerSync credentials missing; run `psgit login` to authenticate via Supabase.',
         context: buildAuthContext(),
       };
     },
-    handleAuthGuest: async (payload) => {
-      const endpointField = (payload as { endpoint?: unknown } | null | undefined)?.endpoint;
-      if (typeof endpointField === 'string') {
-        authEndpoint = normalizeAuthEndpoint(endpointField);
-      } else if (endpointField !== undefined) {
-        authEndpoint = null;
+    handleAuthDevice: async (payload) => {
+      const request = (payload ?? {}) as Record<string, unknown>;
+      cleanupExpiredChallenges();
+
+      const challengeId = typeof request.challengeId === 'string' ? request.challengeId.trim() : '';
+      const sessionPayload = request.session as
+        | {
+            access_token?: unknown;
+            refresh_token?: unknown;
+            expires_in?: unknown;
+            expires_at?: unknown;
+          }
+        | undefined;
+
+      if (challengeId && sessionPayload && typeof sessionPayload === 'object' && !Array.isArray(sessionPayload)) {
+        const record = deviceChallenges.get(challengeId);
+        if (!record) {
+          return {
+            status: 'error',
+            reason: 'invalid_challenge',
+            context: { challengeId },
+          } satisfies DaemonAuthResponse;
+        }
+        if (Date.now() > record.expiresAt) {
+          deviceChallenges.delete(challengeId);
+          return {
+            status: 'error',
+            reason: 'challenge_expired',
+            context: { challengeId },
+          } satisfies DaemonAuthResponse;
+        }
+
+        const accessToken =
+          typeof sessionPayload.access_token === 'string' ? sessionPayload.access_token.trim() : '';
+        const refreshToken =
+          typeof sessionPayload.refresh_token === 'string' ? sessionPayload.refresh_token.trim() : '';
+        if (!accessToken || !refreshToken) {
+          return {
+            status: 'error',
+            reason: 'session_invalid',
+            context: { challengeId },
+          } satisfies DaemonAuthResponse;
+        }
+
+        try {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) {
+            throw error;
+          }
+          if (typeof request.endpoint === 'string') {
+            const overridden = normalizeAuthEndpoint(request.endpoint);
+            if (overridden) {
+              authEndpoint = overridden;
+            }
+          } else if (record.endpointHint) {
+            authEndpoint = normalizeAuthEndpoint(record.endpointHint);
+          }
+          await applySupabaseSession(data.session ?? null, 'device-complete');
+          deviceChallenges.delete(challengeId);
+          if (!authToken) {
+            return {
+              status: 'error',
+              reason: 'session_unavailable',
+              context: { challengeId },
+            } satisfies DaemonAuthResponse;
+          }
+          return {
+            status: 'ready',
+            token: authToken ?? '',
+            expiresAt: authExpiresAt,
+            context: buildAuthContext(),
+          } satisfies DaemonAuthResponse;
+        } catch (error) {
+          console.error('[powersync-daemon] failed to apply Supabase session', error);
+          return {
+            status: 'error',
+            reason: 'session_apply_failed',
+            context: { challengeId },
+          } satisfies DaemonAuthResponse;
+        }
       }
 
-      const tokenField = (payload as { token?: unknown } | null | undefined)?.token;
-      if (typeof tokenField === 'string') {
-        authToken = normalizeAuthToken(tokenField);
-      } else if (tokenField !== undefined) {
-        authToken = null;
+      const mode = typeof request.mode === 'string' ? request.mode : 'device-code';
+      const endpointHint =
+        typeof request.endpoint === 'string' && request.endpoint.trim().length > 0
+          ? normalizeAuthEndpoint(request.endpoint)
+          : authEndpoint;
+      if (endpointHint) {
+        authEndpoint = endpointHint;
       }
+      const id = randomBytes(6).toString('hex');
+      const createdAt = Date.now();
+      const expiresAt = createdAt + deviceChallengeTtlMs;
+      deviceChallenges.set(id, {
+        id,
+        createdAt,
+        expiresAt,
+        endpointHint: endpointHint ?? null,
+        mode,
+      });
 
-      const expiresAtField =
-        typeof (payload as { expiresAt?: unknown } | null | undefined)?.expiresAt === 'string'
-          ? ((payload as { expiresAt?: string }).expiresAt ?? null)
-          : null;
-
-      authExpiresAt = authToken ? expiresAtField ?? formatJwtExpirationIso(authToken) : null;
-
-      const metadataCandidate = payload?.metadata;
-      if (metadataCandidate && typeof metadataCandidate === 'object' && !Array.isArray(metadataCandidate)) {
-        authMetadata = { ...metadataCandidate };
-      }
-
-      if (authToken && isJwtExpired(authToken, 5_000)) {
-        console.warn('[powersync-daemon] received expired PowerSync token from guest login; waiting for refresh.');
-        const context = buildAuthContext();
-        authToken = null;
-        authExpiresAt = null;
-        supabaseWriter?.setAccessToken(null);
-        connected = false;
-        return {
-          status: 'auth_required',
-          reason: 'Received expired PowerSync token; rerun guest login.',
-          context,
-        };
-      }
-
-      supabaseWriter?.setAccessToken(authToken);
-
-      if (!authEndpoint || !authToken) {
-        return {
-          status: 'auth_required',
-          reason: 'Endpoint or token missing from guest payload.',
-          context: buildAuthContext(),
-        };
-      }
-
-      console.info('[powersync-daemon] accepted guest credentials');
-      if (!isJwtExpired(authToken, 5_000)) {
-        supabaseWriter?.start();
-      }
-      scheduleConnect('guest-auth');
-      const readyTimeoutMs = Number.parseInt(
-        process.env.POWERSYNC_DAEMON_AUTH_READY_TIMEOUT_MS ?? '10000',
-        10,
-      );
-      const connectedNow = await waitForConnection(readyTimeoutMs);
-      if (!connectedNow) {
-        return {
-          status: 'pending',
-          reason: 'PowerSync connection pending; retry shortly.',
-          token: authToken,
-          expiresAt: authExpiresAt,
-          context: buildAuthContext(),
-        };
-      }
+      const verificationUrl = buildVerificationUrl(id);
+      const reason =
+        verificationUrl != null
+          ? `Complete daemon login in your browser: ${verificationUrl}`
+          : 'Complete daemon login using the displayed device code.';
       return {
-        status: 'ready',
-        token: authToken,
-        expiresAt: authExpiresAt,
-        context: buildAuthContext(),
-      };
+        status: 'pending',
+        reason,
+        context: {
+          challengeId: id,
+          verificationUrl,
+          expiresAt: new Date(expiresAt).toISOString(),
+          mode,
+        },
+      } satisfies DaemonAuthResponse;
     },
     handleAuthLogout: async () => {
-      authToken = null;
-      authEndpoint = null;
-      authExpiresAt = null;
-      authMetadata = null;
-      supabaseWriter?.setAccessToken(null);
-      if (supabaseWriter) {
-        await supabaseWriter.stop().catch(() => undefined);
+      try {
+        await supabase.auth.signOut();
+      } catch (error) {
+        console.warn('[powersync-daemon] Supabase sign-out failed', error);
       }
-      connected = false;
-      connectedAt = null;
+      await handleSupabaseSignOut('logout');
       return {
         status: 'auth_required',
         reason: 'Daemon logged out.',
@@ -713,6 +882,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       console.warn('[powersync-daemon] failed to stop Supabase writer', error);
     });
   }
+  clearSupabaseAuthSubscription();
   await database.close({ disconnect: true }).catch((error) => {
     console.warn('[powersync-daemon] failed to close database', error);
   });

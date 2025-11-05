@@ -11,7 +11,6 @@ To add additional environments (for example staging), create a remote entry with
 # Add or update a staging profile
 psgit profile set staging \
   --set powersync.url=https://powersync-staging.example.com \
-  --set daemon.token=<service-token-or-jwt> \
   --set supabase.url=https://your-project.supabase.co \
   --set supabase.anonKey=<anon-key> \
   --set supabase.serviceRoleKey=<service-role-key>
@@ -26,6 +25,10 @@ STACK_PROFILE=staging pnpm --filter @app/explorer dev
 pnpm --filter @app/explorer test:e2e:staging
 STACK_PROFILE=staging pnpm live:validate
 
+# When switching to a new profile, authenticate the local daemon via Supabase
+# (prompts a device-code flow that reuses ~/.psgit storage):
+STACK_PROFILE=staging pnpm --filter @pkg/cli cli login
+
 # Build the explorer bundle against production defaults
 STACK_PROFILE=prod pnpm --filter @app/explorer build
 ```
@@ -37,9 +40,6 @@ Resulting profile JSON (for reference):
   "staging": {
     "powersync": {
       "url": "https://powersync-staging.example.com"
-    },
-    "daemon": {
-      "token": "<service-token-or-jwt>"
     },
     "supabase": {
       "url": "https://your-project.supabase.co",

@@ -8,12 +8,6 @@ type DaemonAuthStatus =
 
 const mocks = vi.hoisted(() => {
   const resolveDaemonBaseUrlMock = vi.fn(async () => 'http://127.0.0.1:5030')
-  const postDaemonAuthGuestMock = vi.fn(async () => ({
-    status: 'ready',
-    token: 'guest-token',
-    expiresAt: null,
-    context: null,
-  }) as DaemonAuthStatus)
   const postDaemonAuthDeviceMock = vi.fn(async () => ({
     status: 'pending',
     reason: 'Open browser',
@@ -43,7 +37,6 @@ const mocks = vi.hoisted(() => {
 
   return {
     resolveDaemonBaseUrlMock,
-    postDaemonAuthGuestMock,
     postDaemonAuthDeviceMock,
     fetchDaemonAuthStatusMock,
     postDaemonAuthLogoutMock,
@@ -53,56 +46,21 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('./daemon-client.js', () => ({
   resolveDaemonBaseUrl: mocks.resolveDaemonBaseUrlMock,
-  postDaemonAuthGuest: mocks.postDaemonAuthGuestMock,
   postDaemonAuthDevice: mocks.postDaemonAuthDeviceMock,
   fetchDaemonAuthStatus: mocks.fetchDaemonAuthStatusMock,
   postDaemonAuthLogout: mocks.postDaemonAuthLogoutMock,
   extractDeviceChallenge: mocks.extractDeviceChallengeMock,
 }))
 
-import { loginWithDaemonDevice, loginWithDaemonGuest, logout } from './login.js'
+import { loginWithDaemonDevice, logout } from './login.js'
 
 describe('daemon auth helpers', () => {
   beforeEach(() => {
     mocks.resolveDaemonBaseUrlMock.mockClear()
-    mocks.postDaemonAuthGuestMock.mockClear()
     mocks.postDaemonAuthDeviceMock.mockClear()
     mocks.fetchDaemonAuthStatusMock.mockClear()
     mocks.postDaemonAuthLogoutMock.mockClear()
     mocks.extractDeviceChallengeMock.mockClear()
-  })
-
-  it('logs in as guest via daemon', async () => {
-    const result = await loginWithDaemonGuest({ token: 'abc', endpoint: 'https://ps.dev' })
-    expect(mocks.resolveDaemonBaseUrlMock).toHaveBeenCalledTimes(1)
-    expect(mocks.postDaemonAuthGuestMock).toHaveBeenCalledWith('http://127.0.0.1:5030', {
-      token: 'abc',
-      endpoint: 'https://ps.dev',
-      expiresAt: null,
-      obtainedAt: null,
-      metadata: null,
-    })
-    expect(result.status).toEqual({ status: 'ready', token: 'guest-token', expiresAt: null, context: null })
-  })
-
-  it('fetches auth status when guest response lacks ready token', async () => {
-    mocks.postDaemonAuthGuestMock.mockResolvedValueOnce({ status: 'pending', reason: 'waiting', context: null })
-    mocks.fetchDaemonAuthStatusMock.mockResolvedValueOnce({
-      status: 'ready',
-      token: 'refreshed-token',
-      expiresAt: '2099-01-01T00:00:00.000Z',
-      context: null,
-    })
-
-    const result = await loginWithDaemonGuest({})
-    expect(mocks.postDaemonAuthGuestMock).toHaveBeenCalledTimes(1)
-    expect(mocks.fetchDaemonAuthStatusMock).toHaveBeenCalledTimes(1)
-    expect(result.status).toEqual({
-      status: 'ready',
-      token: 'refreshed-token',
-      expiresAt: '2099-01-01T00:00:00.000Z',
-      context: null,
-    })
   })
 
   it('polls daemon device flow until ready', async () => {
@@ -132,7 +90,12 @@ describe('daemon auth helpers', () => {
       expiresAt: '2099-01-01T00:00:00.000Z',
       context: null,
     })
-    expect(result.challenge).toEqual({ challengeId: 'abc123', verificationUrl: undefined, expiresAt: undefined, mode: undefined })
+    expect(result.challenge).toEqual({
+      challengeId: 'abc123',
+      verificationUrl: undefined,
+      expiresAt: undefined,
+      mode: undefined,
+    })
   })
 
   it('invokes daemon logout hook', async () => {

@@ -7,9 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import {
   resolveDaemonBaseUrl,
   isDaemonResponsive,
-  fetchDaemonStatus,
-  shouldRefreshDaemonStatus,
-  runGuestLogin,
+  ensureDaemonSupabaseAuth,
 } from './dev-shared.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -89,14 +87,15 @@ async function refreshDaemonAfterLaunch(env) {
     await delay(500);
   }
 
-  const status = await fetchDaemonStatus(baseUrl);
-  if (!status || shouldRefreshDaemonStatus(status)) {
-    try {
-      await runGuestLogin({ env, repoRoot });
-      console.info('[dev:daemon] refreshed daemon guest credentials.');
-    } catch (error) {
-      console.warn('[dev:daemon] guest credential refresh failed:', error?.message ?? error);
-    }
+  const authResult = await ensureDaemonSupabaseAuth({
+    env,
+    logger: console,
+    metadata: { initiatedBy: 'start-daemon-with-profile' },
+  });
+  if (authResult.status?.status === 'ready') {
+    console.info('[dev:daemon] daemon authenticated via Supabase.');
+  } else {
+    console.warn('[dev:daemon] daemon authentication skipped or failed — run "pnpm cli login" if required.');
   }
 }
 

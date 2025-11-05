@@ -10,7 +10,7 @@ import {
 
 export type AuthStatus = 'ready' | 'pending' | 'auth_required' | 'error';
 
-export type AuthCredentialSource = 'guest' | 'device' | 'manual' | 'service' | 'env';
+export type AuthCredentialSource = 'guest' | 'device' | 'manual' | 'service' | 'env' | 'supabase';
 
 export interface AuthCredentials {
   endpoint: string;
@@ -18,7 +18,6 @@ export interface AuthCredentials {
   expiresAt?: string | null;
   obtainedAt?: string | null;
   authType?: AuthCredentialSource | null;
-  refreshToken?: string | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -233,7 +232,6 @@ export class DaemonAuthManager {
         expiresAt: credentials.expiresAt ?? null,
         obtainedAt: credentials.obtainedAt ?? null,
         authType: credentials.authType ?? null,
-        refreshToken: credentials.refreshToken ?? null,
         metadata: credentials.metadata ?? null,
       }).catch((error) => {
         console.warn('[powersync-daemon] failed to persist credentials', error);
@@ -267,7 +265,6 @@ export class DaemonAuthManager {
       expiresAt: input.expiresAt ?? null,
       obtainedAt: input.obtainedAt ?? null,
       authType: (input.authType as AuthCredentialSource | null) ?? null,
-      refreshToken: input.refreshToken ?? null,
       metadata: input.metadata ?? null,
     });
   }
@@ -291,7 +288,6 @@ export class DaemonAuthManager {
       obtainedAt,
       expiresAt,
       authType: input.authType ?? null,
-      refreshToken: input.refreshToken ?? null,
       metadata: input.metadata ?? null,
     };
   }

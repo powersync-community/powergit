@@ -141,23 +141,6 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
     result.POWERSYNC_EXPLORER_URL = daemonDeviceLoginUrl
   }
 
-  const daemonToken = profile.daemon?.token ?? profile.powersync?.token
-  const daemonTokenExpires =
-    profile.daemon?.tokenExpiresAt ?? profile.powersync?.tokenExpiresAt ?? null
-  if (daemonToken) {
-    const token = daemonToken
-    const expiresAt = daemonTokenExpires
-    const isExpired =
-      typeof expiresAt === 'string' && expiresAt.trim().length > 0
-        ? Date.parse(expiresAt) <= Date.now() + 5_000
-        : false
-    if (!isExpired) {
-      result.POWERSYNC_DAEMON_TOKEN = token
-      result.POWERSYNC_SERVICE_TOKEN = token
-      result.POWERSYNC_DAEMON_GUEST_TOKEN = token
-    }
-  }
-
   if (profile.supabase?.url) {
     const url = profile.supabase.url
     result.POWERSYNC_SUPABASE_URL = url

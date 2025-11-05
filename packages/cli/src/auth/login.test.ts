@@ -2,13 +2,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { join } from 'node:path'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { loginWithExplicitToken, loginWithSupabasePassword, logout } from './login.js'
+import { loginWithSupabasePassword, logout } from './login.js'
+import { saveStoredCredentials } from './session.js'
+
+const createClientMock = vi.hoisted(() => vi.fn())
+const sharedCoreMock = vi.hoisted(() => ({
+  createSupabaseFileStorage: vi.fn(() => ({ path: '/tmp/supabase-auth.json' })),
+  clearSupabaseFileStorage: vi.fn(),
+  resolveSupabaseSessionPath: vi.fn(() => '/tmp/supabase-auth.json'),
+}))
+
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: createClientMock,
+}))
+
+vi.mock('@shared/core', () => sharedCoreMock)
 
 const tempRoots: string[] = []
 
 describe('cli auth login', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    createClientMock.mockReset()
   })
 
   afterEach(async () => {
@@ -21,40 +36,21 @@ describe('cli auth login', () => {
     return join(dir, 'session.json')
   }
 
-  it('stores manual credentials', async () => {
-    const sessionPath = await createSessionPath()
-    const fakeToken = [
-      'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9',
-      Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600, iat: Math.floor(Date.now() / 1000) })).toString('base64url'),
-      'signature',
-    ].join('.')
-
-    const result = await loginWithExplicitToken({
-      endpoint: 'https://api.example.dev',
-      token: fakeToken,
-      sessionPath,
-    })
-
-    expect(result.credentials.endpoint).toBe('https://api.example.dev')
-    const stored = JSON.parse(await readFile(sessionPath, 'utf8'))
-    expect(stored.token).toBe(fakeToken)
-    expect(typeof stored.expiresAt).toBe('string')
-  })
-
   it('retrieves credentials via Supabase password login', async () => {
     const sessionPath = await createSessionPath()
-    const fakeToken = [
-      'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9',
-      Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 1800 })).toString('base64url'),
-      'signature',
-    ].join('.')
-
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      json: vi.fn().mockResolvedValue({ access_token: fakeToken }),
-    } as unknown as Response)
+    const fakeToken = 'supabase-access-token'
+    const session = {
+      access_token: fakeToken,
+      expires_at: Math.floor(Date.now() / 1000) + 1800,
+    }
+    const signInWithPassword = vi.fn().mockResolvedValue({ data: { session }, error: null })
+    const getSession = vi.fn().mockResolvedValue({ data: { session } })
+    createClientMock.mockReturnValue({
+      auth: {
+        signInWithPassword,
+        getSession,
+      },
+    })
 
     const result = await loginWithSupabasePassword({
       endpoint: 'https://powersync.dev',
@@ -65,29 +61,34 @@ describe('cli auth login', () => {
       sessionPath,
     })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://example.supabase.co/auth/v1/token?grant_type=password',
+    expect(createClientMock).toHaveBeenCalledWith(
+      'https://example.supabase.co',
+      'anon-key',
       expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          apikey: 'anon-key',
+        auth: expect.objectContaining({
+          persistSession: true,
+          autoRefreshToken: true,
         }),
       }),
     )
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      password: 'password123',
+    })
     expect(result.credentials.endpoint).toBe('https://powersync.dev')
     const stored = JSON.parse(await readFile(sessionPath, 'utf8'))
     expect(stored.endpoint).toBe('https://powersync.dev')
-
-    fetchMock.mockRestore()
   })
 
   it('clears stored session on logout', async () => {
     const sessionPath = await createSessionPath()
-    await loginWithExplicitToken({
-      endpoint: 'https://api.example.dev',
-      token: 'abc.def.ghi',
+    await saveStoredCredentials(
+      {
+        endpoint: 'https://api.example.dev',
+        token: 'placeholder-token',
+      },
       sessionPath,
-    })
+    )
 
     await logout({ sessionPath })
     await expect(readFile(sessionPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })

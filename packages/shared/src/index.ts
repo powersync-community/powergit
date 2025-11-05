@@ -48,3 +48,9 @@ export { PowerSyncRemoteClient } from './node.js'
 export type { RepoDataSummary } from './node.js'
 export * from './git.js'
 export * from './importer.js'
+export {
+  createSupabaseFileStorage,
+  clearSupabaseFileStorage,
+  resolveSupabaseSessionPath,
+  SupabaseFileStorage,
+} from './supabase/file-storage.js'

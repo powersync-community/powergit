@@ -5,13 +5,11 @@ import { dirname, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { loadProfileEnvironment } from '../../../cli/src/profile-env.js'
 import {
-  normalizeBaseUrl,
   resolveDaemonBaseUrl,
   isDaemonResponsive,
   stopDaemon,
-  refreshDaemonToken,
   fetchDaemonStatus,
-  shouldRefreshDaemonStatus,
+  ensureDaemonSupabaseAuth,
 } from '../../../../scripts/dev-shared.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -118,9 +116,22 @@ async function startDaemonIfNeeded(env, profileName, { forceRestart = false } = 
   throw new Error('Daemon did not become ready in time.')
 }
 
-async function refreshDaemonTokenIfNeeded(env) {
-  const { status } = await refreshDaemonToken({ env, repoRoot, logger: console })
-  applyDaemonStatusToEnv(env, status)
+async function ensureDaemonAuthStatus(env) {
+  const result = await ensureDaemonSupabaseAuth({
+    env,
+    logger: console,
+    metadata: { initiatedBy: 'explorer-dev' },
+  })
+  if (result.status?.status === 'ready') {
+    applyDaemonStatusToEnv(env, result.status)
+    return result.status
+  }
+  const fallback = await fetchDaemonStatus(resolveDaemonBaseUrl(env)).catch(() => null)
+  if (fallback?.status === 'ready') {
+    applyDaemonStatusToEnv(env, fallback)
+    return fallback
+  }
+  return result.status ?? fallback ?? null
 }
 
 function attachCleanup() {
@@ -142,8 +153,6 @@ function attachCleanup() {
 
 function applyDaemonStatusToEnv(env, status) {
   if (!status || status.status !== 'ready') return
-  env.POWERSYNC_DAEMON_TOKEN = status.token
-  process.env.POWERSYNC_DAEMON_TOKEN = status.token
   const endpoint =
     status.context && typeof status.context.endpoint === 'string' ? status.context.endpoint.trim() : null
   if (endpoint) {
@@ -177,23 +186,15 @@ async function main() {
   if (!options.printEnv) {
     const daemonBaseUrl = resolveDaemonBaseUrl(mergedEnv)
     try {
-      let status = await fetchDaemonStatus(daemonBaseUrl)
-      if (!status || shouldRefreshDaemonStatus(status)) {
-        if (!(await isDaemonResponsive(daemonBaseUrl))) {
-          await startDaemonIfNeeded(mergedEnv, profileResult.profile?.name)
-        }
-        await refreshDaemonTokenIfNeeded(mergedEnv)
-        status = await fetchDaemonStatus(daemonBaseUrl)
-      } else {
-        applyDaemonStatusToEnv(mergedEnv, status)
+      if (!(await isDaemonResponsive(daemonBaseUrl))) {
+        await startDaemonIfNeeded(mergedEnv, profileResult.profile?.name)
       }
 
+      let status = await ensureDaemonAuthStatus(mergedEnv)
       if (!status || status.status !== 'ready') {
         await startDaemonIfNeeded(mergedEnv, profileResult.profile?.name, { forceRestart: true })
-        await refreshDaemonTokenIfNeeded(mergedEnv)
-        status = await fetchDaemonStatus(daemonBaseUrl)
+        status = await ensureDaemonAuthStatus(mergedEnv)
       }
-
       if (!status || status.status !== 'ready' || !(await isDaemonResponsive(daemonBaseUrl))) {
         throw new Error('PowerSync daemon is not reachable after restart attempts.')
       }

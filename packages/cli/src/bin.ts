@@ -2,12 +2,7 @@
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
 import { addPowerSyncRemote, syncPowerSyncRepository, seedDemoRepository } from './index.js'
-import {
-  loginWithDaemonDevice,
-  loginWithDaemonGuest,
-  loginWithSupabasePassword,
-  logout as logoutSession,
-} from './auth/login.js'
+import { loginWithDaemonDevice, logout as logoutSession } from './auth/login.js'
 import {
   resolveProfile,
   listProfiles,
@@ -21,17 +16,9 @@ import {
 import { loadStackEnv } from './stack-env.js'
 
 interface LoginCommandArgs {
-  manual?: boolean
-  guest?: boolean
-  auto?: boolean
-  token?: string
   endpoint?: string
   session?: string
   daemonUrl?: string
-  supabaseEmail?: string
-  supabasePassword?: string
-  supabaseUrl?: string
-  supabaseAnonKey?: string
 }
 
 interface DemoSeedCommandArgs {
@@ -53,15 +40,6 @@ interface DaemonStopCommandArgs {
   daemonUrl?: string
   waitMs?: number
   quiet?: boolean
-}
-
-interface ResolvedGuestCredentials {
-  token: string
-  endpoint?: string
-  expiresAt?: string | null
-  obtainedAt?: string | null
-  metadata?: Record<string, unknown> | null
-  source: 'flag' | 'env' | 'supabase-password'
 }
 
 const PSGIT_STACK_ENV = process.env.PSGIT_STACK_ENV
@@ -224,39 +202,11 @@ function unsetConfigValue(target: Record<string, unknown>, path: string[]): void
   }
 }
 
-function parseJwtPayload(token: string): Record<string, unknown> | null {
-  const parts = token.split('.')
-  if (parts.length < 2) return null
-  try {
-    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=')
-    const json = Buffer.from(padded, 'base64').toString('utf8')
-    const payload = JSON.parse(json)
-    return payload && typeof payload === 'object' && !Array.isArray(payload) ? (payload as Record<string, unknown>) : null
-  } catch {
-    return null
-  }
-}
-
-function getTokenExpirationMs(token: string): number | null {
-  const payload = parseJwtPayload(token)
-  if (!payload) return null
-  const raw = (payload as { exp?: unknown }).exp
-  if (typeof raw === 'number') {
-    const expiresAt = raw * 1000
-    return Number.isFinite(expiresAt) ? expiresAt : null
-  }
-  if (typeof raw === 'string') {
-    const parsed = Number.parseFloat(raw)
-    if (!Number.isFinite(parsed)) return null
-    const expiresAt = parsed * 1000
-    return Number.isFinite(expiresAt) ? expiresAt : null
-  }
-  return null
-}
-
-function persistDaemonCredentials(token: string, expiresAt: string | null | undefined, context: unknown) {
-  if (typeof token !== 'string' || token.trim().length === 0) return
+function persistDaemonCredentials(
+  _token: string,
+  _expiresAt: string | null | undefined,
+  context: unknown,
+) {
   const profileName = activeProfileContext.name
   const existing = getProfile(profileName)
   const working: ProfileConfig = existing
@@ -264,8 +214,8 @@ function persistDaemonCredentials(token: string, expiresAt: string | null | unde
     : {}
   const powersyncConfig = { ...(working.powersync ?? {}) }
   const daemonConfig = { ...(working.daemon ?? {}) }
-  daemonConfig.token = token
-  daemonConfig.tokenExpiresAt = expiresAt ?? null
+  delete daemonConfig.token
+  delete daemonConfig.tokenExpiresAt
   if (context && typeof context === 'object' && !Array.isArray(context)) {
     const endpoint = (context as { endpoint?: unknown }).endpoint
     if (typeof endpoint === 'string' && endpoint.trim().length > 0) {
@@ -283,117 +233,6 @@ function persistDaemonCredentials(token: string, expiresAt: string | null | unde
   for (const [key, value] of Object.entries(env)) {
     process.env[key] = value
   }
-  for (const key of ['POWERSYNC_DAEMON_TOKEN', 'POWERSYNC_SERVICE_TOKEN', 'POWERSYNC_DAEMON_GUEST_TOKEN']) {
-    if (!(key in env)) {
-      delete process.env[key]
-    }
-  }
-}
-
-function isTokenExpired(token: string, skewMs = 0): boolean {
-  const expiresAt = getTokenExpirationMs(token)
-  if (!expiresAt) return false
-  return expiresAt <= Date.now() + Math.max(0, skewMs)
-}
-
-function tokenHasIatClaim(token: string): boolean {
-  const payload = parseJwtPayload(token)
-  if (!payload) return false
-  const value = payload.iat
-  if (typeof value === 'number') {
-    return Number.isFinite(value)
-  }
-  if (typeof value === 'string') {
-    return value.trim().length > 0
-  }
-  return false
-}
-
-function inferGuestTokenFromEnv(): { token: string; source: string } | null {
-  const sources: Array<{ key: string; value: string | undefined }> = [
-    { key: 'POWERSYNC_DAEMON_GUEST_TOKEN', value: process.env.POWERSYNC_DAEMON_GUEST_TOKEN },
-    { key: 'POWERSYNC_DAEMON_TOKEN', value: process.env.POWERSYNC_DAEMON_TOKEN },
-    { key: 'POWERSYNC_TOKEN', value: process.env.POWERSYNC_TOKEN },
-    { key: 'PSGIT_TEST_REMOTE_TOKEN', value: process.env.PSGIT_TEST_REMOTE_TOKEN },
-    { key: 'POWERSYNC_SERVICE_TOKEN', value: process.env.POWERSYNC_SERVICE_TOKEN },
-  ]
-
-  for (const candidate of sources) {
-    if (typeof candidate.value !== 'string') continue
-    const trimmed = candidate.value.trim()
-    if (trimmed.length > 0) {
-      return { token: trimmed, source: candidate.key }
-    }
-  }
-  return null
-}
-
-async function resolveGuestCredentials(args: LoginCommandArgs): Promise<ResolvedGuestCredentials | null> {
-  if (typeof args.token === 'string' && args.token.trim().length > 0) {
-    return {
-      token: args.token.trim(),
-      endpoint: args.endpoint,
-      source: 'flag',
-      metadata: { source: 'flag' },
-    }
-  }
-
-  const endpointHint = firstNonEmpty(
-    args.endpoint,
-    process.env.POWERSYNC_ENDPOINT,
-    process.env.PSGIT_TEST_ENDPOINT,
-    process.env.POWERSYNC_DAEMON_ENDPOINT,
-    process.env.POWERSYNC_ENDPOINT,
-  )
-
-  const envToken = inferGuestTokenFromEnv()
-  if (envToken) {
-    if (!tokenHasIatClaim(envToken.token)) {
-      console.warn(`[psgit] Skipping ${envToken.source} guest token: missing 'iat' claim.`)
-    } else if (isTokenExpired(envToken.token, 5_000)) {
-      console.warn(`[psgit] Skipping ${envToken.source} guest token: token expired.`)
-    } else {
-      return {
-        token: envToken.token,
-        endpoint: endpointHint,
-        source: 'env',
-        metadata: { source: envToken.source },
-      }
-    }
-  }
-
-  const supabaseUrl = firstNonEmpty(args.supabaseUrl, process.env.POWERSYNC_SUPABASE_URL, process.env.PSGIT_TEST_SUPABASE_URL, process.env.SUPABASE_URL)
-  const supabaseAnonKey = firstNonEmpty(args.supabaseAnonKey, process.env.POWERSYNC_SUPABASE_ANON_KEY, process.env.PSGIT_TEST_SUPABASE_ANON_KEY, process.env.SUPABASE_ANON_KEY)
-  const supabaseEmail = firstNonEmpty(args.supabaseEmail, process.env.POWERSYNC_SUPABASE_EMAIL, process.env.PSGIT_TEST_SUPABASE_EMAIL)
-  const supabasePassword = firstNonEmpty(args.supabasePassword, process.env.POWERSYNC_SUPABASE_PASSWORD, process.env.PSGIT_TEST_SUPABASE_PASSWORD)
-  const endpoint = endpointHint
-
-  if (supabaseUrl && supabaseAnonKey && supabaseEmail && supabasePassword && endpoint) {
-    try {
-      const result = await loginWithSupabasePassword({
-        endpoint,
-        supabaseUrl,
-        supabaseAnonKey,
-        supabaseEmail,
-        supabasePassword,
-        persistSession: false,
-      })
-
-      return {
-        token: result.credentials.token,
-        endpoint: result.credentials.endpoint,
-        expiresAt: result.credentials.expiresAt ?? null,
-        obtainedAt: result.credentials.obtainedAt ?? null,
-        metadata: { source: 'supabase-password' },
-        source: 'supabase-password',
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.warn(`[psgit] Supabase password guest fallback failed: ${message}`)
-    }
-  }
-
-  return null
 }
 
 function normalizeDaemonBaseUrl(value: string): string {
@@ -466,95 +305,8 @@ async function runDemoSeedCommand(args: DemoSeedCommandArgs) {
 }
 
 async function runLoginCommand(args: LoginCommandArgs) {
-  let mode: 'auto' | 'manual' | 'guest' = 'auto'
-  if (args.manual) mode = 'manual'
-  if (args.guest) mode = 'guest'
-  if (args.auto) mode = 'auto'
-
-  if (mode === 'manual') {
-    if (!args.token) {
-      throw new Error('Manual login requires --token.')
-    }
-    const { baseUrl, status } = await loginWithDaemonGuest({
-      daemonUrl: args.daemonUrl,
-      endpoint: args.endpoint,
-      token: args.token,
-      metadata: { source: 'manual' },
-    })
-    if (!status) {
-      throw new Error(`Daemon at ${baseUrl} did not return an auth status.`)
-    }
-    if (status.status !== 'ready') {
-      const reason = status.reason ? ` (${status.reason})` : ''
-      throw new Error(`Daemon reported ${status.status}${reason}.`)
-    }
-    persistDaemonCredentials(status.token, status.expiresAt ?? null, status.context ?? null)
-    console.log('✅ PowerSync daemon accepted manual token.')
-    console.log(`   Endpoint: ${args.endpoint ?? 'auto'}`)
-    if (status.expiresAt) {
-      console.log(`   Expires: ${status.expiresAt}`)
-    }
-    return
-  }
-
-  if (mode === 'guest') {
-    const guestCredentials = await resolveGuestCredentials(args)
-    if (!guestCredentials) {
-      console.warn('[psgit] No guest token detected via flags or environment; requesting daemon fallback.')
-    } else if (guestCredentials.source === 'supabase-password') {
-      console.log('[psgit] Minted PowerSync token via Supabase password login for guest session.')
-    }
-
-    const { baseUrl, status } = await loginWithDaemonGuest({
-      daemonUrl: args.daemonUrl,
-      endpoint: guestCredentials?.endpoint ?? args.endpoint,
-      token: guestCredentials?.token,
-      expiresAt: guestCredentials?.expiresAt ?? null,
-      obtainedAt: guestCredentials?.obtainedAt ?? null,
-      metadata: guestCredentials?.metadata ?? null,
-    })
-    if (!status) {
-      throw new Error(`Daemon at ${baseUrl} did not return an auth status.`)
-    }
-    if (status.status === 'ready') {
-      persistDaemonCredentials(status.token, status.expiresAt ?? null, status.context ?? null)
-      console.log('✅ Daemon joined as guest.')
-      if (status.expiresAt) {
-        console.log(`   Expires: ${status.expiresAt}`)
-      }
-      const metadataSource =
-        typeof guestCredentials?.metadata?.source === 'string'
-          ? guestCredentials.metadata.source
-          : guestCredentials?.source === 'supabase-password'
-            ? 'supabase-password'
-            : guestCredentials?.source === 'env'
-              ? 'environment'
-              : guestCredentials?.source === 'flag'
-                ? 'flag'
-                : null
-      if (metadataSource) {
-        console.log(`   Token source: ${metadataSource}`)
-      }
-      return
-    }
-    if (status.status === 'pending') {
-      console.log('Daemon reports authentication pending. Complete the guest provisioning and rerun `psgit login --guest`.')
-      if (status.reason) {
-        console.log(`Reason: ${status.reason}`)
-      }
-      process.exit(1)
-    }
-    const reason = status.reason ? ` (${status.reason})` : ''
-    throw new Error(`Daemon guest login failed with status ${status.status}${reason}.`)
-  }
-
-  if (
-    args.supabaseEmail != null ||
-    args.supabasePassword != null ||
-    args.supabaseUrl != null ||
-    args.supabaseAnonKey != null
-  ) {
-    console.warn('[psgit] Supabase credential flags are no longer supported; routing login through daemon device flow.')
+  if (args.session) {
+    console.warn('[psgit] Ignoring legacy --session option; Supabase session persistence is automatic.')
   }
 
   let observedChallenge: {
@@ -644,8 +396,8 @@ async function runLoginCommand(args: LoginCommandArgs) {
   }
 
   if (finalStatus.status === 'ready') {
-    persistDaemonCredentials(finalStatus.token, finalStatus.expiresAt ?? null, finalStatus.context ?? null)
-    console.log('✅ PowerSync daemon authenticated successfully.')
+    persistDaemonCredentials('', finalStatus.expiresAt ?? null, finalStatus.context ?? null)
+    console.log('✅ PowerSync daemon authenticated via Supabase.')
     if (finalStatus.expiresAt) {
       console.log(`   Expires: ${finalStatus.expiresAt}`)
     }
@@ -746,7 +498,7 @@ function printUsage() {
   console.log('  psgit remote add powersync powersync::https://<endpoint>/orgs/<org>/repos/<repo>')
   console.log('  psgit sync [--remote <name>]')
   console.log('  psgit demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]')
-  console.log('  psgit login [--guest] [--manual --token <jwt>] [--endpoint <url>] [--daemon-url <url>]')
+  console.log('  psgit login [--endpoint <url>] [--daemon-url <url>]')
   console.log('  psgit daemon stop [--daemon-url <url>] [--wait <ms>]')
   console.log('  psgit logout [--daemon-url <url>]')
   console.log('  psgit profile list|show|set|use …')
@@ -762,7 +514,7 @@ function buildCli() {
         '  psgit remote add powersync powersync::https://<endpoint>/orgs/<org>/repos/<repo>\n' +
         '  psgit sync [--remote <name>]\n' +
         '  psgit demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]\n' +
-        '  psgit login [--guest] [--manual --token <jwt>] [--endpoint <url>] [--daemon-url <url>]\n' +
+        '  psgit login [--endpoint <url>] [--daemon-url <url>]\n' +
         '  psgit daemon stop [--daemon-url <url>] [--wait <ms>]\n' +
         '  psgit logout [--daemon-url <url>]',
     )
@@ -1098,22 +850,6 @@ function buildCli() {
       'Authenticate the PowerSync daemon',
       (y) =>
         y
-          .option('manual', {
-            type: 'boolean',
-            describe: 'Provide an explicit PowerSync token',
-          })
-          .option('guest', {
-            type: 'boolean',
-            describe: 'Join as a guest user (anonymous token)',
-          })
-          .option('auto', {
-            type: 'boolean',
-            describe: 'Force device/browser flow (default)',
-          })
-          .option('token', {
-            type: 'string',
-            describe: 'PowerSync JWT',
-          })
           .option('endpoint', {
             type: 'string',
             describe: 'PowerSync endpoint override',
@@ -1125,36 +861,12 @@ function buildCli() {
           .option('daemon-url', {
             type: 'string',
             describe: 'PowerSync daemon base URL',
-          })
-          .option('supabase-email', {
-            type: 'string',
-            describe: 'Supabase email (deprecated)',
-          })
-          .option('supabase-password', {
-            type: 'string',
-            describe: 'Supabase password (deprecated)',
-          })
-          .option('supabase-url', {
-            type: 'string',
-            describe: 'Supabase URL (deprecated)',
-          })
-          .option('supabase-anon-key', {
-            type: 'string',
-            describe: 'Supabase anon key (deprecated)',
           }),
       async (argv) => {
         await runLoginCommand({
-          manual: argv.manual as boolean | undefined,
-          guest: argv.guest as boolean | undefined,
-          auto: argv.auto as boolean | undefined,
-          token: argv.token as string | undefined,
           endpoint: argv.endpoint as string | undefined,
           session: argv.session as string | undefined,
           daemonUrl: argv['daemon-url'] as string | undefined,
-          supabaseEmail: argv['supabase-email'] as string | undefined,
-          supabasePassword: argv['supabase-password'] as string | undefined,
-          supabaseUrl: argv['supabase-url'] as string | undefined,
-          supabaseAnonKey: argv['supabase-anon-key'] as string | undefined,
         })
       },
     )

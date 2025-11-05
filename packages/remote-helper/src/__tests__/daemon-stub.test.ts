@@ -1,8 +1,10 @@
 import { Buffer } from 'node:buffer'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createDaemonStub } from './daemon-stub.js'
+import { __internals } from '../index.js'
 
 const stubs: Array<Awaited<ReturnType<typeof createDaemonStub>>> = []
+const { ensureDaemonReady, __setDaemonBaseUrlForTests } = __internals
 
 afterEach(async () => {
   while (stubs.length > 0) {
@@ -10,6 +12,40 @@ afterEach(async () => {
     if (!stub) continue
     await stub.close().catch(() => undefined)
   }
+})
+
+describe('ensureDaemonReady authentication handling', () => {
+  it('resolves when daemon auth status is ready', async () => {
+    const stub = await createDaemonStub()
+    stubs.push(stub)
+    stub.setAuthStatus({ status: 'ready' })
+    __setDaemonBaseUrlForTests(stub.baseUrl)
+
+    await expect(ensureDaemonReady()).resolves.toBeUndefined()
+  })
+
+  it('throws when daemon requires authentication', async () => {
+    const stub = await createDaemonStub()
+    stubs.push(stub)
+    stub.setAuthStatus({ status: 'auth_required', context: { challengeId: 'abc123' } })
+    __setDaemonBaseUrlForTests(stub.baseUrl)
+
+    await expect(ensureDaemonReady()).rejects.toThrow(/PowerSync daemon is not authenticated/)
+  })
+
+  it('waits for pending authentication to complete', async () => {
+    const stub = await createDaemonStub()
+    stubs.push(stub)
+    stub.setAuthStatus({ status: 'pending', context: { challengeId: 'pending123' } })
+    __setDaemonBaseUrlForTests(stub.baseUrl)
+
+    const readyPromise = ensureDaemonReady()
+    setTimeout(() => {
+      stub.setAuthStatus({ status: 'ready' })
+    }, 150)
+
+    await expect(readyPromise).resolves.toBeUndefined()
+  })
 })
 
 describe('daemon stub harness', () => {

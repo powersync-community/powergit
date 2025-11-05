@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDaemonServer, type DaemonAuthResponse } from '../server.js';
+import { createDaemonServer } from '../server.js';
 
 async function listenServer(
   options: Parameters<typeof createDaemonServer>[0],
@@ -15,8 +15,7 @@ async function listenServer(
 }
 
 describe('createDaemonServer auth routes', () => {
-  it('serves auth status and guest/device/logout handlers', async () => {
-    let guestPayload: Record<string, unknown> | null = null;
+  it('serves auth status and device/logout handlers', async () => {
     let devicePayload: Record<string, unknown> | null = null;
 
     const { baseUrl, close } = await listenServer({
@@ -28,10 +27,6 @@ describe('createDaemonServer auth routes', () => {
         streamCount: 0,
       }),
       getAuthStatus: () => ({ status: 'ready', token: 'cached-token' }),
-      handleAuthGuest: async (payload) => {
-        guestPayload = payload;
-        return { status: 'ready', token: 'guest-token', httpStatus: 201 } satisfies DaemonAuthResponse;
-      },
       handleAuthDevice: async (payload) => {
         devicePayload = payload;
         return { status: 'pending', reason: 'waiting' };
@@ -45,15 +40,6 @@ describe('createDaemonServer auth routes', () => {
       const statusRes = await fetch(`${baseUrl}/auth/status`);
       expect(statusRes.status).toBe(200);
       expect(await statusRes.json()).toEqual({ status: 'ready', token: 'cached-token' });
-
-      const guestRes = await fetch(`${baseUrl}/auth/guest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: 'payload-token', endpoint: 'https://endpoint.local' }),
-      });
-      expect(guestRes.status).toBe(201);
-      expect(await guestRes.json()).toEqual({ status: 'ready', token: 'guest-token' });
-      expect(guestPayload).toEqual({ token: 'payload-token', endpoint: 'https://endpoint.local' });
 
       const deviceRes = await fetch(`${baseUrl}/auth/device`, {
         method: 'POST',

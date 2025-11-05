@@ -12,6 +12,9 @@ const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm
 const DAEMON_AUTOSTART_DISABLED = (process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
 const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000', 10)
 const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000', 10)
+const DAEMON_AUTH_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_AUTH_TIMEOUT_MS ?? '15000', 10)
+const CLI_LOGIN_HINT = process.env.POWERSYNC_LOGIN_COMMAND ?? 'pnpm --filter @pkg/cli cli login'
+const AUTH_STATUS_POLL_INTERVAL_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_AUTH_POLL_MS ?? '500', 10)
 const DAEMON_START_HINT =
   'PowerSync daemon unreachable — start it with "pnpm --filter @svc/daemon start" or point POWERSYNC_DAEMON_URL at a running instance.'
 
@@ -192,7 +195,13 @@ function dedupeFetch(items: FetchRequest[]): FetchRequest[] {
 
 async function ensureClient(): Promise<PowerSyncRemoteClient | null> {
   if (!parsed) return null
-  await ensureDaemonReady()
+  try {
+    await ensureDaemonReady()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(`[powersync] ${message}`)
+    return null
+  }
   if (!daemonClient) {
     if (typeof globalThis.fetch !== 'function') {
       console.error('[powersync] fetch API unavailable; requires Node 18+')
@@ -250,46 +259,144 @@ let daemonStartInFlight = false
 
 async function ensureDaemonReady(): Promise<void> {
   if (typeof globalThis.fetch !== 'function') return
-  if (await isDaemonResponsive()) return
-
-  if (DAEMON_AUTOSTART_DISABLED) {
-    throw new Error(DAEMON_START_HINT)
-  }
-
-  if (!daemonStartInFlight) {
-    daemonStartInFlight = true
-    debugLog(`[powersync] attempting to start daemon via: ${DAEMON_START_COMMAND}`)
-    try {
-      launchDaemon()
-    } catch (error) {
-      daemonStartInFlight = false
-      throw new Error(`failed to launch PowerSync daemon — ${(error as Error).message}`)
+  let responsive = await isDaemonResponsive()
+  if (!responsive) {
+    if (DAEMON_AUTOSTART_DISABLED) {
+      throw new Error(DAEMON_START_HINT)
     }
-  }
 
-  const deadline = Date.now() + DAEMON_START_TIMEOUT_MS
-  while (Date.now() < deadline) {
-    if (await isDaemonResponsive()) {
-      daemonStartInFlight = false
-      return
+    if (!daemonStartInFlight) {
+      daemonStartInFlight = true
+      debugLog(`[powersync] attempting to start daemon via: ${DAEMON_START_COMMAND}`)
+      try {
+        launchDaemon()
+      } catch (error) {
+        daemonStartInFlight = false
+        throw new Error(`failed to launch PowerSync daemon — ${(error as Error).message}`)
+      }
     }
-    await delay(200)
+
+    const deadline = Date.now() + DAEMON_START_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      responsive = await isDaemonResponsive()
+      if (responsive) {
+        daemonStartInFlight = false
+        break
+      }
+      await delay(200)
+    }
+
+    if (!responsive) {
+      daemonStartInFlight = false
+      throw new Error(`${DAEMON_START_HINT} (daemon start timed out)`)
+    }
   }
 
   daemonStartInFlight = false
-  throw new Error(`${DAEMON_START_HINT} (daemon start timed out)`)
+  await ensureDaemonAuthenticated()
 }
 
-async function isDaemonResponsive(): Promise<boolean> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), DAEMON_CHECK_TIMEOUT_MS)
-    const res = await fetch(`${daemonBaseUrl}/health`, { signal: controller.signal })
-    clearTimeout(timeout)
-    return res.ok
-  } catch {
-    return false
+type NormalizedAuthStatus =
+  | { status: 'ready'; reason?: string | null; context?: Record<string, unknown> | null }
+  | { status: 'pending'; reason?: string | null; context?: Record<string, unknown> | null }
+  | { status: 'auth_required'; reason?: string | null; context?: Record<string, unknown> | null }
+  | { status: 'error'; reason?: string | null; context?: Record<string, unknown> | null }
+
+function normalizeAuthContext(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  return raw as Record<string, unknown>
+}
+
+function normalizeAuthStatus(payload: unknown): NormalizedAuthStatus | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const record = payload as { status?: unknown; reason?: unknown; context?: unknown }
+  const statusValue = typeof record.status === 'string' ? record.status.toLowerCase() : ''
+  if (statusValue !== 'ready' && statusValue !== 'pending' && statusValue !== 'auth_required' && statusValue !== 'error') {
+    return null
   }
+  const reason = typeof record.reason === 'string' ? record.reason : null
+  const context = normalizeAuthContext((record.context ?? null) as unknown)
+  return { status: statusValue as NormalizedAuthStatus['status'], reason, context }
+}
+
+async function fetchDaemonAuthStatus(): Promise<NormalizedAuthStatus | null> {
+  try {
+    const res = await fetch(`${daemonBaseUrl}/auth/status`)
+    if (!res.ok) return null
+    const payload = await res.json().catch(() => null)
+    return normalizeAuthStatus(payload)
+  } catch {
+    return null
+  }
+}
+
+function formatDeviceInstructions(context: Record<string, unknown> | null | undefined): string | null {
+  if (!context) return null
+  const verificationUrl =
+    typeof context.verificationUrl === 'string' && context.verificationUrl.trim().length > 0
+      ? context.verificationUrl.trim()
+      : null
+  const challengeId =
+    typeof context.challengeId === 'string' && context.challengeId.trim().length > 0
+      ? context.challengeId.trim()
+      : null
+  if (verificationUrl) {
+    return challengeId
+      ? `Open ${verificationUrl} (device code ${challengeId})`
+      : `Open ${verificationUrl} to finish login`
+  }
+  if (challengeId) {
+    return `Complete daemon login with device code ${challengeId}`
+  }
+  return null
+}
+
+async function ensureDaemonAuthenticated(): Promise<void> {
+  const deadline = Date.now() + DAEMON_AUTH_TIMEOUT_MS
+  let lastStatus: NormalizedAuthStatus | null = null
+  let pendingNotified = false
+  while (Date.now() < deadline) {
+    lastStatus = await fetchDaemonAuthStatus()
+    if (!lastStatus) {
+      await delay(AUTH_STATUS_POLL_INTERVAL_MS)
+      continue
+    }
+    if (lastStatus.status === 'ready') {
+      return
+    }
+    if (lastStatus.status === 'pending') {
+      if (!pendingNotified) {
+        const instructions = formatDeviceInstructions(lastStatus.context)
+        console.error(
+          `[powersync] Waiting for PowerSync daemon login to complete.${instructions ? ` ${instructions}.` : ''}`,
+        )
+        pendingNotified = true
+      }
+      await delay(AUTH_STATUS_POLL_INTERVAL_MS)
+      continue
+    }
+    if (lastStatus.status === 'auth_required') {
+      const instructions = formatDeviceInstructions(lastStatus.context)
+      throw new Error(
+        `PowerSync daemon is not authenticated. Run "${CLI_LOGIN_HINT}" to sign in via Supabase.${
+          instructions ? ` ${instructions}.` : ''
+        }`,
+      )
+    }
+    if (lastStatus.status === 'error') {
+      const reason = lastStatus.reason ? ` (${lastStatus.reason})` : ''
+      throw new Error(`PowerSync daemon authentication failed${reason}. Run "${CLI_LOGIN_HINT}" and retry.`)
+    }
+  }
+
+  if (lastStatus?.status === 'pending') {
+    const instructions = formatDeviceInstructions(lastStatus.context)
+    throw new Error(
+      `PowerSync daemon login is still pending. ${instructions ?? 'Complete the Supabase device flow'} and retry.`,
+    )
+  }
+
+  throw new Error(`PowerSync daemon did not report an authenticated session. Run "${CLI_LOGIN_HINT}" and retry.`)
 }
 
 function launchDaemon(): void {
@@ -307,6 +414,18 @@ function launchDaemon(): void {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function isDaemonResponsive(): Promise<boolean> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), DAEMON_CHECK_TIMEOUT_MS)
+    const res = await fetch(`${daemonBaseUrl}/health`, { signal: controller.signal })
+    clearTimeout(timeout)
+    return res.ok
+  } catch {
+    return false
+  }
 }
 
 function detectRemoteReference(parts: string[]) {
@@ -736,6 +855,12 @@ async function readNextLine(iterator: AsyncIterator<Buffer>, buffer: Buffer): Pr
 export const __internals = {
   parsePush,
   pushViaDaemon,
+  ensureDaemonReady,
+  __setDaemonBaseUrlForTests(url: string) {
+    daemonBaseUrl = normalizeBaseUrl(url)
+    daemonClient = null
+    daemonStartInFlight = false
+  },
 }
 
 function formatDaemonError(operation: string, error: unknown): string | null {

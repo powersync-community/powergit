@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
+import { resolveSupabaseSessionPath as resolveSupabaseSessionPathShared } from '@shared/core'
 
 export interface StoredCredentials {
   endpoint: string
@@ -34,7 +35,12 @@ export async function loadStoredCredentials(filePath?: string): Promise<StoredCr
     if (!parsed || typeof parsed.endpoint !== 'string' || typeof parsed.token !== 'string') {
       return null
     }
-    return parsed
+    return {
+      endpoint: parsed.endpoint,
+      token: parsed.token,
+      expiresAt: parsed.expiresAt,
+      obtainedAt: parsed.obtainedAt,
+    }
   } catch (error: any) {
     if (error?.code === 'ENOENT') {
       return null
@@ -46,7 +52,13 @@ export async function loadStoredCredentials(filePath?: string): Promise<StoredCr
 export async function saveStoredCredentials(credentials: StoredCredentials, filePath?: string): Promise<void> {
   const target = getSessionPath(filePath)
   await ensureDirectory(target)
-  await fs.writeFile(target, `${JSON.stringify(credentials, null, 2)}\n`, 'utf8')
+  const payload: Record<string, unknown> = {
+    endpoint: credentials.endpoint,
+    token: credentials.token,
+    expiresAt: credentials.expiresAt,
+    obtainedAt: credentials.obtainedAt,
+  }
+  await fs.writeFile(target, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
 }
 
 export async function clearStoredCredentials(filePath?: string): Promise<void> {
@@ -59,6 +71,25 @@ export async function clearStoredCredentials(filePath?: string): Promise<void> {
     }
     throw error
   }
+}
+
+export function resolveSupabaseSessionPath(customPath?: string): string {
+  const base = getSessionPath(customPath)
+  try {
+    if (typeof resolveSupabaseSessionPathShared === 'function') {
+      return resolveSupabaseSessionPathShared(base)
+    }
+  } catch (error) {
+    // fall back to local resolution when the shared helper is mocked without the function
+    if (process.env.POWERSYNC_DEBUG_SUPABASE === '1') {
+      console.warn('[psgit] resolveSupabaseSessionPathShared invocation failed; using local path fallback.', error)
+    }
+  }
+  const normalized = resolve(base)
+  if (normalized.endsWith('.json')) {
+    return normalized
+  }
+  return resolve(dirname(normalized), 'supabase-auth.json')
 }
 
 export function isCredentialExpired(credentials: StoredCredentials, clock: () => number = () => Date.now()): boolean {

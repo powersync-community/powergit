@@ -30,6 +30,12 @@ describe('remote helper internals', () => {
       if (target.endsWith('/health')) {
         return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
       }
+      if (target.endsWith('/auth/status')) {
+        return new Response(JSON.stringify({ status: 'ready' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
       return new Response('not used', { status: 500 })
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
@@ -62,6 +68,6 @@ describe('remote helper internals', () => {
     expect(Array.isArray(pushArgs.updates)).toBe(true)
     expect(Buffer.isBuffer(pushArgs.pack)).toBe(true)
     expect(pushArgs.options).toMatchObject({ packOid: '123', summary })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

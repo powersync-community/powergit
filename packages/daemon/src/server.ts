@@ -62,7 +62,6 @@ export interface DaemonServerOptions {
   fetchPack?: (params: { orgId: string; repoId: string; wants?: string[] }) => Promise<DaemonPackResponse | null>;
   pushPack?: (params: { orgId: string; repoId: string; payload: DaemonPushRequest }) => Promise<DaemonPushResponse>;
   getAuthStatus?: () => DaemonAuthResponse | Promise<DaemonAuthResponse>;
-  handleAuthGuest?: (payload: Record<string, unknown>) => Promise<DaemonAuthResponse>;
   handleAuthDevice?: (payload: Record<string, unknown>) => Promise<DaemonAuthResponse>;
   handleAuthLogout?: (payload: Record<string, unknown> | null) => Promise<DaemonAuthResponse>;
   listStreams?: () => Promise<string[]> | string[];
@@ -133,8 +132,6 @@ function allowedMethodsForPath(pathname: string, options: DaemonServerOptions): 
   switch (pathname) {
     case '/auth/status':
       return options.getAuthStatus ? ['GET'] : null;
-    case '/auth/guest':
-      return options.handleAuthGuest ? ['POST'] : null;
     case '/auth/device':
       return options.handleAuthDevice ? ['POST'] : null;
     case '/auth/logout':
@@ -273,21 +270,6 @@ export function createDaemonServer(options: DaemonServerOptions): DaemonServer {
           sendJson(res, 200, payload ?? {});
         } catch (error) {
           console.error('[powersync-daemon] failed to resolve auth status', error);
-          res.statusCode = 500;
-          res.end();
-        }
-        return;
-      }
-
-      if (req.method === 'POST' && url.pathname === '/auth/guest' && options.handleAuthGuest) {
-        try {
-          const payload = (await readJsonBody<Record<string, unknown>>(req)) ?? {};
-          const response = await options.handleAuthGuest(payload);
-          const { httpStatus, ...rest } = response ?? {};
-          applyCorsHeaders(res, originHeader);
-          sendJson(res, httpStatus ?? 200, rest ?? {});
-        } catch (error) {
-          console.error('[powersync-daemon] guest auth handler failed', error);
           res.statusCode = 500;
           res.end();
         }

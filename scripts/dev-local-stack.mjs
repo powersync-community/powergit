@@ -15,7 +15,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import {
   resolveDaemonBaseUrl,
   fetchDaemonStatus,
-  shouldRefreshDaemonStatus,
+  ensureDaemonSupabaseAuth,
 } from './dev-shared.mjs'
 const DEFAULT_ORG = process.env.POWERSYNC_STACK_ORG ?? 'demo'
 const DEFAULT_REPO = process.env.POWERSYNC_STACK_REPO ?? 'infra'
@@ -532,7 +532,6 @@ function buildStackEnv(statusEnv) {
     psPort,
     daemonDeviceLoginUrl,
     daemonEndpoint,
-    daemonToken: process.env.POWERSYNC_DAEMON_TOKEN ?? statusEnv.POWERSYNC_DAEMON_TOKEN ?? serviceRoleKey,
   }
 }
 
@@ -579,48 +578,8 @@ async function ensureSupabaseAuthUser(env) {
   }
 }
 
-async function refreshDaemonCredentials(env) {
-  if (cliOptions?.dryRun) {
-    infoLog('[dry-run] Skipping daemon guest credential refresh')
-    return false
-  }
-
-  const daemonBaseUrl = resolveDaemonBaseUrl({
-    POWERSYNC_DAEMON_URL: env.daemonEndpoint ?? process.env.POWERSYNC_DAEMON_URL,
-    POWERSYNC_DAEMON_ENDPOINT: env.powersyncEndpoint ?? process.env.POWERSYNC_DAEMON_ENDPOINT,
-  })
-  try {
-    let status = await fetchDaemonStatus(daemonBaseUrl)
-    if (!status || shouldRefreshDaemonStatus(status)) {
-      try {
-        delete process.env.POWERSYNC_DAEMON_TOKEN
-        await runCommand('pnpm', ['--filter', '@pkg/cli', 'cli', 'login', '--guest'], {
-          stdio: ['inherit', 'pipe', 'pipe'],
-        })
-      } catch (error) {
-        warnLog(`[dev:stack] Failed to refresh daemon guest credentials: ${error?.message ?? error}`)
-        return false
-      }
-      status = await fetchDaemonStatus(daemonBaseUrl)
-    }
-    if (!status || status.status !== 'ready') {
-      warnLog('[dev:stack] Daemon auth status did not return a ready token; continuing with service-role fallback.')
-      return false
-    }
-    applyDaemonStatusToStackEnv(env, status)
-    infoLog('[dev:stack] Refreshed daemon guest token from /auth/status.')
-    return true
-  } catch (error) {
-    warnLog('[dev:stack] Unable to verify daemon auth status after login', error?.message ?? error)
-    return false
-  }
-}
-
 function applyDaemonStatusToStackEnv(env, status) {
   if (!status || status.status !== 'ready') return
-  env.daemonToken = status.token
-  env.daemonTokenExpiresAt = status.expiresAt ?? null
-  process.env.POWERSYNC_DAEMON_TOKEN = status.token
   const endpoint =
     status.context && typeof status.context.endpoint === 'string' ? status.context.endpoint.trim() : null
   if (endpoint) {
@@ -653,7 +612,6 @@ function buildExportLines(env, authUser) {
     `export POWERSYNC_DAEMON_URL=${JSON.stringify(env.daemonEndpoint)}`,
     `export POWERSYNC_DAEMON_DEVICE_URL=${JSON.stringify(env.daemonDeviceLoginUrl)}`,
     `export POWERSYNC_DAEMON_ENDPOINT=${JSON.stringify(env.powersyncEndpoint)}`,
-    `export POWERSYNC_DAEMON_TOKEN=${JSON.stringify(env.daemonToken ?? env.serviceRoleKey)}`,
     `export PS_DATABASE_URL=${JSON.stringify(env.psDatabaseUrl)}`,
     `export PS_STORAGE_URI=${JSON.stringify(env.psStorageUri)}`,
     `export PS_PORT=${JSON.stringify(env.psPort)}`,
@@ -702,10 +660,6 @@ async function syncLocalProfile(env, authUser) {
     ...existingDaemon,
     ...(env.daemonEndpoint ? { endpoint: env.daemonEndpoint } : {}),
     ...(env.daemonDeviceLoginUrl ? { deviceLoginUrl: env.daemonDeviceLoginUrl } : {}),
-    ...(env.daemonToken ? { token: env.daemonToken } : {}),
-    tokenExpiresAt: env.daemonToken
-      ? env.daemonTokenExpiresAt ?? null
-      : existingDaemon.tokenExpiresAt ?? null,
   }
   if ('deviceLoginUrl' in nextDaemon && 'deviceUrl' in nextDaemon) {
     delete nextDaemon.deviceUrl
@@ -806,7 +760,6 @@ async function startStack() {
     POWERSYNC_PORT: env.powersyncPort,
     POWERSYNC_DAEMON_URL: env.daemonEndpoint,
     POWERSYNC_DAEMON_ENDPOINT: env.powersyncEndpoint,
-    POWERSYNC_DAEMON_TOKEN: env.daemonToken ?? env.serviceRoleKey,
     PS_DATABASE_URL: env.psDatabaseUrl,
     PS_STORAGE_URI: env.psStorageUri,
     PS_PORT: env.psPort,
@@ -845,11 +798,27 @@ async function startStack() {
       PSGIT_TEST_SUPABASE_PASSWORD: authUser.password,
     })
     Object.assign(process.env, authEnv)
+    Object.assign(env, authEnv)
   }
 
   await waitForPowerSyncReady(env.powersyncEndpoint)
 
-  await refreshDaemonCredentials(env)
+  const authResult = await ensureDaemonSupabaseAuth({
+    env,
+    logger: { info: infoLog, warn: warnLog },
+    metadata: { initiatedBy: 'dev-stack' },
+  })
+
+  if (authResult.status?.status === 'ready') {
+    applyDaemonStatusToStackEnv(env, authResult.status)
+  } else {
+    const fallbackStatus = await fetchDaemonStatus(resolveDaemonBaseUrl(env)).catch(() => null)
+    if (fallbackStatus?.status === 'ready') {
+      applyDaemonStatusToStackEnv(env, fallbackStatus)
+    } else {
+      warnLog('[dev:stack] Daemon did not report ready credentials after Supabase authentication.')
+    }
+  }
 
   await syncLocalProfile(env, authUser).catch((error) => {
     warnLog(`[dev:stack] Failed to sync local-dev profile: ${error?.message ?? error}`)

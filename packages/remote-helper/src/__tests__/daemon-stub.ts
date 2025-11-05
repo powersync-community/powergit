@@ -85,6 +85,7 @@ export interface DaemonStub {
   setListRefs(orgId: string, repoId: string, payload: ListRefsPayload): void
   setFetchPack(orgId: string, repoId: string, payload: FetchPackPayload): void
   setPushResponse(orgId: string, repoId: string, payload: PushResponsePayload): void
+  setAuthStatus(payload: unknown): void
   recordStreamSubscriptions(): StreamTarget[][]
   recordedFetchRequests(): Array<{ orgId: string; repoId: string; body: Record<string, unknown> | null }>
   recordedPushRequests(): Array<{ orgId: string; repoId: string; metadata: Record<string, unknown>; bodySize: number }>
@@ -97,6 +98,7 @@ export async function createDaemonStub(): Promise<DaemonStub> {
   const streamRequests: StreamTarget[][] = []
   const fetchRequests: Array<{ orgId: string; repoId: string; body: Record<string, unknown> | null }> = []
   const pushRequests: Array<{ orgId: string; repoId: string; metadata: Record<string, unknown>; bodySize: number }> = []
+  let authStatus: unknown = { status: 'ready' }
 
   const server = http.createServer(async (req, res) => {
     if (!req.url) {
@@ -114,7 +116,7 @@ export async function createDaemonStub(): Promise<DaemonStub> {
     }
 
     if (req.method === 'GET' && pathname === '/auth/status') {
-      sendJson(res, 200, { status: 'ready' })
+      sendJson(res, 200, authStatus ?? { status: 'ready' })
       return
     }
 
@@ -246,6 +248,9 @@ export async function createDaemonStub(): Promise<DaemonStub> {
     },
     setPushResponse(orgId, repoId, payload) {
       pushResponses.set(keyFor(orgId, repoId), payload)
+    },
+    setAuthStatus(payload) {
+      authStatus = payload
     },
     recordStreamSubscriptions() {
       return streamRequests.slice()

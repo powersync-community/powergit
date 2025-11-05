@@ -7,8 +7,6 @@ export interface DaemonConfig {
   dbPath: string;
   /** PowerSync service endpoint (https://host). */
   endpoint?: string;
-  /** PowerSync JWT or service token. */
-  token?: string;
   /** Optional explicit stream identifiers to subscribe on start. */
   initialStreams: readonly string[];
   /** Hostname/interface the RPC server should bind to. */
@@ -20,7 +18,6 @@ export interface DaemonConfig {
 export interface ResolveDaemonConfigOptions {
   dbPath?: string;
   endpoint?: string;
-  token?: string;
   initialStreams?: readonly string[];
   host?: string;
   port?: number;
@@ -47,7 +44,6 @@ export async function resolveDaemonConfig(options: ResolveDaemonConfigOptions = 
   await ensureDirectoryExists(dirname(dbPath));
 
   const endpoint = options.endpoint ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? process.env.POWERSYNC_ENDPOINT ?? undefined;
-  const token = options.token ?? process.env.POWERSYNC_DAEMON_TOKEN ?? process.env.POWERSYNC_TOKEN ?? undefined;
 
   const explicitStreams = options.initialStreams ?? resolveEnvList(process.env.POWERSYNC_DAEMON_STREAMS);
 
@@ -58,7 +54,6 @@ export async function resolveDaemonConfig(options: ResolveDaemonConfigOptions = 
   return {
     dbPath,
     endpoint,
-    token,
     initialStreams: explicitStreams,
     host,
     port,

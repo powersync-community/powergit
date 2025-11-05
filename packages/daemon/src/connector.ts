@@ -40,7 +40,9 @@ export class DaemonPowerSyncConnector implements PowerSyncBackendConnector {
       }
     }
 
-    console.error('[powersync-daemon] missing PowerSync credentials; set POWERSYNC_DAEMON_ENDPOINT and POWERSYNC_DAEMON_TOKEN');
+    console.error(
+      '[powersync-daemon] missing PowerSync credentials; ensure Supabase authentication is complete and a PowerSync endpoint is configured.',
+    );
     return null;
   }
 

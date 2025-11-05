@@ -33,14 +33,6 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const repoRoot = resolve(__dirname, '..', '..', '..', '..')
 
-const DAEMON_TOKEN_ENV_VARS = [
-  'POWERSYNC_DAEMON_GUEST_TOKEN',
-  'POWERSYNC_DAEMON_TOKEN',
-  'POWERSYNC_SERVICE_TOKEN',
-  'POWERSYNC_TOKEN',
-  'PSGIT_TEST_REMOTE_TOKEN',
-]
-
 function hydrateProfileEnv() {
   const profileOverride = process.env.STACK_PROFILE ?? null
   const profileResult = loadProfileEnvironment({
@@ -51,7 +43,7 @@ function hydrateProfileEnv() {
   })
   for (const [key, value] of Object.entries(profileResult.combinedEnv)) {
     const current = process.env[key]
-    if ((!current || !current.trim()) && !DAEMON_TOKEN_ENV_VARS.includes(key)) {
+    if (!current || !current.trim()) {
       process.env[key] = value
     }
   }
@@ -118,39 +110,7 @@ function runCliCommand(args: string[], label: string, options: CliCommandOptions
   }
 }
 
-function clearDaemonTokenEnvVars() {
-  const env = process.env as Record<string, string | undefined>
-  for (const key of DAEMON_TOKEN_ENV_VARS) {
-    if (env[key]) {
-      delete env[key]
-    }
-  }
-}
-
-function scrubProfileToken() {
-  const profilesPath = resolve(os.homedir(), '.psgit', 'profiles.json')
-  if (!existsSync(profilesPath)) return
-  try {
-    const raw = readFileSync(profilesPath, 'utf8')
-    const data = JSON.parse(raw) as Record<string, any>
-    let mutated = false
-    for (const profile of Object.values(data ?? {}) as any[]) {
-      if (profile && typeof profile === 'object' && profile.daemon && profile.daemon.token) {
-        delete profile.daemon.token
-        mutated = true
-      }
-    }
-    if (mutated) {
-      writeFileSync(profilesPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
-    }
-  } catch (error) {
-    console.warn('[live-cli] failed to scrub psgit profile token', error)
-  }
-}
-
-function resetDaemonGuestSession() {
-  scrubProfileToken()
-  clearDaemonTokenEnvVars()
+function resetDaemonSession() {
   try {
     runCliCommand(['logout'], 'clear daemon session', { tolerateFailure: true })
   } catch {
@@ -292,7 +252,7 @@ test.describe('CLI-seeded repo (live PowerSync)', () => {
 
   test.beforeAll(async () => {
     hydrateProfileEnv()
-    resetDaemonGuestSession()
+    resetDaemonSession()
     REQUIRED_ENV_VARS.forEach(requireEnv)
 
     supabaseEmail = requireEnv('POWERSYNC_SUPABASE_EMAIL')

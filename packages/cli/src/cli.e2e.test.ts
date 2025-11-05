@@ -11,7 +11,8 @@ import { parsePowerSyncUrl, PowerSyncRemoteClient, buildRepoStreamTargets, forma
 import { startStack, stopStack } from '../../../scripts/test-stack-hooks.mjs'
 import { seedDemoRepository } from './index.js'
 import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials } from './auth/session.js'
-import { loginWithSupabasePassword, loginWithDaemonGuest } from './auth/login.js'
+import { loginWithSupabasePassword } from './auth/login.js'
+import { fetchDaemonAuthStatus, resolveDaemonBaseUrl } from './auth/daemon-client.js'
 
 const execFileAsync = promisify(execFile)
 const binPath = fileURLToPath(new URL('./bin.ts', import.meta.url))
@@ -279,7 +280,7 @@ describeLive('psgit sync against live PowerSync stack', () => {
 
     const provisionSessionCredentials = async () => {
       let cached = await loadStoredCredentials().catch(() => null)
-      if (cached?.endpoint && cached?.token) {
+      if (cached?.endpoint) {
         return cached
       }
 
@@ -307,18 +308,21 @@ describeLive('psgit sync against live PowerSync stack', () => {
       })
 
       await saveStoredCredentials(result.credentials)
-
-      const { status } = await loginWithDaemonGuest({
-        endpoint: result.credentials.endpoint,
-        token: result.credentials.token,
-      })
-      if (!status || status.status !== 'ready') {
-        const reason = status?.reason ? ` (${status.reason})` : ''
-        throw new Error(`Daemon guest handshake failed${reason}`)
+      const baseUrl = await resolveDaemonBaseUrl({})
+      const deadline = Date.now() + 30_000
+      while (Date.now() < deadline) {
+        const status = await fetchDaemonAuthStatus(baseUrl)
+        if (status?.status === 'ready') {
+          cached = result.credentials
+          return cached
+        }
+        if (status?.status === 'error') {
+          const reason = status.reason ? ` (${status.reason})` : ''
+          throw new Error(`Daemon authentication failed${reason}`)
+        }
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 500))
       }
-
-      cached = result.credentials
-      return cached
+      throw new Error('Timed out waiting for daemon to acknowledge Supabase session.')
     }
 
     let cachedCredentials
@@ -334,7 +338,6 @@ describeLive('psgit sync against live PowerSync stack', () => {
     }
 
     process.env.POWERSYNC_DAEMON_ENDPOINT = cachedCredentials.endpoint
-    process.env.POWERSYNC_DAEMON_TOKEN = cachedCredentials.token
 
     if (startedLocalStack) {
       await runScript('scripts/seed-sync-rules.mjs')

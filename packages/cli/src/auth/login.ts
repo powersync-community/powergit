@@ -1,10 +1,16 @@
+import { createClient } from '@supabase/supabase-js'
+import { createSupabaseFileStorage, clearSupabaseFileStorage } from '@shared/core'
 import { extractJwtMetadata } from './token.js'
-import { clearStoredCredentials, saveStoredCredentials, type StoredCredentials } from './session.js'
+import {
+  clearStoredCredentials,
+  saveStoredCredentials,
+  resolveSupabaseSessionPath,
+  type StoredCredentials,
+} from './session.js'
 import {
   extractDeviceChallenge,
   fetchDaemonAuthStatus,
   postDaemonAuthDevice,
-  postDaemonAuthGuest,
   postDaemonAuthLogout,
   resolveDaemonBaseUrl,
   type DaemonAuthStatus,
@@ -14,7 +20,6 @@ import { DEFAULT_DAEMON_URL, normalizeBaseUrl } from '../index.js'
 
 export interface LoginOptions {
   endpoint?: string
-  token?: string
   sessionPath?: string
   verbose?: boolean
   supabaseEmail?: string
@@ -26,21 +31,7 @@ export interface LoginOptions {
 
 export interface LoginResult {
   credentials: StoredCredentials
-  source: 'manual' | 'supabase-password'
-}
-
-export interface DaemonGuestLoginOptions {
-  daemonUrl?: string
-  endpoint?: string
-  token?: string
-  expiresAt?: string | null
-  obtainedAt?: string | null
-  metadata?: Record<string, unknown> | null
-}
-
-export interface DaemonGuestLoginResult {
-  baseUrl: string
-  status: DaemonAuthStatus | null
+  source: 'supabase-password'
 }
 
 export interface DaemonDeviceLoginOptions {
@@ -89,26 +80,6 @@ function inferSupabasePassword(explicit?: string): string | undefined {
   return process.env.POWERSYNC_SUPABASE_PASSWORD ?? process.env.PSGIT_TEST_SUPABASE_PASSWORD
 }
 
-export async function loginWithExplicitToken(options: LoginOptions): Promise<LoginResult> {
-  const endpoint = options.endpoint ?? process.env.POWERSYNC_ENDPOINT ?? process.env.PSGIT_TEST_ENDPOINT
-  const token = options.token ?? process.env.POWERSYNC_TOKEN ?? process.env.PSGIT_TEST_REMOTE_TOKEN
-  if (!endpoint || !token) {
-    throw new Error('Endpoint and token are required. Provide --endpoint/--token or set POWERSYNC_ENDPOINT + POWERSYNC_TOKEN.')
-  }
-
-  const metadata = extractJwtMetadata(token)
-  const credentials: StoredCredentials = {
-    endpoint,
-    token,
-    expiresAt: metadata.expiresAt,
-    obtainedAt: metadata.issuedAt ?? new Date().toISOString(),
-  }
-  if (options.persistSession ?? true) {
-    await saveStoredCredentials(credentials, options.sessionPath)
-  }
-  return { credentials, source: 'manual' }
-}
-
 export async function loginWithSupabasePassword(options: LoginOptions = {}): Promise<LoginResult> {
   const supabaseUrl = inferSupabaseUrl(options.supabaseUrl)
   const supabaseAnonKey = inferSupabaseAnonKey(options.supabaseAnonKey)
@@ -126,24 +97,25 @@ export async function loginWithSupabasePassword(options: LoginOptions = {}): Pro
     throw new Error('PowerSync endpoint is required. Set POWERSYNC_ENDPOINT or provide --endpoint.')
   }
 
-  const tokenUrl = `${supabaseUrl.replace(/\/$/, '')}/auth/v1/token?grant_type=password`
-  const response = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${supabaseAnonKey}`,
+  const persistSession = options.persistSession ?? true
+  const supabaseStoragePath = resolveSupabaseSessionPath(options.sessionPath)
+  const storage = persistSession ? createSupabaseFileStorage(supabaseStoragePath) : null
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession,
+      autoRefreshToken: true,
+      storage: storage ?? undefined,
+      storageKey: 'psgit',
     },
-    body: JSON.stringify({ email, password }),
   })
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(`Supabase login failed (${response.status} ${response.statusText}) ${text}`)
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) {
+    throw new Error(`Supabase login failed (${error.name ?? 'AuthError'}): ${error.message}`)
   }
 
-  const result = (await response.json().catch(() => ({}))) as { access_token?: string }
-  const token = result?.access_token
+  const session = data?.session ?? (await supabase.auth.getSession()).data.session
+  const token = session?.access_token
   if (typeof token !== 'string' || token.length === 0) {
     throw new Error('Supabase login response did not include an access_token.')
   }
@@ -156,30 +128,10 @@ export async function loginWithSupabasePassword(options: LoginOptions = {}): Pro
     obtainedAt: metadata.issuedAt ?? new Date().toISOString(),
   }
 
-  if (options.persistSession ?? true) {
+  if (persistSession) {
     await saveStoredCredentials(credentials, options.sessionPath)
   }
   return { credentials, source: 'supabase-password' }
-}
-
-export async function loginWithDaemonGuest(options: DaemonGuestLoginOptions = {}): Promise<DaemonGuestLoginResult> {
-  const baseUrl = await resolveDaemonBaseUrl({ daemonUrl: options.daemonUrl })
-  let status = await postDaemonAuthGuest(baseUrl, {
-    token: options.token,
-    endpoint: options.endpoint,
-    expiresAt: options.expiresAt ?? null,
-    obtainedAt: options.obtainedAt ?? null,
-    metadata: options.metadata ?? null,
-  })
-
-  if (!status || status.status !== 'ready' || !status.token) {
-    const refreshed = await fetchDaemonAuthStatus(baseUrl)
-    if (refreshed && refreshed.status === 'ready' && refreshed.token) {
-      status = refreshed
-    }
-  }
-
-  return { baseUrl, status }
 }
 
 export async function loginWithDaemonDevice(options: DaemonDeviceLoginOptions = {}): Promise<DaemonDeviceLoginResult> {
@@ -228,6 +180,10 @@ export async function loginWithDaemonDevice(options: DaemonDeviceLoginOptions = 
 }
 
 export async function logout(options: { sessionPath?: string; daemonUrl?: string } = {}) {
+  const supabaseSessionPath = resolveSupabaseSessionPath(options.sessionPath)
+  if (typeof clearSupabaseFileStorage === 'function') {
+    await clearSupabaseFileStorage(supabaseSessionPath)
+  }
   await clearStoredCredentials(options.sessionPath)
   const baseUrl = normalizeBaseUrl(options.daemonUrl ?? DEFAULT_DAEMON_URL)
   try {

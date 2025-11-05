@@ -12,22 +12,17 @@ export interface ResolveDaemonOptions {
   daemonUrl?: string
 }
 
-export interface AuthGuestPayload {
-  token?: string
-  endpoint?: string
-  expiresAt?: string | null
-  obtainedAt?: string | null
-  metadata?: Record<string, unknown> | null
-}
-
 export interface AuthDevicePayload {
   mode?: 'device-code' | 'browser'
   endpoint?: string
   metadata?: Record<string, unknown> | null
   challengeId?: string
-  token?: string
-  expiresAt?: string | null
-  obtainedAt?: string | null
+  session?: {
+    access_token: string
+    refresh_token: string
+    expires_in?: number | null
+    expires_at?: number | null
+  }
 }
 
 interface JsonResponse<T> {
@@ -121,21 +116,6 @@ export async function fetchDaemonAuthStatus(baseUrl: string): Promise<DaemonAuth
   return normalizeAuthStatus(result.body)
 }
 
-export async function postDaemonAuthGuest(
-  baseUrl: string,
-  payload: AuthGuestPayload,
-): Promise<DaemonAuthStatus | null> {
-  const result = await request<DaemonAuthStatusBody>(
-    baseUrl,
-    '/auth/guest',
-    {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    },
-  )
-  return normalizeAuthStatus(result.body)
-}
-
 export async function postDaemonAuthDevice(
   baseUrl: string,
   payload: AuthDevicePayload = {},
@@ -187,10 +167,13 @@ export function extractDeviceChallenge(status: DaemonAuthStatus | null): DaemonD
 
 export interface CompleteDeviceLoginPayload {
   challengeId: string
-  token: string
+  session: {
+    access_token: string
+    refresh_token: string
+    expires_in?: number | null
+    expires_at?: number | null
+  }
   endpoint?: string | null
-  expiresAt?: string | null
-  obtainedAt?: string | null
   metadata?: Record<string, unknown> | null
 }
 
@@ -200,10 +183,8 @@ export async function completeDaemonDeviceLogin(
 ): Promise<DaemonAuthStatus | null> {
   return postDaemonAuthDevice(baseUrl, {
     challengeId: payload.challengeId,
-    token: payload.token,
     endpoint: payload.endpoint ?? undefined,
-    expiresAt: payload.expiresAt ?? null,
-    obtainedAt: payload.obtainedAt ?? null,
     metadata: payload.metadata ?? null,
+    session: payload.session,
   })
 }

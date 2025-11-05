@@ -10,7 +10,6 @@ export interface StoredAuthCredentials {
   expiresAt?: string | null;
   obtainedAt?: string | null;
   authType?: string | null;
-  refreshToken?: string | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -38,7 +37,6 @@ export async function loadStoredAuthCredentials(sessionPath: string): Promise<St
       expiresAt: parsed.expiresAt ?? null,
       obtainedAt: parsed.obtainedAt ?? null,
       authType: parsed.authType ?? null,
-      refreshToken: parsed.refreshToken ?? null,
       metadata: parsed.metadata ?? null,
     };
   } catch (error: any) {
@@ -52,13 +50,12 @@ export async function loadStoredAuthCredentials(sessionPath: string): Promise<St
 
 export async function saveStoredAuthCredentials(sessionPath: string, credentials: StoredAuthCredentials): Promise<void> {
   await ensureDirectoryExists(sessionPath);
-  const payload = {
+  const payload: Record<string, unknown> = {
     endpoint: credentials.endpoint,
     token: credentials.token,
     expiresAt: credentials.expiresAt ?? null,
     obtainedAt: credentials.obtainedAt ?? null,
     authType: credentials.authType ?? null,
-    refreshToken: credentials.refreshToken ?? null,
     metadata: credentials.metadata ?? null,
   };
   await fs.writeFile(sessionPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');

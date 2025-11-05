@@ -58,7 +58,6 @@ describe('loadProfileEnvironment', () => {
         },
         daemon: {
           endpoint: 'https://daemon.example.com',
-          token: 'staging-token',
         },
         supabase: {
           url: 'https://supabase.example.com',
@@ -90,7 +89,6 @@ describe('loadProfileEnvironment', () => {
     expect(result.profileEnv).toMatchObject({
       POWERSYNC_ENDPOINT: 'https://powersync.example.com',
       POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
-      POWERSYNC_DAEMON_TOKEN: 'staging-token',
       POWERSYNC_SUPABASE_URL: 'https://supabase.example.com',
     })
     expect(result.stackEnvValues).toMatchObject({
@@ -100,7 +98,6 @@ describe('loadProfileEnvironment', () => {
     expect(result.combinedEnv).toMatchObject({
       POWERSYNC_ENDPOINT: 'https://powersync.example.com',
       POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
-      POWERSYNC_DAEMON_TOKEN: 'staging-token',
       POWERSYNC_SUPABASE_URL: 'https://supabase.example.com',
       POWERSYNC_SUPABASE_ANON_KEY: 'anon-key-staging',
       VITE_CUSTOM_FLAG: 'enabled',
