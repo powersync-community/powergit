@@ -17,8 +17,6 @@ import {
   fetchDaemonStatus,
   shouldRefreshDaemonStatus,
 } from './dev-shared.mjs'
-
-const STACK_ENV_FILENAME = '.env.powersync-stack'
 const DEFAULT_ORG = process.env.POWERSYNC_STACK_ORG ?? 'demo'
 const DEFAULT_REPO = process.env.POWERSYNC_STACK_REPO ?? 'infra'
 const DEFAULT_REMOTE_NAME = process.env.POWERSYNC_STACK_REMOTE ?? 'powersync'
@@ -67,7 +65,6 @@ function parseArgs(rawArgs) {
     log: false,
     logDir: resolve(repoRoot, 'logs', 'dev-stack'),
     printExports: false,
-    skipEnvFile: false,
     skipSeeds: false,
     skipDemoSeed: false,
     skipSyncRules: false,
@@ -112,10 +109,6 @@ function parseArgs(rawArgs) {
       case '--print-env':
       case '--shell-output':
         options.printExports = true
-        break
-      case '--no-env-file':
-      case '--no-file':
-        options.skipEnvFile = true
         break
       case '--skip-seeds':
       case '--no-seed':
@@ -509,11 +502,11 @@ function buildStackEnv(statusEnv) {
     process.env.POWERSYNC_ENDPOINT ?? statusEnv.POWERSYNC_ENDPOINT ?? `http://127.0.0.1:${powersyncPort}`
   const remoteUrl = `powersync::${powersyncEndpoint.replace(/\/$/, '')}/orgs/${DEFAULT_ORG}/repos/${DEFAULT_REPO}`
   const databaseUrl = resolvedDatabaseUrl
-  const daemonDeviceUrl =
+  const daemonDeviceLoginUrl =
     process.env.POWERSYNC_DAEMON_DEVICE_URL ??
     statusEnv.POWERSYNC_DAEMON_DEVICE_URL ??
     DEFAULT_DAEMON_DEVICE_URL
-  const daemonUrl =
+  const daemonEndpoint =
     process.env.POWERSYNC_DAEMON_URL ??
     statusEnv.POWERSYNC_DAEMON_URL ??
     process.env.POWERSYNC_DAEMON_ENDPOINT ??
@@ -537,8 +530,8 @@ function buildStackEnv(statusEnv) {
     psDatabaseUrl,
     psStorageUri,
     psPort,
-    daemonDeviceUrl,
-    daemonUrl,
+    daemonDeviceLoginUrl,
+    daemonEndpoint,
     daemonToken: process.env.POWERSYNC_DAEMON_TOKEN ?? statusEnv.POWERSYNC_DAEMON_TOKEN ?? serviceRoleKey,
   }
 }
@@ -593,7 +586,7 @@ async function refreshDaemonCredentials(env) {
   }
 
   const daemonBaseUrl = resolveDaemonBaseUrl({
-    POWERSYNC_DAEMON_URL: env.daemonUrl ?? process.env.POWERSYNC_DAEMON_URL,
+    POWERSYNC_DAEMON_URL: env.daemonEndpoint ?? process.env.POWERSYNC_DAEMON_URL,
     POWERSYNC_DAEMON_ENDPOINT: env.powersyncEndpoint ?? process.env.POWERSYNC_DAEMON_ENDPOINT,
   })
   try {
@@ -626,6 +619,7 @@ async function refreshDaemonCredentials(env) {
 function applyDaemonStatusToStackEnv(env, status) {
   if (!status || status.status !== 'ready') return
   env.daemonToken = status.token
+  env.daemonTokenExpiresAt = status.expiresAt ?? null
   process.env.POWERSYNC_DAEMON_TOKEN = status.token
   const endpoint =
     status.context && typeof status.context.endpoint === 'string' ? status.context.endpoint.trim() : null
@@ -656,8 +650,8 @@ function buildExportLines(env, authUser) {
     `export POWERSYNC_DATABASE_URL=${JSON.stringify(env.powersyncDatabaseUrl)}`,
     `export POWERSYNC_STORAGE_URI=${JSON.stringify(env.powersyncStorageUri)}`,
     `export POWERSYNC_PORT=${JSON.stringify(env.powersyncPort)}`,
-    `export POWERSYNC_DAEMON_URL=${JSON.stringify(env.daemonUrl)}`,
-    `export POWERSYNC_DAEMON_DEVICE_URL=${JSON.stringify(env.daemonDeviceUrl)}`,
+    `export POWERSYNC_DAEMON_URL=${JSON.stringify(env.daemonEndpoint)}`,
+    `export POWERSYNC_DAEMON_DEVICE_URL=${JSON.stringify(env.daemonDeviceLoginUrl)}`,
     `export POWERSYNC_DAEMON_ENDPOINT=${JSON.stringify(env.powersyncEndpoint)}`,
     `export POWERSYNC_DAEMON_TOKEN=${JSON.stringify(env.daemonToken ?? env.serviceRoleKey)}`,
     `export PS_DATABASE_URL=${JSON.stringify(env.psDatabaseUrl)}`,
@@ -678,26 +672,9 @@ function buildExportLines(env, authUser) {
   return lines
 }
 
-async function writeStackEnvFile(env, authUser) {
-  const lines = buildExportLines(env, authUser)
-  const filePath = resolve(repoRoot, STACK_ENV_FILENAME)
-
-  if (cliOptions.dryRun || cliOptions.skipEnvFile) {
-    infoLog(`[skip] ${STACK_ENV_FILENAME} ${cliOptions.dryRun ? '(dry-run)' : '(disabled via flag)'}`)
-    return lines
-  }
-
-  await writeFile(filePath, lines.join('\n'))
-  infoLog(`💾 Wrote stack environment exports to ${STACK_ENV_FILENAME}`)
-  infoLog(`   source ${STACK_ENV_FILENAME}  # apply in your current shell (zsh/bash/fish)`)
-  await syncLocalProfile(env, authUser).catch((error) => {
-    warnLog(`[dev:stack] Failed to sync local-dev profile: ${error?.message ?? error}`)
-  })
-  return lines
-}
-
 async function syncLocalProfile(env, authUser) {
-  const profileDir = resolve(homedir(), '.psgit')
+  const override = process.env.PSGIT_HOME
+  const profileDir = resolve(override && override.trim().length > 0 ? override : resolve(homedir(), '.psgit'))
   const profilesPath = resolve(profileDir, 'profiles.json')
 
   let profiles = {}
@@ -711,14 +688,27 @@ async function syncLocalProfile(env, authUser) {
 
   const existing = profiles['local-dev'] && typeof profiles['local-dev'] === 'object' ? profiles['local-dev'] : {}
   const existingPowerSync = existing.powersync && typeof existing.powersync === 'object' ? existing.powersync : {}
+  const existingDaemon = existing.daemon && typeof existing.daemon === 'object' ? existing.daemon : {}
   const existingSupabase = existing.supabase && typeof existing.supabase === 'object' ? existing.supabase : {}
 
   const nextPowerSync = {
     ...existingPowerSync,
-    ...(env.powersyncEndpoint ? { endpoint: env.powersyncEndpoint } : {}),
-    ...(env.daemonUrl ? { daemonUrl: env.daemonUrl } : {}),
-    ...(env.daemonDeviceUrl ? { deviceUrl: env.daemonDeviceUrl } : {}),
+    ...(env.powersyncEndpoint
+      ? { url: env.powersyncEndpoint, endpoint: env.powersyncEndpoint }
+      : {}),
+  }
+
+  const nextDaemon = {
+    ...existingDaemon,
+    ...(env.daemonEndpoint ? { endpoint: env.daemonEndpoint } : {}),
+    ...(env.daemonDeviceLoginUrl ? { deviceLoginUrl: env.daemonDeviceLoginUrl } : {}),
     ...(env.daemonToken ? { token: env.daemonToken } : {}),
+    tokenExpiresAt: env.daemonToken
+      ? env.daemonTokenExpiresAt ?? null
+      : existingDaemon.tokenExpiresAt ?? null,
+  }
+  if ('deviceLoginUrl' in nextDaemon && 'deviceUrl' in nextDaemon) {
+    delete nextDaemon.deviceUrl
   }
 
   const nextSupabase = {
@@ -739,15 +729,15 @@ async function syncLocalProfile(env, authUser) {
 
   const nextProfile = {
     ...existing,
-    stackEnvPath: STACK_ENV_FILENAME,
     powersync: nextPowerSync,
+    daemon: nextDaemon,
     supabase: nextSupabase,
   }
 
   profiles['local-dev'] = nextProfile
   await mkdirAsync(profileDir, { recursive: true })
   await writeFile(profilesPath, `${JSON.stringify(profiles, null, 2)}\n`)
-  infoLog(`🔁 Synced local-dev profile with ${STACK_ENV_FILENAME}`)
+  infoLog('🔁 Synced local-dev profile credentials.')
 }
 
 async function seedSyncRules(env) {
@@ -814,7 +804,7 @@ async function startStack() {
     POWERSYNC_DATABASE_URL: env.powersyncDatabaseUrl,
     POWERSYNC_STORAGE_URI: env.powersyncStorageUri,
     POWERSYNC_PORT: env.powersyncPort,
-    POWERSYNC_DAEMON_URL: env.daemonUrl,
+    POWERSYNC_DAEMON_URL: env.daemonEndpoint,
     POWERSYNC_DAEMON_ENDPOINT: env.powersyncEndpoint,
     POWERSYNC_DAEMON_TOKEN: env.daemonToken ?? env.serviceRoleKey,
     PS_DATABASE_URL: env.psDatabaseUrl,
@@ -822,7 +812,7 @@ async function startStack() {
     PS_PORT: env.psPort,
     POWERSYNC_SUPABASE_JWT_SECRET: env.jwtSecret,
     POWERSYNC_SUPABASE_JWT_SECRET_B64: env.jwtSecretBase64,
-    POWERSYNC_DAEMON_DEVICE_URL: env.daemonDeviceUrl,
+    POWERSYNC_DAEMON_DEVICE_URL: env.daemonDeviceLoginUrl,
     SUPABASE_BIN,
     DOCKER_BIN,
   })
@@ -861,18 +851,22 @@ async function startStack() {
 
   await refreshDaemonCredentials(env)
 
-  const exportLines = await writeStackEnvFile(env, authUser)
+  await syncLocalProfile(env, authUser).catch((error) => {
+    warnLog(`[dev:stack] Failed to sync local-dev profile: ${error?.message ?? error}`)
+  })
+
+  const exportLines = buildExportLines(env, authUser)
 
   await seedSyncRules(env)
 
   infoLog('✨ Supabase + PowerSync stack is ready.')
   infoLog(`   Remote name: ${DEFAULT_REMOTE_NAME}`)
   infoLog(`   Remote URL: ${env.remoteUrl}`)
-  infoLog('   Use "STACK_PROFILE=local-dev pnpm <command>" (or source .env.powersync-stack) before running CLI e2e tests.')
+  infoLog('   Use "STACK_PROFILE=local-dev pnpm <command>" to target this stack.')
 
   if (cliOptions.printExports) {
     exportLines.forEach((line) => process.stdout.write(`${line}\n`))
-  } else if (!cliOptions.skipEnvFile) {
+  } else {
     infoLog('   Tip: run source <(pnpm dev:stack -- --print-exports) to auto-apply in your shell.')
   }
 }
@@ -900,7 +894,6 @@ function printHelp() {
     '  --log               Tee output to logs/dev-stack/<timestamp>.log.',
     `  --log-dir <dir>     Override log directory (default ${relLogDir || './logs/dev-stack'}).`,
     '  --print-exports     Emit shell exports to stdout for sourcing.',
-    '  --no-env-file       Skip writing .env.powersync-stack.',
     '  --skip-sync-rules   Skip seeding sync rules into Supabase.',
     '  --skip-demo-seed    Skip seeding the demo repository.',
     '  --skip-seeds        Skip all seeding (sync rules + demo).',

@@ -6,7 +6,7 @@
     "psgit": "dist/cli/src/bin.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && chmod +x dist/cli/src/bin.js",
+    "build": "tsc -p tsconfig.json && cp src/profile-defaults-data.js dist/cli/src/profile-defaults-data.js && chmod +x dist/cli/src/bin.js",
     "cli": "tsx src/bin.ts",
     "login": "tsx src/bin.ts login",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -17,7 +17,7 @@
     "@powersync/common": "1.40.0",
     "@powersync/node": "0.12.0",
     "@shared/core": "workspace:*",
-    "simple-git": "^3.28.0",
+    "simple-git": "^3.30.0",
     "yargs": "^17.7.2"
   },
   "devDependencies": {

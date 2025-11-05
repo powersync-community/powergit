@@ -39,14 +39,11 @@ const DAEMON_TOKEN_ENV_VARS = [
 
 function hydrateProfileEnv() {
   const profileOverride = process.env.STACK_PROFILE ?? null
-  const explicitStackEnv = process.env.POWERSYNC_STACK_ENV_PATH ?? null
   const profileResult = loadProfileEnvironment({
     profile: profileOverride,
     startDir: repoRoot,
     updateState: false,
     strict: Boolean(profileOverride),
-    stackEnvPaths: explicitStackEnv ? [explicitStackEnv] : undefined,
-    stackEnvPathsAllowMissing: true,
   })
   for (const [key, value] of Object.entries(profileResult.combinedEnv)) {
     const current = process.env[key]
@@ -141,24 +138,6 @@ function clearDaemonTokenEnvVars() {
   }
 }
 
-function scrubStackEnvFile() {
-  const stackEnvPath =
-    process.env.POWERSYNC_STACK_ENV_PATH ?? resolve(repoRoot, '.env.powersync-stack')
-  if (!existsSync(stackEnvPath)) return
-  try {
-    const original = readFileSync(stackEnvPath, 'utf8')
-    const filtered = original
-      .split('\n')
-      .filter((line) => !DAEMON_TOKEN_ENV_VARS.some((key) => line.includes(key)))
-      .join('\n')
-    if (filtered !== original) {
-      writeFileSync(stackEnvPath, filtered)
-    }
-  } catch (error) {
-    console.warn('[live-github-import] failed to scrub stack env file', error)
-  }
-}
-
 function scrubProfileToken() {
   const profilesPath = resolve(os.homedir(), '.psgit', 'profiles.json')
   if (!existsSync(profilesPath)) return
@@ -167,8 +146,8 @@ function scrubProfileToken() {
     const data = JSON.parse(raw) as Record<string, any>
     let mutated = false
     for (const profile of Object.values(data ?? {}) as any[]) {
-      if (profile && typeof profile === 'object' && profile.powersync && profile.powersync.token) {
-        delete profile.powersync.token
+      if (profile && typeof profile === 'object' && profile.daemon && profile.daemon.token) {
+        delete profile.daemon.token
         mutated = true
       }
     }
@@ -181,7 +160,6 @@ function scrubProfileToken() {
 }
 
 function resetDaemonGuestSession() {
-  scrubStackEnvFile()
   scrubProfileToken()
   clearDaemonTokenEnvVars()
   try {

@@ -14,6 +14,7 @@ import {
   getProfile,
   setActiveProfile,
   saveProfile,
+  buildEnvFromProfile,
   type ProfileConfig,
   type ResolvedProfile,
 } from './profile-manager.js'
@@ -63,7 +64,6 @@ interface ResolvedGuestCredentials {
   source: 'flag' | 'env' | 'supabase-password'
 }
 
-const DEFAULT_STACK_ENV_PATH = '.env.powersync-stack'
 const PSGIT_STACK_ENV = process.env.PSGIT_STACK_ENV
 const STACK_ENV_DISABLED = (process.env.PSGIT_NO_STACK_ENV ?? '').toLowerCase() === 'true'
 const appliedStackEnvPaths = new Set<string>()
@@ -113,10 +113,12 @@ function maybeApplyStackEnv({
   explicitPath,
   silent = false,
   allowMissing = true,
+  includeDefault = true,
 }: {
   explicitPath?: string
   silent?: boolean
   allowMissing?: boolean
+  includeDefault?: boolean
 } = {}) {
   if (STACK_ENV_DISABLED) return
 
@@ -128,8 +130,6 @@ function maybeApplyStackEnv({
   } else if (PSGIT_STACK_ENV) {
     candidates.push({ path: PSGIT_STACK_ENV, silent, allowMissing: false })
   }
-  candidates.push({ path: DEFAULT_STACK_ENV_PATH, silent, allowMissing })
-
   for (const candidate of candidates) {
     const loaded = applyStackEnv(candidate.path, { silent: candidate.silent })
     if (loaded) return
@@ -156,7 +156,7 @@ function parseKeyPath(input: string): string[] {
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0)
   if (segments.length === 0) {
-    throw new Error(`Invalid key path "${input}". Use dot notation, e.g. "powersync.endpoint".`)
+    throw new Error(`Invalid key path "${input}". Use dot notation, e.g. "powersync.url".`)
   }
   return segments
 }
@@ -253,6 +253,41 @@ function getTokenExpirationMs(token: string): number | null {
     return Number.isFinite(expiresAt) ? expiresAt : null
   }
   return null
+}
+
+function persistDaemonCredentials(token: string, expiresAt: string | null | undefined, context: unknown) {
+  if (typeof token !== 'string' || token.trim().length === 0) return
+  const profileName = activeProfileContext.name
+  const existing = getProfile(profileName)
+  const working: ProfileConfig = existing
+    ? (JSON.parse(JSON.stringify(existing)) as ProfileConfig)
+    : {}
+  const powersyncConfig = { ...(working.powersync ?? {}) }
+  const daemonConfig = { ...(working.daemon ?? {}) }
+  daemonConfig.token = token
+  daemonConfig.tokenExpiresAt = expiresAt ?? null
+  if (context && typeof context === 'object' && !Array.isArray(context)) {
+    const endpoint = (context as { endpoint?: unknown }).endpoint
+    if (typeof endpoint === 'string' && endpoint.trim().length > 0) {
+      powersyncConfig.url = endpoint.trim()
+      powersyncConfig.endpoint = endpoint.trim()
+    }
+  }
+  working.powersync = powersyncConfig
+  working.daemon = daemonConfig
+  saveProfile(profileName, working)
+  activeProfileContext.config = working
+  activeProfileContext.stackEnvPath = working.stackEnvPath
+  const { env } = buildEnvFromProfile(working)
+  activeProfileContext.env = env
+  for (const [key, value] of Object.entries(env)) {
+    process.env[key] = value
+  }
+  for (const key of ['POWERSYNC_DAEMON_TOKEN', 'POWERSYNC_SERVICE_TOKEN', 'POWERSYNC_DAEMON_GUEST_TOKEN']) {
+    if (!(key in env)) {
+      delete process.env[key]
+    }
+  }
 }
 
 function isTokenExpired(token: string, skewMs = 0): boolean {
@@ -453,6 +488,7 @@ async function runLoginCommand(args: LoginCommandArgs) {
       const reason = status.reason ? ` (${status.reason})` : ''
       throw new Error(`Daemon reported ${status.status}${reason}.`)
     }
+    persistDaemonCredentials(status.token, status.expiresAt ?? null, status.context ?? null)
     console.log('✅ PowerSync daemon accepted manual token.')
     console.log(`   Endpoint: ${args.endpoint ?? 'auto'}`)
     if (status.expiresAt) {
@@ -481,6 +517,7 @@ async function runLoginCommand(args: LoginCommandArgs) {
       throw new Error(`Daemon at ${baseUrl} did not return an auth status.`)
     }
     if (status.status === 'ready') {
+      persistDaemonCredentials(status.token, status.expiresAt ?? null, status.context ?? null)
       console.log('✅ Daemon joined as guest.')
       if (status.expiresAt) {
         console.log(`   Expires: ${status.expiresAt}`)
@@ -607,6 +644,7 @@ async function runLoginCommand(args: LoginCommandArgs) {
   }
 
   if (finalStatus.status === 'ready') {
+    persistDaemonCredentials(finalStatus.token, finalStatus.expiresAt ?? null, finalStatus.context ?? null)
     console.log('✅ PowerSync daemon authenticated successfully.')
     if (finalStatus.expiresAt) {
       console.log(`   Expires: ${finalStatus.expiresAt}`)
@@ -730,7 +768,7 @@ function buildCli() {
     )
     .option('stack-env', {
       type: 'string',
-      describe: 'Path to stack env exports (defaults to .env.powersync-stack when present).',
+      describe: 'Path to additional stack env exports (optional).',
       global: true,
     })
     .option('no-stack-env', {
@@ -751,6 +789,7 @@ function buildCli() {
         explicitPath,
         silent: Boolean(explicitPath && explicitPath === activeProfileContext.stackEnvPath),
         allowMissing: !explicitPath || explicitPath === activeProfileContext.stackEnvPath,
+        includeDefault: !explicitPath && activeProfileContext.stackEnvPath != null,
       })
     }, true)
     .command(
@@ -833,7 +872,7 @@ function buildCli() {
                 .option('set', {
                   type: 'string',
                   array: true,
-                  describe: 'Set key=value pairs (dot notation, e.g. powersync.endpoint=https://example).',
+                  describe: 'Set key=value pairs (dot notation, e.g. powersync.url=https://example).',
                 })
                 .option('unset', {
                   type: 'string',

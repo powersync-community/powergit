@@ -31,7 +31,7 @@ export async function startStack(options = {}) {
     return { ...cachedEnv }
   }
 
-  const args = ['start', '--print-exports', '--no-env-file']
+  const args = ['start', '--print-exports']
   if (options.skipSeeds) {
     args.push('--skip-seeds')
   } else {

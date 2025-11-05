@@ -2,8 +2,6 @@ import { promises as fs } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 
-const SESSION_RELATIVE_PATH = '.psgit/session.json'
-
 export interface StoredCredentials {
   endpoint: string
   token: string
@@ -11,9 +9,17 @@ export interface StoredCredentials {
   obtainedAt?: string
 }
 
+function resolvePsgitHome(): string {
+  const override = process.env.PSGIT_HOME
+  if (override && override.trim().length > 0) {
+    return resolve(override)
+  }
+  return resolve(homedir(), '.psgit')
+}
+
 function getSessionPath(customPath?: string): string {
   if (customPath) return resolve(customPath)
-  return resolve(homedir(), SESSION_RELATIVE_PATH)
+  return resolve(resolvePsgitHome(), 'session.json')
 }
 
 async function ensureDirectory(path: string) {

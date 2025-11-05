@@ -1,0 +1,26 @@
+{
+  "local-dev": {
+    "powersync": {
+      "url": "http://127.0.0.1:55440"
+    },
+    "daemon": {
+      "endpoint": "http://127.0.0.1:5030",
+      "deviceLoginUrl": "http://localhost:5783/auth"
+    },
+    "supabase": {
+      "url": "http://127.0.0.1:55431",
+      "anonKey": "anon-placeholder",
+      "serviceRoleKey": "service-role-placeholder",
+      "email": "psgit-service@example.com",
+      "password": "psgit-service-password"
+    },
+    "env": {
+      "VITE_SUPABASE_URL": "http://127.0.0.1:55431",
+      "VITE_SUPABASE_ANON_KEY": "anon-placeholder",
+      "VITE_SUPABASE_SCHEMA": "public",
+      "VITE_POWERSYNC_ENDPOINT": "http://127.0.0.1:55440",
+      "VITE_POWERSYNC_DEFAULT_REPOS": "infra",
+      "VITE_POWERSYNC_DISABLED": "false"
+    }
+  }
+}

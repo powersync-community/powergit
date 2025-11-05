@@ -1,12 +1,30 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import os from 'node:os'
+import { cloneProfileDefaults } from './profile-defaults-data.js'
 
 export interface PowerSyncProfileConfig {
+  url?: string
   endpoint?: string
+  /** @deprecated legacy compatibility */
   daemonUrl?: string
+  /** @deprecated legacy compatibility */
+  deviceUrl?: string
+  /** @deprecated legacy compatibility */
+  deviceLoginUrl?: string
+  /** @deprecated legacy compatibility */
+  token?: string
+  /** @deprecated legacy compatibility */
+  tokenExpiresAt?: string | null
+}
+
+export interface DaemonProfileConfig {
+  endpoint?: string
+  deviceLoginUrl?: string
+  /** @deprecated legacy compatibility */
   deviceUrl?: string
   token?: string
+  tokenExpiresAt?: string | null
 }
 
 export interface SupabaseProfileConfig {
@@ -15,13 +33,15 @@ export interface SupabaseProfileConfig {
   serviceRoleKey?: string
   email?: string
   password?: string
+  schema?: string
 }
 
 export interface ProfileConfig {
-  stackEnvPath?: string
   powersync?: PowerSyncProfileConfig
+  daemon?: DaemonProfileConfig
   supabase?: SupabaseProfileConfig
   env?: Record<string, string | undefined>
+  stackEnvPath?: string
 }
 
 export interface ProfilesFile {
@@ -36,7 +56,15 @@ export interface ResolvedProfile {
   source: 'default' | 'file'
 }
 
-export const PSGIT_DIR = resolve(os.homedir(), '.psgit')
+function resolvePsgitHome(): string {
+  const override = process.env.PSGIT_HOME
+  if (override && override.trim().length > 0) {
+    return resolve(override)
+  }
+  return resolve(os.homedir(), '.psgit')
+}
+
+export const PSGIT_DIR = resolvePsgitHome()
 export const PROFILES_PATH = resolve(PSGIT_DIR, 'profiles.json')
 export const STATE_PATH = resolve(PSGIT_DIR, 'profile.json')
 
@@ -59,19 +87,7 @@ function writeJsonFile(path: string, data: unknown) {
 }
 
 function createDefaultProfiles(): ProfilesFile {
-  return {
-    'local-dev': {
-      stackEnvPath: '.env.powersync-stack',
-      powersync: {
-        endpoint: 'http://127.0.0.1:55440',
-        daemonUrl: 'http://127.0.0.1:5030',
-        deviceUrl: 'http://localhost:5783/auth',
-      },
-      supabase: {
-        url: 'http://127.0.0.1:55431',
-      },
-    },
-  }
+  return cloneProfileDefaults() as ProfilesFile
 }
 
 function loadProfiles(): { profiles: ProfilesFile; source: 'default' | 'file' } {
@@ -99,27 +115,47 @@ function saveProfileState(name: string) {
 export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<string, string>; stackEnvPath?: string } {
   const result: Record<string, string> = {}
 
-  if (profile.powersync?.endpoint) {
-    const endpoint = profile.powersync.endpoint
+  const powersyncEndpoint =
+    profile.powersync?.url ?? profile.powersync?.endpoint ?? undefined
+  if (powersyncEndpoint) {
+    const endpoint = powersyncEndpoint
     result.POWERSYNC_ENDPOINT = endpoint
     result.POWERSYNC_DAEMON_ENDPOINT = endpoint
     result.PSGIT_TEST_ENDPOINT = endpoint
   }
 
-  if (profile.powersync?.daemonUrl) {
-    result.POWERSYNC_DAEMON_URL = profile.powersync.daemonUrl
+  const daemonEndpoint =
+    profile.daemon?.endpoint ?? profile.powersync?.daemonUrl ?? undefined
+  if (daemonEndpoint) {
+    result.POWERSYNC_DAEMON_URL = daemonEndpoint
   }
 
-  if (profile.powersync?.deviceUrl) {
-    result.POWERSYNC_DAEMON_DEVICE_URL = profile.powersync.deviceUrl
-    result.POWERSYNC_EXPLORER_URL = profile.powersync.deviceUrl
+  const daemonDeviceLoginUrl =
+    profile.daemon?.deviceLoginUrl ??
+    profile.daemon?.deviceUrl ??
+    profile.powersync?.deviceLoginUrl ??
+    profile.powersync?.deviceUrl ??
+    undefined
+  if (daemonDeviceLoginUrl) {
+    result.POWERSYNC_DAEMON_DEVICE_URL = daemonDeviceLoginUrl
+    result.POWERSYNC_EXPLORER_URL = daemonDeviceLoginUrl
   }
 
-  if (profile.powersync?.token) {
-    const token = profile.powersync.token
-    result.POWERSYNC_DAEMON_TOKEN = token
-    result.POWERSYNC_SERVICE_TOKEN = token
-    result.POWERSYNC_DAEMON_GUEST_TOKEN = token
+  const daemonToken = profile.daemon?.token ?? profile.powersync?.token
+  const daemonTokenExpires =
+    profile.daemon?.tokenExpiresAt ?? profile.powersync?.tokenExpiresAt ?? null
+  if (daemonToken) {
+    const token = daemonToken
+    const expiresAt = daemonTokenExpires
+    const isExpired =
+      typeof expiresAt === 'string' && expiresAt.trim().length > 0
+        ? Date.parse(expiresAt) <= Date.now() + 5_000
+        : false
+    if (!isExpired) {
+      result.POWERSYNC_DAEMON_TOKEN = token
+      result.POWERSYNC_SERVICE_TOKEN = token
+      result.POWERSYNC_DAEMON_GUEST_TOKEN = token
+    }
   }
 
   if (profile.supabase?.url) {
@@ -152,6 +188,10 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
     result.PSGIT_TEST_SUPABASE_PASSWORD = password
   }
 
+  if (profile.supabase?.schema) {
+    result.POWERSYNC_SUPABASE_SCHEMA = profile.supabase.schema
+  }
+
   if (profile.env) {
     for (const [key, value] of Object.entries(profile.env)) {
       if (value === undefined || value === null) continue
@@ -172,20 +212,22 @@ export function resolveProfile(options: ResolveProfileOptions = {}): ResolvedPro
   const { name = null, updateState = true, strict = false } = options
   const requestedName = typeof name === 'string' && name.trim().length > 0 ? name.trim() : null
   const { profiles, source } = loadProfiles()
+  const defaults = createDefaultProfiles()
+  const mergedProfiles: ProfilesFile = { ...defaults, ...profiles }
   const state = loadProfileState()
   const candidates: Array<string> = []
 
   if (requestedName) {
     candidates.push(requestedName)
   }
-  if (state.current && profiles[state.current]) {
+  if (state.current && mergedProfiles[state.current]) {
     candidates.push(state.current)
   }
   if (!candidates.includes('local-dev')) {
     candidates.push('local-dev')
   }
 
-  const profileName = candidates.find((candidate) => Boolean(candidate && profiles[candidate])) ?? 'local-dev'
+  const profileName = candidates.find((candidate) => Boolean(candidate && mergedProfiles[candidate])) ?? 'local-dev'
 
   if (strict && requestedName && profileName !== requestedName) {
     throw new Error(`Unknown profile "${requestedName}". Use "psgit profile list" to inspect available profiles.`)
@@ -197,14 +239,14 @@ export function resolveProfile(options: ResolveProfileOptions = {}): ResolvedPro
     }
   }
 
-  const config = profiles[profileName] ?? createDefaultProfiles()['local-dev']
+  const config = mergedProfiles[profileName] ?? defaults['local-dev']
   const { env, stackEnvPath } = buildEnvFromProfile(config)
   return {
     name: profileName,
     config,
     env,
     stackEnvPath,
-    source,
+    source: profileName in profiles ? source : 'default',
   }
 }
 

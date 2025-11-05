@@ -7,6 +7,7 @@
     "dev": "node ./scripts/dev-with-stack.mjs",
     "dev:remote": "vite",
     "build": "tsc -p tsconfig.json && vite build",
+    "build:prod": "STACK_PROFILE=prod pnpm run build",
     "preview": "vite preview",
     "lint": "echo 'stub'",
     "typecheck": "tsc -p tsconfig.json --noEmit",

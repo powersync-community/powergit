@@ -1,9 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import net from 'node:net'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { test } from '@playwright/test'
 import { loadProfileEnvironment } from '../../../../../cli/src/profile-env.js'
 
@@ -96,36 +94,16 @@ async function loginDaemonIfNeeded(): Promise<void> {
 
 function applyProfileEnvironment(): void {
   const profileOverride = process.env.STACK_PROFILE ?? null
-  const explicitStackEnv = process.env.POWERSYNC_STACK_ENV_PATH ?? null
   const profileResult = loadProfileEnvironment({
     profile: profileOverride,
     startDir: repoRoot,
     updateState: false,
     strict: Boolean(profileOverride),
-    stackEnvPaths: explicitStackEnv ? [explicitStackEnv] : undefined,
-    stackEnvPathsAllowMissing: true,
   })
   for (const [key, value] of Object.entries(profileResult.combinedEnv)) {
     if (!(key in process.env)) {
       process.env[key] = value
     }
-  }
-
-  const stackEnvPath = profileResult.stackEnvPath
-  const alreadyScoped = Boolean(explicitStackEnv || process.env.__POWERSYNC_E2E_STACK_ENV_SCOPED__)
-  if (!alreadyScoped && stackEnvPath) {
-    const tempDir = mkdtempSync(join(tmpdir(), 'psgit-stack-env-'))
-    const tempPath = join(tempDir, 'stack.env')
-    let content = ''
-    try {
-      content = readFileSync(stackEnvPath, 'utf8')
-    } catch {
-      content = ''
-    }
-    writeFileSync(tempPath, content, 'utf8')
-    process.env.POWERSYNC_STACK_ENV_PATH = tempPath
-    process.env.__POWERSYNC_E2E_STACK_ENV_SCOPED__ = 'true'
-    process.env.__POWERSYNC_E2E_STACK_ENV_PATH__ = tempPath
   }
 }
 
@@ -160,17 +138,5 @@ test.describe('PowerSync dev stack (live)', () => {
   test.afterAll(async () => {
     if (!startedBySuite) return
     runCommand(STOP_COMMAND[0]!, STOP_COMMAND.slice(1), 'stop dev stack')
-    const tempPath = process.env.__POWERSYNC_E2E_STACK_ENV_PATH__
-    if (tempPath) {
-      try {
-        rmSync(tempPath, { force: true })
-        rmSync(resolve(tempPath, '..'), { recursive: true, force: true })
-      } catch {
-        // ignore cleanup errors
-      } finally {
-        delete process.env.__POWERSYNC_E2E_STACK_ENV_PATH__
-        delete process.env.__POWERSYNC_E2E_STACK_ENV_SCOPED__
-      }
-    }
   })
 })

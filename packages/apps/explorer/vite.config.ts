@@ -5,6 +5,7 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadProfileEnvironment } from '../../cli/src/profile-env.js'
+import { PROFILE_DEFAULTS } from '../../cli/src/profile-defaults-data.js'
 
 const resolveFromRoot = (p: string) => path.resolve(fileURLToPath(new URL('.', import.meta.url)), p)
 
@@ -25,6 +26,26 @@ const profileEnv = loadProfileEnvironment({
   updateState: false,
 })
 const combinedEnv = profileEnv.combinedEnv
+const profileName = profileEnv.profile?.name ?? 'local-dev'
+const profileConfig = profileEnv.profile?.config ?? {}
+const defaultProfileConfig =
+  (PROFILE_DEFAULTS && typeof PROFILE_DEFAULTS === 'object' ? PROFILE_DEFAULTS[profileName] : null) ??
+  (PROFILE_DEFAULTS && typeof PROFILE_DEFAULTS === 'object' ? PROFILE_DEFAULTS['local-dev'] : null) ??
+  {}
+
+const PROFILE_TO_VITE_TARGETS: Record<string, string[]> = {
+  VITE_SUPABASE_URL: ['supabase.url'],
+  VITE_SUPABASE_ANON_KEY: ['supabase.anonKey'],
+  VITE_SUPABASE_SCHEMA: ['supabase.schema'],
+  VITE_POWERSYNC_ENDPOINT: ['powersync.url', 'powersync.endpoint'],
+  VITE_POWERSYNC_DAEMON_URL: ['daemon.endpoint', 'powersync.daemonUrl'],
+  POWERSYNC_DAEMON_DEVICE_URL: [
+    'daemon.deviceLoginUrl',
+    'daemon.deviceUrl',
+    'powersync.deviceLoginUrl',
+    'powersync.deviceUrl',
+  ],
+}
 
 const PLACEHOLDER_PATTERNS: Array<(value: string) => boolean> = [
   (value) => value.trim().length === 0,
@@ -49,6 +70,24 @@ const valueFromCombined = (key: string): string | undefined => {
     return value.trim()
   }
   return undefined
+}
+
+const valueFromProfileConfig = (path: string): string | undefined => {
+  const segments = path.split('.')
+  const lookup = (source: unknown): string | undefined => {
+    let cursor: unknown = source
+    for (const segment of segments) {
+      if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor)) {
+        return undefined
+      }
+      cursor = (cursor as Record<string, unknown>)[segment]
+    }
+    if (typeof cursor === 'string' && cursor.trim().length > 0) {
+      return cursor.trim()
+    }
+    return undefined
+  }
+  return lookup(profileConfig) ?? lookup(defaultProfileConfig)
 }
 
 function resolveEnvValue(key: string, fallbacks: string[], defaults: Record<string, string>): string | undefined {
@@ -81,6 +120,7 @@ function applyProfileEnv() {
     VITE_SUPABASE_URL: 'http://127.0.0.1:55431',
     VITE_SUPABASE_ANON_KEY:
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0',
+    VITE_SUPABASE_SCHEMA: 'public',
     VITE_POWERSYNC_ENDPOINT: 'http://127.0.0.1:55440',
     VITE_POWERSYNC_DAEMON_URL: 'http://127.0.0.1:5030',
     VITE_POWERSYNC_USE_DAEMON: 'true',
@@ -91,6 +131,20 @@ function applyProfileEnv() {
     const current = process.env[key]
     if (typeof current !== 'string' || isPlaceholder(current)) {
       process.env[key] = value
+    }
+  }
+
+  for (const [target, paths] of Object.entries(PROFILE_TO_VITE_TARGETS)) {
+    const current = process.env[target]
+    if (typeof current === 'string' && !isPlaceholder(current)) {
+      continue
+    }
+    for (const path of paths) {
+      const profileValue = valueFromProfileConfig(path)
+      if (profileValue) {
+        process.env[target] = profileValue
+        break
+      }
     }
   }
 

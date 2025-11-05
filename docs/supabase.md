@@ -25,7 +25,7 @@ The PowerSync-first architecture stores Git metadata in Supabase while the Power
    ```bash
    pnpm dev:stack
    ```
-   The script launches the Supabase containers, bootstraps the PowerSync services, ensures a development Supabase user exists, and writes connection details to `.env.powersync-stack`. It also keeps the `local-dev` profile in `~/.psgit/profiles.json` up to date so tools can pick up the new endpoints automatically.
+   The script launches the Supabase containers, bootstraps the PowerSync services, ensures a development Supabase user exists, and synchronises those credentials into the `local-dev` profile stored under `~/.psgit` (override with `PSGIT_HOME` when you need an isolated config directory). Use `--print-exports` if you need shell exports; otherwise the profile provides everything the CLI, explorer, and tests need.
 3. Profiles are refreshed automatically. Run `psgit profile list` to confirm the active profile (default is `local-dev`). Override ad‑hoc with `STACK_PROFILE=staging pnpm --filter @pkg/cli sync` (or similar) when targeting a remote environment.
 4. Start the device flow so `psgit` and the daemon can reuse a Supabase-issued JWT:
    ```bash

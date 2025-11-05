@@ -1,8 +1,10 @@
 # PowerSync-First Architecture Roadmap
 
 ## Active Focus (2025-10-21)
+- Profile + env loaders now normalise to the canonical prefixes (`powersync.*`, `daemon.*`, `supabase.*`, `env.*`). Explorer e2e cleanup, stack scaffolding, and exports now source `daemon.endpoint`/`daemon.deviceLoginUrl`; keep the legacy fallbacks in loaders for now but new scripts should avoid writing the old keys.
+- Bundled profile defaults (including the hosted `prod` stack) live in `packages/cli/src/profile-defaults-data.js`; tweak that module before publishing builds so first-run users receive the correct endpoints/tokens.
 - Raw table writes now target the `id` primary key again (`persistPush` uses `refId`/`commitId`/`fileChangeId` + `ON CONFLICT(id)` and stops pruning untouched refs). Monitor Supabase to confirm refs remain populated after new pushes before tackling any composite-key migration follow-up.
-- Supabase writer now piggybacks on the daemon’s Supabase JWT (or `POWERSYNC_SUPABASE_ACCESS_TOKEN`) instead of requiring the service-role secret; once RLS allows authenticated writes we can drop `POWERSYNC_SUPABASE_SERVICE_ROLE_KEY` from `.env.powersync-stack` entirely.
+- Supabase writer now piggybacks on the daemon’s Supabase JWT (or `POWERSYNC_SUPABASE_ACCESS_TOKEN`) instead of requiring the service-role secret; once RLS allows authenticated writes we can drop `POWERSYNC_SUPABASE_SERVICE_ROLE_KEY` from the `local-dev` profile exports entirely.
 - `ensureLocalSchema` was previously skipped in the daemon bootstrap and the Supabase writer loop never started; the current daemon entrypoint now calls both, so keep an eye on the logs (`Supabase writer started…`) to confirm the poller stays healthy on fresh stacks.
 - Daemon start now preflights the bind host/port (`assertPortAvailable`) so reruns fail fast with a friendly `[powersync-daemon] port ... is already in use` message instead of hanging; make sure automation stops any previous daemon before spawning a new one or set `POWERSYNC_DAEMON_PORT` to an alternate value.
 - Live Playwright suite now reaches the explorer but still times out waiting for branch data (`branch-heading` never renders); Supabase isn’t ingesting refs even with `previousValues` merging, so continue debugging the control-plane write path before re-running.
@@ -17,11 +19,11 @@
   - The disable function is exported/registered inside the extension.
   - Browser + daemon both take the dependency through the pnpm patch pipeline.
 - Daemon streaming e2e now fetches fresh credentials from `/auth/status` after `psgit login --guest`, so the connector avoids the static stack token without an `iat` claim that previously left `waitForFirstSync` hanging.
-- `pnpm dev:stack` refreshes the daemon guest token during bootstrap, rewrites `.env.powersync-stack` with the new JWT (including `iat`), and syncs the updated endpoint for downstream tools—future agents no longer inherit the stale service-role token that PowerSync rejects. The profile manager now persists the refreshed token so `STACK_PROFILE` environments get the same credentials.
+- `pnpm dev:stack` refreshes the daemon guest token during bootstrap, updates the `local-dev` profile with the new JWT (including `iat`), and prints shell exports on demand via `--print-exports` so future agents no longer inherit the stale service-role token that PowerSync rejects. The profile manager now persists the refreshed token so `STACK_PROFILE` environments get the same credentials.
 - `psgit login --guest` now falls back to `/auth/status` when the daemon response isn’t ready, guaranteeing the saved session (and subsequent tests) capture the daemon’s issued token instead of a placeholder.
 - Reapplying the patched binaries workflow: `pnpm patch @powersync/web` → copy `third_party/powersync-sqlite-core/libpowersync*.wasm` into `dist/` → `pnpm patch-commit ...` (repeat for `@powersync/node` with the dylib/static lib) → `pnpm install --force` → restart Vite/daemon so the new `@powersync/web` symlink refreshes (it should point at a patch hash whose wasm contains `powersync_disable_drop_view`).
-- Dev stack bootstrap now writes `POWERSYNC_DAEMON_ENDPOINT`/`POWERSYNC_DAEMON_TOKEN` to `.env.powersync-stack`; source that file (or export both vars) before running CLI live tests so the daemon auto-start retains credentials. For remote stacks we need a profile-aware alternative so the CLI/explorer stop relying on manual exports.
-- Added `pnpm dev:daemon` wrapper (`scripts/start-daemon-with-profile.mjs`) so local runs launch the daemon with the active `psgit` profile + stack env without manual sourcing; CLI auto-start and explorer dev script both route through this entrypoint. Daemon bootstrap defers the PowerSync connect loop until credentials arrive so `psgit login --guest` can bring an unauthenticated daemon online. Playwright live stack setup now authenticates the daemon via the CLI helper and uses a temp `.env.powersync-stack` copy so Vite stops restarting mid-test; live GitHub import spec clicks through to `Branches` before asserting on streamed data.
+- Dev stack bootstrap now syncs `POWERSYNC_DAEMON_ENDPOINT`/`POWERSYNC_DAEMON_TOKEN` into the active profile. Downstream scripts read the profile via `loadProfileEnvironment`, so CLI live tests pick up the daemon automatically without manual exports.
+- Added `pnpm dev:daemon` wrapper (`scripts/start-daemon-with-profile.mjs`) so local runs launch the daemon with the active `psgit` profile without manual sourcing; CLI auto-start and explorer dev script both route through this entrypoint. Daemon bootstrap defers the PowerSync connect loop until credentials arrive so `psgit login --guest` can bring an unauthenticated daemon online. Playwright live stack setup now authenticates the daemon via the CLI helper and relies on profile-backed credentials instead of a temporary env file.
 - Remaining sync gaps are upstream (PowerSync service still needs to populate control-plane tables); once the service streams bucket snapshots, the Playwright suite should match manual results.
 - Live Playwright spec now fails fast if PowerSync stays disconnected for ~20s (tunable via `POWERSYNC_E2E_FAIL_FAST_MS`) so iteration remains quick while we stabilise the backend.
 - Branch assertions in the live CLI e2e now cap wait time at the same fail-fast window (20s by default) so we bail quickly when branches never arrive instead of sitting on the full 5‑minute test timeout.
@@ -37,9 +39,9 @@
 ## Profile / Environment Switching (2025-10-23)
 - CLI now materialises `~/.psgit/profiles.json` with a `local-dev` baseline, tracks the active profile in `~/.psgit/profile.json`, and injects profile env vars on startup; `psgit profile list/show/use/set` ship alongside the `STACK_PROFILE` override.
 - Configs/scripts now read profiles directly via `packages/cli/src/profile-env.js`, so setting `STACK_PROFILE=<name>` before a command (e.g., `STACK_PROFILE=staging pnpm --filter @app/explorer dev`) hydrates the correct environment without wrappers.
-- Stack orchestration leans on the shared loader (`scripts/dev-with-stack.mjs`, Playwright/Vitest configs, live CLI spec/setup, stack harness). `pnpm dev:stack` still writes `.env.powersync-stack` and synchronises the `local-dev` profile.
+- Stack orchestration leans on the shared loader (`scripts/dev-with-stack.mjs`, Playwright/Vitest configs, live CLI spec/setup, stack harness). `loadProfileEnvironment` now hydrates every command directly from profile JSON.
 - Follow-up: finish Playwright compatibility when running with `STACK_PROFILE` overrides—the third_party `powersync-tanstack-db` packages still trip Vitest/TS loaders during Playwright startup; update their test hooks (or exclude them from the explorer run) so `playwright test --list` and staged runs succeed.
-- Docs highlight the profile workflow (`DEV_SETUP.md`, `docs/env.remote.example`); follow up with Supabase doc updates once the daemon-auth rewrite lands.
+- Docs highlight the profile workflow (`DEV_SETUP.md`, `docs/profiles/remote.example.md`); follow up with Supabase doc updates once the daemon-auth rewrite lands.
 
 ## Vision
 Create a development experience where every component—CLI, explorer, background jobs—operates purely through PowerSync replicas. Supabase and object storage are written through the daemon’s integrated bridge layer (running locally for dev and configurable for shared environments), so no developer tooling ever needs direct credentials.
@@ -108,16 +110,16 @@ Create a development experience where every component—CLI, explorer, backgroun
 - Immediate actions tracked below (add new workstream items): finish daemon RPC push/fetch, add interactive auth (browser/PKCE), remove helper’s Supabase dependency, and update CI harnesses.
 
 ## Agent Notes (2025-10-15)
-- CLI now walks up from the package directory when resolving `.env.powersync-stack`, so `pnpm --filter @pkg/cli …` commands inherit the dev stack exports automatically.
+- CLI now sources environment data directly from the active profile, and `STACK_PROFILE` overrides continue to work for per-command targeting.
 - Added `psgit daemon stop` to issue `/shutdown` requests and poll until the daemon exits; the helper no longer leaves orphaned `pnpm --filter @svc/daemon start` processes.
 - Guest login falls back to Supabase password auth when no token is provided, letting `pnpm --filter @pkg/cli cli login --guest` mint a JWT against the local stack without manual env tweaks.
 - `pnpm dev:stack:down` now calls the new CLI command to terminate the daemon before tearing down Supabase/PowerSync services.
 - Dev stack exports now include `POWERSYNC_DAEMON_DEVICE_URL` (defaulting to `http://localhost:5783/auth`), so `psgit login` prints a clickable link when the explorer is running.
-- Explorer `pnpm dev` now loads `.env.powersync-stack` automatically and binds to port 5783; use `pnpm --filter @app/explorer dev:remote` for hosted Supabase targets.
+- Explorer `pnpm dev` now hydrates from the active profile and binds to port 5783; use `pnpm --filter @app/explorer dev:remote` for hosted Supabase targets.
 
 ## Agent Notes (2025-10-18)
 - Removed the remaining Supabase edge function clients (`invokeSupabaseEdgeFunction`, browser connector hooks, CLI login flow) and replaced them with env/daemon-based credential handling. CRUD uploads now hard-fail if a caller still expects the old functions so we surface unsupported write paths immediately.
-- Deleted all edge function assets (`supabase/functions/*`, smoke script) and disabled Supabase's edge runtime in the local stack. Updated `dev-local-stack` to stop deploying functions and refreshed docs (`DEV_SETUP.md`, `docs/supabase.md`, `docs/env.local.example`) to reflect the daemon-owned flow.
+- Deleted all edge function assets (`supabase/functions/*`, smoke script) and disabled Supabase's edge runtime in the local stack. Updated `dev-local-stack` to stop deploying functions and refreshed docs (`DEV_SETUP.md`, `docs/supabase.md`, `docs/profiles/local-dev.example.json`) to reflect the daemon-owned flow.
 - CLI `login` no longer accepts `--functions-url` or `--service-role-key`; use Supabase password login or manual tokens. Tests were updated accordingly; the live sync e2e still times out at 60 s after the stack bootstrap (needs follow-up to stabilise the daemon push path).
 - CLI now delegates `psgit sync` to the daemon: we removed the local PowerSync database, call the daemon's new `/summary` endpoint, and print raw table counts instead of creating a SQLite snapshot. New RPCs (`/summary`) were added to the daemon and shared client; tests/docs updated accordingly.
 

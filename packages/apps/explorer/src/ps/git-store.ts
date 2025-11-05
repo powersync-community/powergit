@@ -77,7 +77,8 @@ export class GitObjectStore {
       try {
         await this.fs.mkdir(current)
       } catch (error) {
-        const code = (error as { code?: string }).code
+        const nodeError = error as NodeJS.ErrnoException
+        const code = nodeError?.code
         if (code === 'EEXIST') {
           continue
         }
@@ -85,10 +86,10 @@ export class GitObjectStore {
           // parent missing; loop will create it on next iteration
           continue
         }
-        if (typeof error?.message === 'string' && error.message.includes('EEXIST')) {
+        if (typeof nodeError?.message === 'string' && nodeError.message.includes('EEXIST')) {
           continue
         }
-        throw error
+        throw nodeError
       }
     }
   }
@@ -257,7 +258,7 @@ export class GitObjectStore {
     for (const key of cacheKeys) {
       this.packCache.set(key, writeCopy.slice())
     }
-    await git.indexPack({
+    await (git.indexPack as unknown as (args: Record<string, unknown>) => Promise<unknown>)({
       fs: this.fs,
       dir: '/',
       gitdir: this.gitdir,

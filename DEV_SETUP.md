@@ -35,13 +35,9 @@ Detailed breakdown:
    pnpm install
    ```
 
-2. **Bootstrap environment variables (first run only)**
+2. **Review profile configuration (first run only)**
 
-   ```bash
-   cp docs/env.local.example .env.local
-   ```
-
-   Edit `.env.local` if you have real Supabase/PowerSync credentials. The defaults match the local stack started below.
+   The CLI seeds a `local-dev` profile in `~/.psgit/profiles.json` automatically. If you need to preconfigure a workspace without running `pnpm dev:stack`, copy `docs/profiles/local-dev.example.json` into that file (or replicate it with `psgit profile set`). No `.env` files are required; every tool reads from the active profile, so feel free to delete any legacy `.env.*` artifacts.
 
 3. **Apply the database schema** (first time after pulling changes)
 
@@ -95,14 +91,14 @@ Detailed breakdown:
 
 ### Switch between local and remote stacks
 
-The CLI bootstraps `~/.psgit/profiles.json` the first time you run it, pre-populating a `local-dev` profile that reads `.env.powersync-stack`. Profiles drive every tool:
+The CLI bootstraps `~/.psgit/profiles.json` the first time you run it, pre-populating `local-dev` (your local Supabase + PowerSync stack) and `prod` (values from `packages/cli/src/profile-defaults-data.js`). `pnpm dev:stack` keeps the local profile in sync; run `pnpm dev:stack -- --print-exports` whenever you need shell exports. Profiles drive every tool:
 
 - `psgit profile list|show|set|use` inspect or update entries. Example for a staging stack:
 
   ```bash
   psgit profile set staging \
-    --set powersync.endpoint=https://powersync-staging.example.com \
-    --set powersync.token=<service-token-or-jwt> \
+    --set powersync.url=https://powersync-staging.example.com \
+    --set daemon.token=<service-token-or-jwt> \
     --set supabase.url=https://your-project.supabase.co \
     --set supabase.anonKey=<anon-key>
   ```
@@ -114,7 +110,7 @@ The CLI bootstraps `~/.psgit/profiles.json` the first time you run it, pre-popul
 
 ### Validate against a hosted Supabase instance
 
-Once you have a live Supabase + PowerSync environment, capture its credentials in a profile (see above or `docs/env.remote.example`) and run:
+Once you have a live Supabase + PowerSync environment, capture its credentials in a profile (see above or `docs/profiles/remote.example.md`) and run:
 
 ```bash
 STACK_PROFILE=staging pnpm live:validate
@@ -128,6 +124,7 @@ The command performs the CLI end-to-end test suite against your staged stack, co
 | --- | --- |
 | Run workspace unit tests | `pnpm test` |
 | Run explorer Playwright smoke tests | `pnpm --filter @app/explorer test:e2e` |
+| Build explorer against prod profile | `pnpm --filter @app/explorer build:prod` |
 | Type check all packages | `pnpm typecheck` |
 | Build the remote helper | `pnpm --filter @pkg/remote-helper build` |
 | Build the CLI (`psgit`) | `pnpm --filter @pkg/cli build` |
@@ -155,19 +152,9 @@ We pin `@tanstack/powersync-db-collection` to the PR branch via `pnpm.overrides`
 }
 ```
 
-### Explorer environment template
+### Explorer profile template
 
-Copy `docs/env.local.example` and tweak as needed. Key entries:
-
-```
-VITE_POWERSYNC_ENDPOINT=https://YOUR-POWERSYNC-ENDPOINT
-VITE_POWERSYNC_TOKEN=YOUR_DEV_TOKEN
-VITE_POWERSYNC_DEFAULT_REPOS=infra
-VITE_SUPABASE_URL=https://YOUR-SUPABASE-PROJECT.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
-VITE_SUPABASE_SCHEMA=public
-VITE_POWERSYNC_DISABLED=false
-```
+Use `docs/profiles/local-dev.example.json` (or the remote example under `docs/profiles/remote.example.md`) as a starting point when customising profiles. The explorer derives its `VITE_*` settings from the profile’s `powersync` and `supabase` blocks automatically; add explicit `env.VITE_*` overrides only when you need to diverge from the shared profile values (for example, forcing `VITE_POWERSYNC_DISABLED=true` for offline UI work).
 
 ### PowerSync tables
 

@@ -1,10 +1,17 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import os from 'node:os'
+import { cloneProfileDefaults } from './profile-defaults-data.js'
 
-const DEFAULT_STACK_ENV = '.env.powersync-stack'
+function resolvePsgitHome() {
+  const override = process.env.PSGIT_HOME
+  if (override && override.trim().length > 0) {
+    return resolve(override)
+  }
+  return resolve(os.homedir(), '.psgit')
+}
 
-const PSGIT_DIR = resolve(os.homedir(), '.psgit')
+const PSGIT_DIR = resolvePsgitHome()
 const PROFILES_PATH = resolve(PSGIT_DIR, 'profiles.json')
 const STATE_PATH = resolve(PSGIT_DIR, 'profile.json')
 
@@ -31,19 +38,7 @@ function writeJsonFile(path, data) {
 }
 
 function createDefaultProfiles() {
-  return {
-    'local-dev': {
-      stackEnvPath: DEFAULT_STACK_ENV,
-      powersync: {
-        endpoint: 'http://127.0.0.1:55440',
-        daemonUrl: 'http://127.0.0.1:5030',
-        deviceUrl: 'http://localhost:5783/auth',
-      },
-      supabase: {
-        url: 'http://127.0.0.1:55431',
-      },
-    },
-  }
+  return cloneProfileDefaults()
 }
 
 function loadProfiles() {
@@ -71,27 +66,46 @@ function saveProfileState(name) {
 function buildEnvFromProfile(profile) {
   const result = {}
 
-  if (profile?.powersync?.endpoint) {
-    const endpoint = profile.powersync.endpoint
+  const powersyncEndpoint =
+    profile?.powersync?.url ?? profile?.powersync?.endpoint
+  if (powersyncEndpoint) {
+    const endpoint = powersyncEndpoint
     result.POWERSYNC_ENDPOINT = endpoint
     result.POWERSYNC_DAEMON_ENDPOINT = endpoint
     result.PSGIT_TEST_ENDPOINT = endpoint
   }
 
-  if (profile?.powersync?.daemonUrl) {
-    result.POWERSYNC_DAEMON_URL = profile.powersync.daemonUrl
+  const daemonEndpoint =
+    profile?.daemon?.endpoint ?? profile?.powersync?.daemonUrl
+  if (daemonEndpoint) {
+    result.POWERSYNC_DAEMON_URL = daemonEndpoint
   }
 
-  if (profile?.powersync?.deviceUrl) {
-    result.POWERSYNC_DAEMON_DEVICE_URL = profile.powersync.deviceUrl
-    result.POWERSYNC_EXPLORER_URL = profile.powersync.deviceUrl
+  const daemonDeviceLoginUrl =
+    profile?.daemon?.deviceLoginUrl ??
+    profile?.daemon?.deviceUrl ??
+    profile?.powersync?.deviceLoginUrl ??
+    profile?.powersync?.deviceUrl
+  if (daemonDeviceLoginUrl) {
+    result.POWERSYNC_DAEMON_DEVICE_URL = daemonDeviceLoginUrl
+    result.POWERSYNC_EXPLORER_URL = daemonDeviceLoginUrl
   }
 
-  if (profile?.powersync?.token) {
-    const token = profile.powersync.token
-    result.POWERSYNC_DAEMON_TOKEN = token
-    result.POWERSYNC_SERVICE_TOKEN = token
-    result.POWERSYNC_DAEMON_GUEST_TOKEN = token
+  const daemonToken = profile?.daemon?.token ?? profile?.powersync?.token
+  const daemonTokenExpires =
+    profile?.daemon?.tokenExpiresAt ?? profile?.powersync?.tokenExpiresAt ?? null
+  if (daemonToken) {
+    const token = daemonToken
+    const expiresAt = daemonTokenExpires
+    const isExpired =
+      typeof expiresAt === 'string' && expiresAt.trim().length > 0
+        ? Date.parse(expiresAt) <= Date.now() + 5000
+        : false
+    if (!isExpired) {
+      result.POWERSYNC_DAEMON_TOKEN = token
+      result.POWERSYNC_SERVICE_TOKEN = token
+      result.POWERSYNC_DAEMON_GUEST_TOKEN = token
+    }
   }
 
   if (profile?.supabase?.url) {
@@ -124,6 +138,10 @@ function buildEnvFromProfile(profile) {
     result.PSGIT_TEST_SUPABASE_PASSWORD = password
   }
 
+  if (profile?.supabase?.schema) {
+    result.POWERSYNC_SUPABASE_SCHEMA = profile.supabase.schema
+  }
+
   if (profile?.env && typeof profile.env === 'object') {
     for (const [key, value] of Object.entries(profile.env)) {
       if (value === undefined || value === null) continue
@@ -136,15 +154,17 @@ function buildEnvFromProfile(profile) {
 
 function resolveProfile(options = {}) {
   const { profiles, source } = loadProfiles()
+  const defaults = createDefaultProfiles()
+  const mergedProfiles = { ...defaults, ...profiles }
   const state = loadProfileState()
   const requestedName = typeof options.name === 'string' && options.name.trim().length > 0 ? options.name.trim() : null
 
   const candidates = []
   if (requestedName) candidates.push(requestedName)
-  if (state.current && profiles[state.current]) candidates.push(state.current)
+  if (state.current && mergedProfiles[state.current]) candidates.push(state.current)
   if (!candidates.includes('local-dev')) candidates.push('local-dev')
 
-  const profileName = candidates.find((candidate) => Boolean(candidate && profiles[candidate])) ?? 'local-dev'
+  const profileName = candidates.find((candidate) => Boolean(candidate && mergedProfiles[candidate])) ?? 'local-dev'
 
   if (options.strict && requestedName && profileName !== requestedName) {
     throw new Error(`Unknown profile "${requestedName}". Use "psgit profile list" to inspect available profiles.`)
@@ -156,14 +176,14 @@ function resolveProfile(options = {}) {
     }
   }
 
-  const config = profiles[profileName] ?? createDefaultProfiles()['local-dev']
+  const config = mergedProfiles[profileName] ?? defaults['local-dev']
   const { env, stackEnvPath } = buildEnvFromProfile(config)
   return {
     name: profileName,
     config,
     env,
     stackEnvPath,
-    source,
+    source: profileName in profiles ? source : 'default',
   }
 }
 
@@ -274,7 +294,6 @@ export function loadProfileEnvironment(options = {}) {
         entries.push({ path: profile.stackEnvPath, allowMissing: true })
       }
     }
-    entries.push({ path: DEFAULT_STACK_ENV, allowMissing: true })
 
     const candidates = dedupePaths(entries)
     for (const candidate of candidates) {

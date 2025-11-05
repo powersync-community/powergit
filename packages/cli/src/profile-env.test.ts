@@ -6,6 +6,7 @@ import { join } from 'node:path'
 describe('loadProfileEnvironment', () => {
   const originalStackProfile = process.env.STACK_PROFILE
   const originalPsgitStackEnv = process.env.PSGIT_STACK_ENV
+  const originalPsgitHome = process.env.PSGIT_HOME
 
   let tempHome: string
   let stackEnvFile: string
@@ -14,10 +15,12 @@ describe('loadProfileEnvironment', () => {
 
   beforeEach(() => {
     tempHome = mkdtempSync(join(tmpdir(), 'psgit-profile-env-'))
-    mkdirSync(join(tempHome, '.psgit'), { recursive: true })
-    profilesPath = join(tempHome, '.psgit', 'profiles.json')
+    const homeDir = join(tempHome, '.psgit')
+    mkdirSync(homeDir, { recursive: true })
+    profilesPath = join(homeDir, 'profiles.json')
     stackEnvFile = join(tempHome, 'stack.env')
     process.env.HOME = tempHome
+    process.env.PSGIT_HOME = homeDir
     delete process.env.STACK_PROFILE
     delete process.env.PSGIT_STACK_ENV
   })
@@ -39,6 +42,11 @@ describe('loadProfileEnvironment', () => {
     } else {
       delete process.env.PSGIT_STACK_ENV
     }
+    if (originalPsgitHome !== undefined) {
+      process.env.PSGIT_HOME = originalPsgitHome
+    } else {
+      delete process.env.PSGIT_HOME
+    }
     rmSync(tempHome, { recursive: true, force: true })
   })
 
@@ -46,6 +54,9 @@ describe('loadProfileEnvironment', () => {
     const profiles = {
       staging: {
         powersync: {
+          url: 'https://powersync.example.com',
+        },
+        daemon: {
           endpoint: 'https://daemon.example.com',
           token: 'staging-token',
         },
@@ -77,7 +88,8 @@ describe('loadProfileEnvironment', () => {
     expect(result.profile.name).toBe('staging')
     expect(result.stackEnvPath).toBe(stackEnvFile)
     expect(result.profileEnv).toMatchObject({
-      POWERSYNC_ENDPOINT: 'https://daemon.example.com',
+      POWERSYNC_ENDPOINT: 'https://powersync.example.com',
+      POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
       POWERSYNC_DAEMON_TOKEN: 'staging-token',
       POWERSYNC_SUPABASE_URL: 'https://supabase.example.com',
     })
@@ -86,7 +98,8 @@ describe('loadProfileEnvironment', () => {
       VITE_CUSTOM_FLAG: 'enabled',
     })
     expect(result.combinedEnv).toMatchObject({
-      POWERSYNC_ENDPOINT: 'https://daemon.example.com',
+      POWERSYNC_ENDPOINT: 'https://powersync.example.com',
+      POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
       POWERSYNC_DAEMON_TOKEN: 'staging-token',
       POWERSYNC_SUPABASE_URL: 'https://supabase.example.com',
       POWERSYNC_SUPABASE_ANON_KEY: 'anon-key-staging',
