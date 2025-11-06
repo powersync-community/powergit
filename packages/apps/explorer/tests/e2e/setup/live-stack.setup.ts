@@ -1,8 +1,8 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import net from 'node:net'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { test } from '@playwright/test'
+import { test, chromium } from '@playwright/test'
 import { loadProfileEnvironment } from '../../../../../cli/src/profile-env.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -71,6 +71,79 @@ function runCommand(command: string, args: string[], label: string): void {
   }
 }
 
+async function performGuestLogin(deviceUrl: string): Promise<void> {
+  const browser = await chromium.launch()
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  try {
+    await page.goto(deviceUrl, { waitUntil: 'networkidle' })
+    const guestButton = page.getByTestId('guest-continue-button')
+    await guestButton.waitFor({ state: 'visible', timeout: 15_000 })
+    await guestButton.click()
+    await page.waitForTimeout(2_000)
+  } finally {
+    await context.close()
+    await browser.close()
+  }
+}
+
+async function runDeviceLoginFlow(): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const loginProc = spawn('pnpm', ['--filter', '@pkg/cli', 'exec', 'tsx', 'src/bin.ts', 'login'], {
+      cwd: repoRoot,
+      env: { ...process.env },
+      stdio: ['inherit', 'pipe', 'inherit'],
+    })
+
+    let automationPromise: Promise<void> | null = null
+    let finished = false
+
+    const finalize = (error?: Error) => {
+      if (finished) return
+      finished = true
+      const complete = () => {
+        if (error) {
+          reject(error)
+        } else {
+          resolve()
+        }
+      }
+      if (automationPromise) {
+        automationPromise.then(complete).catch(reject)
+      } else {
+        complete()
+      }
+    }
+
+    loginProc.stdout.on('data', (chunk) => {
+      const text = chunk.toString()
+      process.stdout.write(text)
+      if (!automationPromise) {
+        const urlMatch = text.match(/Open:\s+(https?:\/\/\S+)/)
+        if (urlMatch) {
+          const deviceUrl = urlMatch[1]
+          automationPromise = performGuestLogin(deviceUrl).catch((error) => {
+            console.error('[live-stack.setup] failed to automate device login', error)
+            throw error
+          })
+        }
+      }
+    })
+
+    loginProc.on('error', (error) => {
+      finalize(error instanceof Error ? error : new Error(String(error)))
+    })
+
+    loginProc.on('exit', (code) => {
+      if (code === 0) {
+        finalize()
+      } else {
+        finalize(new Error('Command failed (authenticate daemon): pnpm --filter @pkg/cli exec tsx src/bin.ts login'))
+      }
+    })
+  })
+}
+
 async function loginDaemonIfNeeded(): Promise<void> {
   const daemonUrl =
     process.env.POWERSYNC_DAEMON_URL ??
@@ -82,14 +155,7 @@ async function loginDaemonIfNeeded(): Promise<void> {
   if (status?.status === 'ready') {
     return
   }
-  const loginResult = spawnSync('pnpm', ['--filter', '@pkg/cli', 'exec', 'tsx', 'src/bin.ts', 'login', '--guest'], {
-    cwd: repoRoot,
-    env: { ...process.env },
-    stdio: 'inherit',
-  })
-  if (loginResult.status !== 0) {
-    throw new Error('Command failed (authenticate daemon guest): pnpm --filter @pkg/cli exec tsx src/bin.ts login --guest')
-  }
+  await runDeviceLoginFlow()
 }
 
 function applyProfileEnvironment(): void {

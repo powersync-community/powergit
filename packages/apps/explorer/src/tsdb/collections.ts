@@ -3,7 +3,7 @@ import * as React from 'react'
 import { createCollection, type CollectionImpl } from '@tanstack/db'
 import { usePowerSync } from '@powersync/react'
 import { powerSyncCollectionOptions } from '@tanstack/powersync-db-collection'
-import { AppSchema, collectionSpecs, type Database } from '../ps/schema'
+import { refs, commits, file_changes, objects, type Database } from '../ps/schema'
 
 type Collections = {
   refs: CollectionImpl<Database['refs']>
@@ -24,29 +24,25 @@ export function useCollections(): Collections {
       refs: createCollection(
         powerSyncCollectionOptions<Database['refs']>({
           database: db,
-          tableName: 'refs',
-          schema: collectionSpecs.refs,
+          table: refs,
         })
       ) as unknown as CollectionImpl<Database['refs']>,
       commits: createCollection(
         powerSyncCollectionOptions<Database['commits']>({
           database: db,
-          tableName: 'commits',
-          schema: collectionSpecs.commits,
+          table: commits,
         })
       ) as unknown as CollectionImpl<Database['commits']>,
       file_changes: createCollection(
         powerSyncCollectionOptions<Database['file_changes']>({
           database: db,
-          tableName: 'file_changes',
-          schema: collectionSpecs.file_changes,
+          table: file_changes,
         })
       ) as unknown as CollectionImpl<Database['file_changes']>,
       objects: createCollection(
         powerSyncCollectionOptions<Database['objects']>({
           database: db,
-          tableName: 'objects',
-          schema: collectionSpecs.objects,
+          table: objects,
         })
       ) as unknown as CollectionImpl<Database['objects']>,
     }

@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream'
 import { ReadableStream as NodeReadableStream } from 'node:stream/web'
-import type { RefRow, RawTableKey } from './index.js'
+import type { RefRow } from './index.js'
+import type { PowerSyncTableName } from './powersync/schema.js'
 
 export interface PowerSyncRemoteConfig {
   endpoint: string
@@ -55,7 +56,7 @@ export interface PushPackResult {
 export interface RepoDataSummary {
   orgId: string
   repoId: string
-  counts: Record<RawTableKey, number>
+  counts: Record<PowerSyncTableName, number>
 }
 
 interface JsonFetchPack {

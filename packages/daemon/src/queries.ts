@@ -5,11 +5,11 @@ import type {
   GitPushSummary,
   GitRefSummary,
   PackRow,
-  RawTableKey,
+  PowerSyncTableName,
   RefRow,
   RepoSummaryRow,
 } from '@shared/core';
-import { RAW_TABLE_SPECS } from '@shared/core/powersync/raw-tables';
+import { powerSyncSchemaSpec } from '@shared/core/powersync/schema';
 
 type WriteContext = Parameters<Parameters<PowerSyncDatabase['writeTransaction']>[0]>[0];
 
@@ -58,16 +58,16 @@ export async function listRepos(database: PowerSyncDatabase, options: ListReposO
 export async function getRepoSummary(
   database: PowerSyncDatabase,
   options: { orgId: string; repoId: string },
-): Promise<{ orgId: string; repoId: string; counts: Record<RawTableKey, number> }> {
+): Promise<{ orgId: string; repoId: string; counts: Record<PowerSyncTableName, number> }> {
   const { orgId, repoId } = options;
-  const counts = {} as Record<RawTableKey, number>;
+  const counts = {} as Record<PowerSyncTableName, number>;
 
-  for (const [key, spec] of Object.entries(RAW_TABLE_SPECS) as Array<[RawTableKey, (typeof RAW_TABLE_SPECS)[RawTableKey]]>) {
+  for (const tableName of Object.keys(powerSyncSchemaSpec) as PowerSyncTableName[]) {
     const row = await database.getOptional<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM ${spec.tableName} WHERE org_id = ? AND repo_id = ?`,
+      `SELECT COUNT(*) AS count FROM ${tableName} WHERE org_id = ? AND repo_id = ?`,
       [orgId, repoId],
     );
-    counts[key] = Number(row?.count ?? 0);
+    counts[tableName] = Number(row?.count ?? 0);
   }
 
   return { orgId, repoId, counts };

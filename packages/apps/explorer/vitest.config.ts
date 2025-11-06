@@ -24,7 +24,6 @@ export default defineConfig({
       '@ps': resolveFromRoot('src/ps'),
       '@tsdb': resolveFromRoot('src/tsdb'),
       '@shared/core/powersync/schema': resolveFromRoot('../../shared/src/powersync/schema.ts'),
-      '@shared/core/powersync/raw-tables': resolveFromRoot('../../shared/src/powersync/raw-tables.ts'),
       '@shared/core/powersync/streams': resolveFromRoot('../../shared/src/powersync/streams.ts'),
       '@shared/core/': `${resolveFromRoot('../../shared/src')}/`,
       '@shared/core': resolveFromRoot('../../shared/src/index.ts'),

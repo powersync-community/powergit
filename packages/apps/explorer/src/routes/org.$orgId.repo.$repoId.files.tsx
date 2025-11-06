@@ -221,10 +221,7 @@ function Files() {
     if ((!branchExists || !branchParam) && fallback) {
       void navigate({
         to: '.',
-        search: (prev) => ({
-          ...prev,
-          branch: fallback,
-        }),
+        search: { branch: fallback } as any,
         replace: true,
       })
     }
@@ -569,10 +566,7 @@ function Files() {
         setPendingPath(loadStoredPath(next?.name ?? null))
         void navigate({
           to: '.',
-          search: (prev) => ({
-            ...prev,
-            branch: next?.name ?? undefined,
-          }),
+          search: { branch: next?.name ?? undefined } as any,
         })
       }}
       className="border border-gray-300 rounded px-2 py-1 text-sm"

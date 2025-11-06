@@ -7,7 +7,6 @@ import { spawn } from 'node:child_process'
 import simpleGit from 'simple-git'
 import {
   PowerSyncRemoteClient,
-  RAW_TABLE_SPECS,
   type RepoDataSummary,
   parsePowerSyncUrl,
   REPO_STREAM_SUFFIXES,

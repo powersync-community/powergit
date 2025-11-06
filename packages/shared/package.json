@@ -13,10 +13,6 @@
       "import": "./dist/powersync/schema.js",
       "types": "./dist/powersync/schema.d.ts"
     },
-    "./powersync/raw-tables": {
-      "import": "./dist/powersync/raw-tables.js",
-      "types": "./dist/powersync/raw-tables.d.ts"
-    },
     "./powersync/streams": {
       "import": "./dist/powersync/streams.js",
       "types": "./dist/powersync/streams.d.ts"

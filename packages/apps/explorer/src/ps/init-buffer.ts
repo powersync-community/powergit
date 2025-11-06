@@ -1,13 +1,11 @@
 import { Buffer as PolyfillBuffer } from 'buffer'
 
-declare global {
-  // eslint-disable-next-line no-var
-  var Buffer: typeof PolyfillBuffer | undefined
+type BufferConstructor = typeof PolyfillBuffer
+
+const globalWithBuffer = globalThis as typeof globalThis & { Buffer?: BufferConstructor }
+
+if (typeof globalWithBuffer.Buffer === 'undefined') {
+  globalWithBuffer.Buffer = PolyfillBuffer
 }
 
-if (typeof globalThis.Buffer === 'undefined') {
-  globalThis.Buffer = PolyfillBuffer
-}
-
-export const Buffer = globalThis.Buffer
-
+export const Buffer = globalWithBuffer.Buffer

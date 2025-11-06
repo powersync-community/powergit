@@ -1,10 +1,8 @@
 
 import { column, Schema, Table } from '@powersync/web'
-import { convertPowerSyncSchemaToSpecs } from '@tanstack/powersync-db-collection'
 import { buildPowerSyncSchema, powerSyncSchemaSpec } from '@shared/core/powersync/schema'
-import { RAW_TABLES_FOR_SCHEMA } from '@shared/core/powersync/raw-tables'
 
-const { tables } = buildPowerSyncSchema<Schema, Table, Pick<typeof column, 'text' | 'integer'>>({
+const { schema: appSchema, tables } = buildPowerSyncSchema<Schema, Table, Pick<typeof column, 'text' | 'integer'>>({
   createSchema: (tableMap) => new Schema(tableMap as Record<string, Table>),
   createTable: (columns, options) => new Table(columns, options),
   column: {
@@ -33,16 +31,26 @@ type SchemaTables = {
   [TableName in keyof SchemaSpec]: Table<TableColumnMap<TableName>>
 }
 
-const typedTables = tables as SchemaTables
-const schemaForCollections = new Schema(typedTables as Record<string, Table>)
-
-export const AppSchema = (() => {
-  const schema = new Schema({})
-  schema.withRawTables(RAW_TABLES_FOR_SCHEMA)
-  return schema
+const schemaTableMap = (() => {
+  const entries = new Map<string, Table>()
+  for (const table of appSchema.tables as Table[]) {
+    entries.set(table.name, table)
+  }
+  return entries
 })()
+
+const typedTables = Object.fromEntries(
+  Object.keys(powerSyncSchemaSpec).map((tableName) => {
+    const table = schemaTableMap.get(tableName)
+    if (!table) {
+      throw new Error(`PowerSync schema missing table: ${tableName}`)
+    }
+    return [tableName, table]
+  }),
+) as SchemaTables
+
+export const AppSchema = appSchema
 export const { refs, commits, file_changes, objects } = typedTables
-export const collectionSpecs = convertPowerSyncSchemaToSpecs(schemaForCollections)
 
 type ColumnValueMap = {
   text: string | null

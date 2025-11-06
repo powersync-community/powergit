@@ -16,8 +16,6 @@ import {
 } from './server.js';
 import { getLatestPack, getRepoSummary, listRefs, listRepos, persistPush } from './queries.js';
 import type { PersistPushResult, PushUpdateRow } from './queries.js';
-import { ensureRawTables } from './raw-table-migration.js';
-import { ensureLocalSchema } from './local-schema.js';
 import { SupabaseWriter } from './supabase-writer.js';
 import { GithubImportManager } from './importer.js';
 import { resolveSessionPath } from './auth/index.js';
@@ -203,8 +201,11 @@ class StreamSubscriptionManager {
     return this.active.size;
   }
 
-  listKeys(): string[] {
-    return Array.from(this.targets.keys());
+  listTargets(): StreamSubscriptionTarget[] {
+    return Array.from(this.targets.values()).map((target) => {
+      const parameters = target.params ? { ...target.params } : undefined;
+      return parameters ? { id: target.id, parameters } : { id: target.id };
+    });
   }
 
   async subscribe(targets: StreamSubscriptionTarget[]): Promise<SubscribeStreamsResult> {
@@ -451,8 +452,6 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
 
   const startedAt = new Date();
   const database = await createPowerSyncDatabase({ dbPath: config.dbPath });
-  await ensureRawTables(database, { verbose: true });
-  await ensureLocalSchema(database);
   const subscriptionManager = new StreamSubscriptionManager(database);
   const daemonBaseUrl = `http://127.0.0.1:${config.port}`;
   const importManager = new GithubImportManager({
@@ -552,8 +551,6 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
           dbPath: config.dbPath,
           includeDefaultStreams: false,
         });
-        await ensureRawTables(database, { verbose: true });
-        await ensureLocalSchema(database);
         connected = true;
         connectedAt = new Date();
         console.info('[powersync-daemon] connected to PowerSync backend');
@@ -785,7 +782,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
         context: buildAuthContext(),
       };
     },
-    listStreams: () => subscriptionManager.listKeys(),
+    listStreams: () => subscriptionManager.listTargets(),
     subscribeStreams: async (streams) => {
       const result = await subscriptionManager.subscribe(streams);
       return result;

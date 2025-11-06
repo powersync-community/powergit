@@ -4,7 +4,8 @@ declare module '@tanstack/powersync-db-collection' {
 
   export type PowerSyncCollectionOptions<T extends object> = {
     database: AbstractPowerSyncDatabase
-    tableName: string
+    tableName?: string
+    table?: unknown
     schema?: unknown
   }
 

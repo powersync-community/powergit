@@ -42,7 +42,6 @@ export function parsePowerSyncUrl(url: string): ParsedPSUrl {
 
 export * from './supabase.js'
 export * from './powersync/schema.js'
-export * from './powersync/raw-tables.js'
 export * from './powersync/streams.js'
 export { PowerSyncRemoteClient } from './node.js'
 export type { RepoDataSummary } from './node.js'

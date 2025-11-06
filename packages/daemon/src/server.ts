@@ -64,7 +64,7 @@ export interface DaemonServerOptions {
   getAuthStatus?: () => DaemonAuthResponse | Promise<DaemonAuthResponse>;
   handleAuthDevice?: (payload: Record<string, unknown>) => Promise<DaemonAuthResponse>;
   handleAuthLogout?: (payload: Record<string, unknown> | null) => Promise<DaemonAuthResponse>;
-  listStreams?: () => Promise<string[]> | string[];
+  listStreams?: () => Promise<StreamSubscriptionTarget[]> | StreamSubscriptionTarget[];
   subscribeStreams?: (streams: StreamSubscriptionTarget[]) => Promise<SubscribeStreamsResult> | SubscribeStreamsResult;
   unsubscribeStreams?: (streams: StreamSubscriptionTarget[]) => Promise<UnsubscribeStreamsResult> | UnsubscribeStreamsResult;
   listImportJobs?: () => Promise<PowerSyncImportJob[]> | PowerSyncImportJob[];

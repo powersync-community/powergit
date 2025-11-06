@@ -1,5 +1,5 @@
 -- PowerSync Git metadata tables managed by Supabase migrations.
--- Dev-only: we drop and recreate the raw tables each run so relic views/tables never collide.
+-- Dev-only: we drop and recreate the PowerSync tables each run so relic views/tables never collide.
 
 do $$
 declare relkind char;

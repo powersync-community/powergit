@@ -309,37 +309,23 @@ test.describe('CLI-seeded repo (live PowerSync)', () => {
         return null
       }
       const tables = await db.getAll("SELECT name FROM sqlite_master WHERE type = 'table'")
-    const refsRows = await db.getAll('SELECT name, target_sha, org_id, repo_id FROM refs')
-    let rawRefs: Array<Record<string, unknown>> | { error: string } | null = null
-    try {
-      rawRefs = await db.getAll('SELECT id, org_id, repo_id, name, target_sha FROM raw_refs')
-    } catch (error) {
-      rawRefs = { error: error instanceof Error ? error.message : String(error) }
-    }
-    let psDataRefs: Array<Record<string, unknown>> | { error: string } | null = null
-    let psDataRefsInfo: Array<Record<string, unknown>> | { error: string } | null = null
-    let untypedRefs: Array<Record<string, unknown>> | { error: string } | null = null
-    try {
-      psDataRefs = await db.getAll('SELECT id, data FROM ps_data__refs')
-    } catch (error) {
-      psDataRefs = { error: error instanceof Error ? error.message : String(error) }
-    }
-    try {
-      psDataRefsInfo = await db.getAll("PRAGMA table_info('ps_data__refs')")
-    } catch (error) {
-      psDataRefsInfo = { error: error instanceof Error ? error.message : String(error) }
-    }
-    try {
-      untypedRefs = await db.getAll("SELECT id, type, json_extract(data, '$.name') AS name FROM ps_untyped WHERE type = 'refs'")
-    } catch (error) {
-      untypedRefs = { error: error instanceof Error ? error.message : String(error) }
-    }
+      const refsRows = await db.getAll('SELECT name, target_sha, org_id, repo_id FROM refs')
+      let psDataRefs: Array<Record<string, unknown>> | { error: string } | null = null
+      let psDataRefsInfo: Array<Record<string, unknown>> | { error: string } | null = null
+      try {
+        psDataRefs = await db.getAll('SELECT id, data FROM ps_data__refs')
+      } catch (error) {
+        psDataRefs = { error: error instanceof Error ? error.message : String(error) }
+      }
+      try {
+        psDataRefsInfo = await db.getAll("PRAGMA table_info('ps_data__refs')")
+      } catch (error) {
+        psDataRefsInfo = { error: error instanceof Error ? error.message : String(error) }
+      }
       return {
         refs: refsRows,
-        raw_refs: rawRefs,
         ps_data_refs: psDataRefs,
         ps_data_refs_info: psDataRefsInfo,
-        ps_untyped_refs: untypedRefs,
         tables,
       }
     })

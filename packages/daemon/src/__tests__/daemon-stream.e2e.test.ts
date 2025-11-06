@@ -9,8 +9,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { PowerSyncDatabase, SyncStreamSubscription } from '@powersync/node';
 import { DaemonPowerSyncConnector } from '../connector.js';
 import { connectWithSchemaRecovery, createPowerSyncDatabase } from '../database.js';
-import { ensureRawTables } from '../raw-table-migration.js';
-import { ensureLocalSchema } from '../local-schema.js';
 import { buildRepoStreamTargets } from '@shared/core';
 import { startStack, stopStack } from '../../../../scripts/test-stack-hooks.mjs';
 import type { DaemonAuthResponse } from '../server.js';
@@ -198,6 +196,12 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
         throw new Error('PowerSync endpoint environment missing; ensure dev stack exports POWERSYNC_ENDPOINT.');
       }
 
+      const daemonToken =
+        typeof daemonAuth?.token === 'string' && daemonAuth.token.length > 0 ? daemonAuth.token : null;
+      if (!daemonToken) {
+        throw new Error('PowerSync daemon returned no token; ensure login succeeded before running the stream e2e.');
+      }
+
       const remoteUrl = `powersync::${endpoint.replace(/\/+$/, '')}/orgs/${orgId}/repos/${repoId}`;
 
       runCliCommand(
@@ -219,8 +223,6 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
       const clientDir = await mkdtemp(join(tmpdir(), 'powersync-daemon-e2e-'));
       dbPath = join(clientDir, 'client.db');
       database = await createPowerSyncDatabase({ dbPath });
-      await ensureRawTables(database);
-      await ensureLocalSchema(database);
       console.info('[daemon-e2e] Local database prepared');
 
       const connector = new DaemonPowerSyncConnector({

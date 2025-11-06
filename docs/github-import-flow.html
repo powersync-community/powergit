@@ -86,7 +86,7 @@ sequenceDiagram
     Worker->>Storage: Upload packfiles (git-remote-powersync)
     Worker->>DB: Upsert refs/commits/file_changes/objects
     Worker-->>Explorer: Return import summary
-    DB-->>PSSvc: Publish raw-table changes (Sync Streams)
+    DB-->>PSSvc: Publish synced-table changes (Sync Streams)
     PSSvc-->>Explorer: Stream updates (PowerSync Web)
     Explorer-->>User: Render branches/commits/files (TanStack DB)
       </pre>
@@ -99,10 +99,10 @@ sequenceDiagram
     <ul>
       <li><strong>Bootstrap Git repos:</strong> clone from GitHub and inject the <code>powersync::</code> remote helper so every future push streams packs + metadata into Supabase.</li>
       <li><strong>Orchestrate imports:</strong> handle auth, launch the daemon (if needed), invoke the clone worker (edge function or local), and poll until refs/commits land.</li>
-      <li><strong>Keep CLI/daemon/explorer in sync:</strong> use PowerSync’s raw tables for all Git plumbing commands so the CLI, daemon, and explorer share one cached dataset.</li>
+      <li><strong>Keep CLI/daemon/explorer in sync:</strong> rely on PowerSync’s managed sync tables so the CLI, daemon, and explorer share one cached dataset.</li>
     </ul>
     <p>
-      Without <code>psgit</code> we’d have to reimplement the Git protocol ourselves or manually upload packfiles and parse refs—which is brittle and hard to maintain. The remote helper piggybacks on git’s own pack negotiation while giving PowerSync the tidy raw-table representation it expects.
+      Without <code>psgit</code> we’d have to reimplement the Git protocol ourselves or manually upload packfiles and parse refs—which is brittle and hard to maintain. The remote helper piggybacks on git’s own pack negotiation while letting PowerSync populate the synced views it expects.
     </p>
 
     <h2>Remote Helper Details</h2>
@@ -138,12 +138,12 @@ sequenceDiagram
           <td>Publish metadata</td>
           <td>Helper internal call</td>
           <td>Helper emits refs/commits/file_changes rows to Supabase/Postgres.</td>
-          <td>PowerSync raw tables (Supabase Postgres)</td>
+          <td>PowerSync synced tables (Supabase Postgres)</td>
         </tr>
       </tbody>
     </table>
-    <p><em>Note:</em> The custom git remote helper is the glue. By registering the <code>powersync::</code> remote it intercepts every push, uploads packs, and emits the raw-table metadata that feeds PowerSync.</p>
-    <p><strong>What is psgit?</strong> It is our CLI wrapper around <code>git</code>; it configures the <code>powersync::</code> remote so the helper can stream pack bytes and emit raw-table metadata no matter where the clone runs.</p>
+    <p><em>Note:</em> The custom git remote helper is the glue. By registering the <code>powersync::</code> remote it intercepts every push, uploads packs, and emits the metadata that feeds PowerSync’s synced tables.</p>
+    <p><strong>What is psgit?</strong> It is our CLI wrapper around <code>git</code>; it configures the <code>powersync::</code> remote so the helper can stream pack bytes and emit synced-table metadata no matter where the clone runs.</p>
 
     <h2>Hosted Clone, Local Playback</h2>
     <p>
@@ -167,7 +167,7 @@ sequenceDiagram
     SupaFunc->>GitHub: Clone via psgit
     SupaFunc->>Daemon: Notify / deliver pack summary
     Daemon->>DB: Upsert refs/commits/file_changes/objects
-    DB-->>PSSvc: Publish raw-table changes
+    DB-->>PSSvc: Publish synced-table changes
     PSSvc-->>Explorer: Stream updates (PowerSync Web)
     Explorer-->>User: Show repo contents
       </pre>
@@ -191,8 +191,8 @@ sequenceDiagram
     User->>Explorer: Choose org/repo in UI
     Explorer->>Worker: invokeImport(repoUrl, orgId, repoId)
     Worker->>GitHub: Clone via psgit
-    Worker->>DB: Store pack bytes + metadata (raw tables)
-    DB-->>PSSvc: Publish raw-table changes
+    Worker->>DB: Store pack bytes + metadata (PowerSync tables)
+    DB-->>PSSvc: Publish synced-table changes
     PSSvc-->>Explorer: Stream updates
     Explorer-->>User: Render branches/commits/files (TanStack DB)
       </pre>
@@ -207,8 +207,8 @@ sequenceDiagram
       <li><strong>Clone + push:</strong> The worker runs <code>psgit</code>, clones from GitHub, sets the PowerSync remote, and pushes. Packfiles flow into Supabase Storage automatically via the remote helper.</li>
       <li><strong>Control-plane writes:</strong> The same job upserts refs, commits, file_changes, and objects metadata into Supabase Postgres.</li>
       <li><strong>Sync Streams:</strong> PowerSync service notices the new rows and broadcasts them through the org/repo streams.</li>
-      <li><strong>Daemon cache:</strong> The local daemon (if present) receives the stream, keeps its raw SQLite replica warm, and serves CLI requests from the same data.</li>
-      <li><strong>Explorer cache:</strong> Explorer’s PowerSync Web client syncs the four raw tables into IndexedDB; TanStack DB runs live queries directly on that cache.</li>
+      <li><strong>Daemon cache:</strong> The local daemon (if present) receives the stream, keeps its PowerSync replica warm, and serves CLI requests from the same data.</li>
+      <li><strong>Explorer cache:</strong> Explorer’s PowerSync Web client syncs the four streamed tables into IndexedDB; TanStack DB runs live queries directly on that cache.</li>
       <li><strong>Read experience:</strong> User browses branches/commits/files instantly—even offline—while subsequent updates from GitHub flow through the same pipeline.</li>
     </ol>
 
@@ -224,13 +224,8 @@ sequenceDiagram
         <strong>Local daemon</strong> – owns PowerSync Node, Supabase writer, and the import manager.
         It ensures that:
         <ol>
-          <li>
-            raw SQLite tables exist locally (by running the raw-table migration when the daemon
-            starts),
-          </li>
-          <li>
-            Supabase writer persists control-plane changes (refs/commits/...) upstream, and
-          </li>
+          <li>the local replica stays healthy so CLI/Explorer requests can reuse it,</li>
+          <li>Supabase writer persists control-plane changes (refs/commits/...) upstream, and</li>
           <li>
             Sync Streams remain subscribed for the requested org/repo so the explorer (and CLI) stay
             in sync.
@@ -244,7 +239,7 @@ sequenceDiagram
         can confirm what changed.
       </li>
       <li>
-        <strong>PowerSync Service</strong> – delivers the raw table changes to all subscribed
+        <strong>PowerSync Service</strong> – delivers the synced-table changes to all subscribed
         clients (daemon, explorer, CLI) via Sync Streams.
       </li>
     </ul>
@@ -261,8 +256,7 @@ sequenceDiagram
         client.
       </li>
       <li>
-        <strong>Daemon PowerSync SQLite</strong>: Raw-table replica for offline CLI/daemon
-        operations. Contains the exact schema as Postgres.
+        <strong>Daemon PowerSync SQLite</strong>: Standard PowerSync replica used for offline CLI/daemon operations. Mirrors the Postgres schema.
       </li>
       <li>
         <strong>Explorer IndexedDB (via PowerSync Web)</strong>: Browser cache, enabling offline
@@ -281,10 +275,7 @@ sequenceDiagram
         Triggers the same import path (either via the daemon directly or the Supabase function).
       </li>
       <li>Waits for daemon counters (<code>refs</code>/<code>commits</code>) to go non-zero.</li>
-      <li>
-        Uses the raw-table replica in the daemon PowerSync database to execute Git plumbing
-        commands locally.
-      </li>
+      <li>Uses the daemon’s PowerSync replica to execute Git plumbing commands locally.</li>
     </ol>
 
     <h2>Happy Path Summary</h2>
@@ -299,7 +290,7 @@ sequenceDiagram
       </li>
       <li>
         Explorer renders the repo instantly using its cached dataset; CLI and daemon share the same
-        raw-table replica for any follow-up Git commands.
+        synced PowerSync replica for any follow-up Git commands.
       </li>
       <li>
         Subsequent visits hit local cache first and only stream incremental changes.
