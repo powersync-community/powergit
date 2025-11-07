@@ -47,7 +47,7 @@ function Branches() {
   const shaClass = isDark ? 'font-mono text-xs text-slate-400' : 'font-mono text-xs text-slate-500'
 
   return (
-    <div className="space-y-3" data-testid="branch-view">
+    <div className="mx-auto max-w-6xl space-y-3" data-testid="branch-view">
       <h3 className={headingClass} data-testid="branch-heading">
         Branches ({orgId}/{repoId})
       </h3>

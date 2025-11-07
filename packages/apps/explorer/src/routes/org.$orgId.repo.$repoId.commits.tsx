@@ -46,7 +46,7 @@ function Commits() {
   const shaClass = isDark ? 'font-mono text-slate-300' : 'font-mono text-slate-600'
 
   return (
-    <div className="space-y-3" data-testid="commit-view">
+    <div className="mx-auto max-w-6xl space-y-3" data-testid="commit-view">
       <h3 className={headingClass} data-testid="commit-heading">
         Commits ({orgId}/{repoId})
       </h3>

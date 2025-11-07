@@ -115,48 +115,50 @@ const AppShell: React.FC = () => {
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${shellBackground}`}>
-      <div className="mx-auto max-w-6xl space-y-6 p-6">
-        <header className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Git Explorer</h1>
-            <div className={`text-sm ${headerSubText}`}>
-              {status.connected ? 'Connected' : 'Offline'}
-              {!status.hasSynced ? ' · syncing…' : ''}
+      <div className="space-y-6 p-6">
+        <div className="mx-auto max-w-6xl space-y-6">
+          <header className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold">Git Explorer</h1>
+              <div className={`text-sm ${headerSubText}`}>
+                {status.connected ? 'Connected' : 'Offline'}
+                {!status.hasSynced ? ' · syncing…' : ''}
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <nav className="space-x-4 text-sm">
-              <Link to="/" className={`${navLink} [&.active]:font-semibold`}>
-                Home
-              </Link>
-            </nav>
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              data-testid="theme-toggle"
-              className={`inline-flex h-10 w-10 items-center justify-center rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40 ${
-                isDark ? 'border-slate-600 bg-slate-900 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              {theme === 'dark' ? <CiLight className="h-5 w-5" aria-hidden /> : <CiDark className="h-5 w-5" aria-hidden />}
-            </button>
-            <div className="flex items-center gap-2 text-xs">
-              <span className={userText}>{userLabel}</span>
+            <div className="flex items-center gap-3">
+              <nav className="space-x-4 text-sm">
+                <Link to="/" className={`${navLink} [&.active]:font-semibold`}>
+                  Home
+                </Link>
+              </nav>
               <button
                 type="button"
-                className={signOutClasses}
-                onClick={() => {
-                  void handleSignOut()
-                }}
-                disabled={signingOut}
+                onClick={toggleTheme}
+                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                data-testid="theme-toggle"
+                className={`inline-flex h-10 w-10 items-center justify-center rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40 ${
+                  isDark ? 'border-slate-600 bg-slate-900 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                }`}
               >
-                {signingOut ? 'Signing out…' : 'Sign out'}
+                {theme === 'dark' ? <CiLight className="h-5 w-5" aria-hidden /> : <CiDark className="h-5 w-5" aria-hidden />}
               </button>
+              <div className="flex items-center gap-2 text-xs">
+                <span className={userText}>{userLabel}</span>
+                <button
+                  type="button"
+                  className={signOutClasses}
+                  onClick={() => {
+                    void handleSignOut()
+                  }}
+                  disabled={signingOut}
+                >
+                  {signingOut ? 'Signing out…' : 'Sign out'}
+                </button>
+              </div>
             </div>
-          </div>
-        </header>
-        <StatusViewport />
+          </header>
+          <StatusViewport />
+        </div>
         <Outlet />
       </div>
     </div>

@@ -1,7 +1,13 @@
 import * as React from 'react'
 import { Suspense } from 'react'
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { IoGitBranchOutline, IoChevronForwardOutline, IoChevronDownOutline, IoDocumentTextOutline } from 'react-icons/io5'
+import {
+  IoGitBranchOutline,
+  IoChevronForwardOutline,
+  IoChevronDownOutline,
+  IoChevronBackOutline,
+  IoDocumentTextOutline,
+} from 'react-icons/io5'
 import { eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/react-db'
 import { useRepoStreams } from '@ps/streams'
@@ -11,11 +17,72 @@ import { gitStore, type PackRow, type TreeEntry } from '@ps/git-store'
 import type { Database } from '@ps/schema'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
+import rehypeHighlight from 'rehype-highlight'
+import rehypeSanitize, { defaultSchema, type Options as RehypeSanitizeOptions } from 'rehype-sanitize'
 import { useTheme } from '../ui/theme-context'
 
 const MonacoEditor = React.lazy(() => import('@monaco-editor/react'))
 const decoder = 'TextDecoder' in globalThis ? new TextDecoder('utf-8') : null
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdown', 'mkd'])
+const DESKTOP_TREE_MIN_WIDTH = 240
+const DESKTOP_TREE_MAX_WIDTH = 640
+const DESKTOP_TREE_DEFAULT_WIDTH = 360
+
+const clampTreeWidth = (width: number) => Math.min(DESKTOP_TREE_MAX_WIDTH, Math.max(DESKTOP_TREE_MIN_WIDTH, width))
+
+const markdownSanitizeSchema: RehypeSanitizeOptions = {
+  ...defaultSchema,
+  tagNames: Array.from(
+    new Set([...(defaultSchema.tagNames ?? []), 'picture', 'source']),
+  ),
+  attributes: {
+    ...defaultSchema.attributes,
+    p: [
+      ...(defaultSchema.attributes?.p ?? []),
+      ['align', /^(left|right|center|justify)$/],
+    ],
+    a: [
+      ...(defaultSchema.attributes?.a ?? []),
+      ['target', /^(_blank|_self|_parent|_top)$/],
+      ['rel', 'string'],
+    ],
+    img: [
+      ...(defaultSchema.attributes?.img ?? []),
+      ['loading', /^(lazy|eager|auto)$/],
+      ['decoding', /^(sync|async|auto)$/],
+      ['referrerpolicy', 'string'],
+    ],
+    picture: [
+      ...(defaultSchema.attributes?.picture ?? []),
+      ['className', 'string'],
+    ],
+    source: [
+      ...(defaultSchema.attributes?.source ?? []),
+      ['srcSet', 'string'],
+      ['srcset', 'string'],
+      ['media', 'string'],
+      ['type', 'string'],
+    ],
+    code: [
+      ...(defaultSchema.attributes?.code ?? []),
+      ['className', 'string'],
+      ['dataLanguage', 'string'],
+    ],
+    pre: [
+      ...(defaultSchema.attributes?.pre ?? []),
+      ['className', 'string'],
+    ],
+    span: [
+      ...(defaultSchema.attributes?.span ?? []),
+      ['className', 'string'],
+    ],
+    div: [
+      ...(defaultSchema.attributes?.div ?? []),
+      ['className', 'string'],
+    ],
+  },
+}
 
 type FileRouteSearch = {
   branch?: string
@@ -61,6 +128,41 @@ type FallbackEntry = {
 type FallbackNode =
   | { type: 'directory'; name: string; path: string; children: FallbackNode[] }
   | { type: 'file'; name: string; path: string; commitSha: string | null }
+
+type IndexStatus = ReturnType<typeof gitStore.getProgress>['status']
+
+type FileTreePaneProps = {
+  className: string
+  headerClass: string
+  bodyClass: string
+  fallbackInfoClass: string
+  fallbackNoticeClass: string
+  treeEmptyClass: string
+  indexStatus: IndexStatus
+  hasFallbackTree: boolean
+  fallbackTree: FallbackNode
+  indexingLabel: string
+  indexError?: string | null
+  selectedCommit: string | null
+  renderTree: (path: string, depth: number) => React.ReactNode
+  handleFileSelect: (path: string) => void
+  selectedPath: string | null
+  isDark: boolean
+  headerAction?: React.ReactNode
+}
+
+type FileViewerPaneProps = React.PropsWithChildren<{
+  className: string
+  headerClass: string
+  selectedPath: string | null
+  headerAction?: React.ReactNode
+}>
+
+type ExplorerViewProps = {
+  treeProps: FileTreePaneProps
+  viewerProps: FileViewerPaneProps
+  isDark: boolean
+}
 
 function sortTreeEntries(entries: TreeEntry[]): TreeEntry[] {
   return [...entries].sort((a, b) => {
@@ -125,6 +227,7 @@ function sortFallbackTree(node: FallbackNode) {
 function Files() {
   const { orgId, repoId } = Route.useParams()
   const { theme } = useTheme()
+  const isDesktop = useMediaQuery('(min-width: 1024px)')
   const isDark = theme === 'dark'
   const navigate = Route.useNavigate()
   const { branch: branchParam } = Route.useSearch()
@@ -425,8 +528,8 @@ function Files() {
 
   const handleFileSelect = React.useCallback(
     async (fullPath: string) => {
-      setSelectedPath(fullPath)
-      setPendingPath(null)
+    setSelectedPath(fullPath)
+    setPendingPath(null)
       if (indexStatus === 'error') {
         setViewerState({
           status: 'error',
@@ -658,6 +761,9 @@ function Files() {
   const blobHeaderClass = isDark
     ? 'flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-700 bg-slate-900/70 px-4 py-2 text-xs text-slate-300'
     : 'flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600'
+  const markdownProseClass = isDark
+    ? 'markdown-prose markdown-prose-dark prose prose-invert max-w-none px-6 py-4'
+    : 'markdown-prose markdown-prose-light prose max-w-none px-6 py-4'
 
   const viewerContent = (() => {
     if (indexStatus === 'indexing') {
@@ -770,8 +876,17 @@ function Files() {
             </div>
             <div className="flex-1 overflow-auto">
               {isMarkdownFile ? (
-                <div className={isDark ? 'prose prose-invert max-w-none px-6 py-4' : 'prose max-w-none px-6 py-4'}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{viewerState.content}</ReactMarkdown>
+                <div className={markdownProseClass}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[
+                      rehypeRaw,
+                      rehypeHighlight,
+                      [rehypeSanitize, markdownSanitizeSchema],
+                    ]}
+                  >
+                    {viewerState.content}
+                  </ReactMarkdown>
                 </div>
               ) : (
                 <Suspense
@@ -839,92 +954,329 @@ function Files() {
     ? 'flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/70 text-slate-200 shadow-lg shadow-slate-900/40'
     : 'flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm'
   const viewerHeaderClass = isDark
-    ? 'border-b border-slate-700 bg-slate-900/60 px-4 py-2 text-sm font-medium text-slate-100'
-    : 'border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700'
+    ? 'border-b border-slate-700 bg-slate-900/60 px-4 py-2 text-sm font-medium text-slate-100 flex items-center justify-between gap-2'
+    : 'border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 flex items-center justify-between gap-2'
+
+  const treePaneProps: FileTreePaneProps = {
+    className: treePanelClass,
+    headerClass: treeHeaderClass,
+    bodyClass: treeBodyClass,
+    fallbackInfoClass,
+    fallbackNoticeClass,
+    treeEmptyClass,
+    indexStatus,
+    hasFallbackTree,
+    fallbackTree,
+    indexingLabel,
+    indexError,
+    selectedCommit,
+    renderTree,
+    handleFileSelect,
+    selectedPath,
+    isDark,
+  }
+
+  const viewerPaneProps: FileViewerPaneProps = {
+    className: viewerContainerClass,
+    headerClass: viewerHeaderClass,
+    selectedPath,
+    children: viewerContent,
+  }
 
   return (
-    <div className="space-y-4" data-testid="file-explorer-view">
-      <div>
+    <div className="space-y-6" data-testid="file-explorer-view">
+      <div className="mx-auto max-w-6xl space-y-4">
         <div className={repoHeadingClass}>
           {orgId}
           <span className={repoSlashClass}>/</span>
           {repoId}
         </div>
-      </div>
-      <div className={toolbarClass} data-testid="repo-toolbar">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5">
-              <IoGitBranchOutline className={branchIconClass} aria-hidden />
-              {branchSelector}
-            </div>
-            <div className="relative hidden sm:block">
-              <input
-                id="repo-search"
-                type="search"
-                placeholder="Go to file"
-                className={repoSearchInputClass}
-              />
-              <span className={repoSearchShortcutClass}>⇧t</span>
-            </div>
-            <div className="ml-auto">
-              {headCommitLabel ? (
-                <Link
-                  to="/org/$orgId/repo/$repoId/commits"
-                  params={{ orgId, repoId }}
-                  search={{ branch: selectedBranch?.name ?? undefined }}
-                  className={commitButtonClass}
-                  data-testid="view-commits-button"
-                >
-                  View commits · {headCommitLabel}
-                </Link>
-              ) : null}
+        <div className={toolbarClass} data-testid="repo-toolbar">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <IoGitBranchOutline className={branchIconClass} aria-hidden />
+                {branchSelector}
+              </div>
+              <div className="relative hidden sm:block">
+                <input
+                  id="repo-search"
+                  type="search"
+                  placeholder="Go to file"
+                  className={repoSearchInputClass}
+                />
+                <span className={repoSearchShortcutClass}>⇧t</span>
+              </div>
+              <div className="ml-auto">
+                {headCommitLabel ? (
+                  <Link
+                    to="/org/$orgId/repo/$repoId/commits"
+                    params={{ orgId, repoId }}
+                    search={{ branch: selectedBranch?.name ?? undefined }}
+                    className={commitButtonClass}
+                    data-testid="view-commits-button"
+                  >
+                    View commits · {headCommitLabel}
+                  </Link>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[320px,1fr] min-h-[540px]">
-        <div className={treePanelClass}>
-          <div className={treeHeaderClass}>
-            Files
-          </div>
-          <div className={treeBodyClass} data-testid="file-explorer-tree">
-            {indexStatus !== 'ready' ? (
-              hasFallbackTree ? (
-                <div className="space-y-2">
-                  <div className={fallbackInfoClass}>
-                    <div>{indexingLabel}</div>
-                    {indexProgress.status !== 'error' ? (
-                      <div className={isDark ? 'text-emerald-200/80' : undefined}>
-                        Showing recently replicated paths while pack indexing completes.
-                      </div>
-                    ) : indexError ? (
-                      <div className={isDark ? 'text-red-300' : 'text-red-500'}>{indexError}</div>
-                    ) : null}
-                  </div>
-                  <div className="space-y-0.5">
-                    {renderFallbackTree(fallbackTree, 0, handleFileSelect, selectedPath, isDark)}
-                  </div>
-                </div>
-              ) : (
-                <div className={fallbackNoticeClass}>{indexingLabel}</div>
-              )
-            ) : selectedCommit ? (
-              renderTree('', 0)
-            ) : (
-              <div className={treeEmptyClass}>No commits available.</div>
-            )}
-          </div>
-        </div>
+      {isDesktop ? (
+        <DesktopView treeProps={treePaneProps} viewerProps={viewerPaneProps} isDark={isDark} />
+      ) : (
+        <MobileView treeProps={treePaneProps} viewerProps={viewerPaneProps} isDark={isDark} />
+      )}
+    </div>
+  )
+}
 
-        <div className={viewerContainerClass} data-testid="file-viewer">
-          <div className={viewerHeaderClass} data-testid="file-viewer-header">
-            {selectedPath ?? 'Select a file to preview'}
-          </div>
-          <div className="flex-1">{viewerContent}</div>
-        </div>
+const FileTreePane = React.forwardRef<HTMLDivElement, FileTreePaneProps>(function FileTreePane(
+  {
+    className,
+    headerClass,
+    bodyClass,
+    fallbackInfoClass,
+    fallbackNoticeClass,
+    treeEmptyClass,
+    indexStatus,
+    hasFallbackTree,
+    fallbackTree,
+    indexingLabel,
+    indexError,
+    selectedCommit,
+    renderTree,
+    handleFileSelect,
+    selectedPath,
+    isDark,
+    headerAction,
+  },
+  ref,
+) {
+  return (
+    <div ref={ref} className={className}>
+      <div className={`${headerClass} flex items-center justify-between gap-2`}>
+        <span>Files</span>
+        {headerAction ?? null}
       </div>
+      <div className={bodyClass} data-testid="file-explorer-tree">
+        {indexStatus !== 'ready' ? (
+          hasFallbackTree ? (
+            <div className="space-y-2">
+              <div className={fallbackInfoClass}>
+                <div>{indexingLabel}</div>
+                {indexStatus !== 'error' ? (
+                  <div className={isDark ? 'text-emerald-200/80' : undefined}>
+                    Showing recently replicated paths while pack indexing completes.
+                  </div>
+                ) : indexError ? (
+                  <div className={isDark ? 'text-red-300' : 'text-red-500'}>{indexError}</div>
+                ) : null}
+              </div>
+              <div className="space-y-0.5">
+                {renderFallbackTree(fallbackTree, 0, handleFileSelect, selectedPath, isDark)}
+              </div>
+            </div>
+          ) : (
+            <div className={fallbackNoticeClass}>{indexingLabel}</div>
+          )
+        ) : selectedCommit ? (
+          renderTree('', 0)
+        ) : (
+          <div className={treeEmptyClass}>No commits available.</div>
+        )}
+      </div>
+    </div>
+  )
+})
+
+const FileViewerPane = React.forwardRef<HTMLDivElement, FileViewerPaneProps>(function FileViewerPane(
+  { className, headerClass, selectedPath, headerAction, children },
+  ref,
+) {
+  return (
+    <div ref={ref} className={className} data-testid="file-viewer">
+      <div className={headerClass} data-testid="file-viewer-header">
+        <span>{selectedPath ?? 'Select a file to preview'}</span>
+        {headerAction ?? null}
+      </div>
+      <div className="flex-1">{children}</div>
+    </div>
+  )
+})
+
+function DesktopView({ treeProps, viewerProps, isDark }: ExplorerViewProps) {
+  const [treeWidth, setTreeWidth] = React.useState(DESKTOP_TREE_DEFAULT_WIDTH)
+  const desktopViewerProps = {
+    ...viewerProps,
+    className: `${viewerProps.className} flex-1 min-w-0`,
+  }
+  const startXRef = React.useRef(0)
+  const startWidthRef = React.useRef(DESKTOP_TREE_DEFAULT_WIDTH)
+  const resizingRef = React.useRef(false)
+  const separatorButtonClass = isDark
+    ? 'bg-slate-900/60 border-slate-700 hover:bg-slate-900/80 focus-visible:ring-emerald-300/50'
+    : 'bg-white border-slate-200 hover:bg-slate-50 focus-visible:ring-emerald-300/50'
+  const separatorIndicatorClass = isDark
+    ? 'bg-slate-600 group-hover:bg-emerald-300'
+    : 'bg-slate-300 group-hover:bg-emerald-500'
+
+  const handlePointerMove = React.useCallback((event: PointerEvent) => {
+    if (!resizingRef.current) return
+    const delta = event.clientX - startXRef.current
+    setTreeWidth(clampTreeWidth(startWidthRef.current + delta))
+  }, [])
+
+  const handlePointerUp = React.useCallback(() => {
+    if (!resizingRef.current) return
+    resizingRef.current = false
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [handlePointerMove])
+
+  const beginResize = React.useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (typeof window === 'undefined') return
+      event.preventDefault()
+      resizingRef.current = true
+      startXRef.current = event.clientX
+      startWidthRef.current = treeWidth
+      window.addEventListener('pointermove', handlePointerMove)
+      window.addEventListener('pointerup', handlePointerUp)
+    },
+    [handlePointerMove, handlePointerUp, treeWidth],
+  )
+
+  React.useEffect(() => {
+    return () => {
+      if (typeof window === 'undefined') return
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [handlePointerMove, handlePointerUp])
+
+  const adjustWidth = React.useCallback((delta: number) => {
+    setTreeWidth((prev) => clampTreeWidth(prev + delta))
+  }, [])
+
+  const handleSeparatorKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      switch (event.key) {
+        case 'ArrowLeft':
+        case 'ArrowDown':
+          event.preventDefault()
+          adjustWidth(-24)
+          break
+        case 'ArrowRight':
+        case 'ArrowUp':
+          event.preventDefault()
+          adjustWidth(24)
+          break
+        case 'Home':
+          event.preventDefault()
+          setTreeWidth(DESKTOP_TREE_MIN_WIDTH)
+          break
+        case 'End':
+          event.preventDefault()
+          setTreeWidth(DESKTOP_TREE_MAX_WIDTH)
+          break
+        case 'Enter':
+        case ' ': // Space
+          event.preventDefault()
+          setTreeWidth(DESKTOP_TREE_DEFAULT_WIDTH)
+          break
+        default:
+          break
+      }
+    },
+    [adjustWidth],
+  )
+
+  return (
+    <div className="flex min-h-[540px] w-full items-stretch gap-4">
+      <div className="flex h-full flex-col" style={{ width: `${treeWidth}px` }}>
+        <FileTreePane {...treeProps} />
+      </div>
+      <button
+        type="button"
+        role="separator"
+        aria-label="Resize file tree panel"
+        aria-orientation="vertical"
+        aria-valuemin={DESKTOP_TREE_MIN_WIDTH}
+        aria-valuemax={DESKTOP_TREE_MAX_WIDTH}
+        aria-valuenow={Math.round(treeWidth)}
+        onPointerDown={beginResize}
+        onKeyDown={handleSeparatorKeyDown}
+        onDoubleClick={() => setTreeWidth(DESKTOP_TREE_DEFAULT_WIDTH)}
+        className={`group flex w-3 shrink-0 cursor-col-resize items-center justify-center self-stretch rounded-full border transition focus-visible:outline-none ${separatorButtonClass}`}
+      >
+        <span aria-hidden="true" className={`h-24 w-1 rounded-full transition-all ${separatorIndicatorClass}`} />
+      </button>
+      <div className="flex min-w-0 flex-1">
+        <FileViewerPane {...desktopViewerProps} />
+      </div>
+    </div>
+  )
+}
+
+function MobileView({ treeProps, viewerProps }: ExplorerViewProps) {
+  const [panel, setPanel] = React.useState<'tree' | 'viewer'>('tree')
+  const treeRef = React.useRef<HTMLDivElement | null>(null)
+  const viewerRef = React.useRef<HTMLDivElement | null>(null)
+  const previousPath = React.useRef<string | null>(null)
+  const selectedPath = viewerProps.selectedPath ?? null
+
+  React.useEffect(() => {
+    if (selectedPath && selectedPath !== previousPath.current) {
+      setPanel('viewer')
+    }
+    previousPath.current = selectedPath
+  }, [selectedPath])
+
+  React.useEffect(() => {
+    const node = panel === 'tree' ? treeRef.current : viewerRef.current
+    node?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [panel])
+
+  return (
+    <div className="grid min-h-[540px] w-full gap-5">
+      <FileTreePane
+        {...treeProps}
+        ref={treeRef}
+        className={`${treeProps.className} ${panel !== 'tree' ? 'hidden' : ''}`}
+        headerAction={
+          panel === 'tree' && selectedPath ? (
+            <button
+              type="button"
+              onClick={() => setPanel('viewer')}
+              className="text-xs font-medium text-emerald-600"
+            >
+              View file
+            </button>
+          ) : null
+        }
+      />
+      <FileViewerPane
+        {...viewerProps}
+        ref={viewerRef}
+        className={`${viewerProps.className} ${panel !== 'viewer' ? 'hidden' : ''}`}
+        headerAction={
+          panel === 'viewer' ? (
+            <button
+              type="button"
+              onClick={() => setPanel('tree')}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600"
+            >
+              <IoChevronBackOutline /> Back
+            </button>
+          ) : null
+        }
+      />
     </div>
   )
 }
@@ -1032,4 +1384,32 @@ function renderFallbackTree(
     }
     return renderFallbackTree(child, depth, onSelect, selectedPath, isDark)
   })
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = React.useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia(query).matches
+  })
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const media = window.matchMedia(query)
+    const listener = (event: MediaQueryListEvent) => setMatches(event.matches)
+    if (media.addEventListener) {
+      media.addEventListener('change', listener)
+    } else {
+      media.addListener(listener)
+    }
+    setMatches(media.matches)
+    return () => {
+      if (media.removeEventListener) {
+        media.removeEventListener('change', listener)
+      } else {
+        media.removeListener(listener)
+      }
+    }
+  }, [query])
+
+  return matches
 }

@@ -1,1 +1,98 @@
 @import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+.markdown-prose pre {
+  border-radius: 0.75rem;
+  padding: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.markdown-prose pre,
+.markdown-prose code {
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.markdown-prose pre code {
+  display: block;
+  background: transparent;
+  padding: 0;
+}
+
+.markdown-prose code:not(pre code) {
+  padding: 0.1rem 0.25rem;
+  border-radius: 0.35rem;
+  font-size: 0.85em;
+}
+
+.markdown-prose-light pre {
+  background: #f8fafc;
+  color: #0f172a;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.markdown-prose-light code:not(pre code) {
+  background: rgba(15, 23, 42, 0.08);
+  color: #0f172a;
+}
+
+.markdown-prose-dark pre {
+  background: #0c111d;
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.markdown-prose-dark code:not(pre code) {
+  background: rgba(148, 163, 184, 0.15);
+  color: #e2e8f0;
+}
+
+.markdown-prose .hljs {
+  background: transparent;
+}
+
+.markdown-prose .hljs-comment,
+.markdown-prose .hljs-quote {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.markdown-prose .hljs-keyword,
+.markdown-prose .hljs-selector-tag,
+.markdown-prose .hljs-type,
+.markdown-prose .hljs-template-tag,
+.markdown-prose .hljs-built_in,
+.markdown-prose .hljs-tag {
+  color: #c792ea;
+}
+
+.markdown-prose .hljs-string,
+.markdown-prose .hljs-attr,
+.markdown-prose .hljs-bullet,
+.markdown-prose .hljs-addition {
+  color: #7ee787;
+}
+
+.markdown-prose .hljs-title,
+.markdown-prose .hljs-section,
+.markdown-prose .hljs-selector-id,
+.markdown-prose .hljs-selector-class,
+.markdown-prose .hljs-name {
+  color: #82aaff;
+}
+
+.markdown-prose .hljs-literal,
+.markdown-prose .hljs-number,
+.markdown-prose .hljs-variable,
+.markdown-prose .hljs-template-variable,
+.markdown-prose .hljs-deletion {
+  color: #f78c6c;
+}
+
+.markdown-prose .hljs-meta,
+.markdown-prose .hljs-operator,
+.markdown-prose .hljs-punctuation {
+  color: #f8f8f2;
+}

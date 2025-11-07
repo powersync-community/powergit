@@ -94,7 +94,7 @@ export function OrgActivity() {
   const branchShaClass = isDark ? 'font-mono text-xs text-slate-300' : 'font-mono text-xs text-slate-500'
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto max-w-6xl space-y-4">
       <h2 className={headingClass}>Org: {orgId} — Activity</h2>
       {isLoading ? (
         <div className={loadingClass}>Loading repository refs…</div>

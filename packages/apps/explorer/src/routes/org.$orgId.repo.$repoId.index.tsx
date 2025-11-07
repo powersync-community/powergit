@@ -46,7 +46,7 @@ function RepoOverview() {
     : 'text-sm font-medium text-emerald-600 underline-offset-2 hover:text-emerald-500'
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto max-w-6xl space-y-4">
       <h2 className={headingClass}>
         Repo: {orgId}/{repoId}
       </h2>
