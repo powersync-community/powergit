@@ -473,8 +473,8 @@ async function ensureRemoteConfigured(repoDir: string, remoteUrl: string): Promi
 
 async function pushAllReferences(repoDir: string): Promise<void> {
   await ensurePowerSyncRemoteHelper();
-  await runGit(['push', '--prune', REMOTE_NAME, '--all'], { cwd: repoDir });
-  await runGit(['push', REMOTE_NAME, '--tags'], { cwd: repoDir });
+  await runGit(['fetch', '--all', '--prune'], { cwd: repoDir });
+  await runGit(['push', '--mirror', REMOTE_NAME], { cwd: repoDir });
 }
 
 async function detectCurrentBranch(repoDir: string): Promise<string | null> {
