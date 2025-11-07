@@ -143,7 +143,12 @@ export function useRepoStreams(orgId: string, repoId: string) {
 
     const task = async () => {
       try {
-        active = await openRepo(ps, orgId, repoId)
+        const subscriptions = await openRepo(ps, orgId, repoId)
+        if (disposed) {
+          subscriptions.forEach((subscription) => subscription.unsubscribe())
+          return
+        }
+        active = subscriptions
         if (import.meta.env.DEV) {
           console.debug('[PowerSync][streams] repo subscriptions active', active.length)
         }
@@ -156,7 +161,10 @@ export function useRepoStreams(orgId: string, repoId: string) {
 
     return () => {
       disposed = true
-      active.forEach((subscription) => subscription.unsubscribe())
+      if (active.length > 0) {
+        active.forEach((subscription) => subscription.unsubscribe())
+        active = []
+      }
     }
   }, [ps, orgId, repoId])
 }

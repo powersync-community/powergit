@@ -97,9 +97,6 @@ export function Home() {
             <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
               Recently explored repositories
             </h2>
-            <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Repositories streamed into your local PowerSync replica.
-            </p>
           </div>
           <span className={repoBadge}>
             {repoSummaries.length} repo{repoSummaries.length === 1 ? '' : 's'}

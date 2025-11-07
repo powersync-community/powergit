@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { Suspense } from 'react'
 import { Link, createFileRoute } from '@tanstack/react-router'
+import { IoGitBranchOutline, IoChevronForwardOutline, IoChevronDownOutline, IoDocumentTextOutline } from 'react-icons/io5'
 import { eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/react-db'
 import { useRepoStreams } from '@ps/streams'
@@ -8,10 +9,13 @@ import { useRepoFixture } from '@ps/test-fixture-bridge'
 import { useCollections } from '@tsdb/collections'
 import { gitStore, type PackRow, type TreeEntry } from '@ps/git-store'
 import type { Database } from '@ps/schema'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useTheme } from '../ui/theme-context'
 
 const MonacoEditor = React.lazy(() => import('@monaco-editor/react'))
 const decoder = 'TextDecoder' in globalThis ? new TextDecoder('utf-8') : null
+const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdown', 'mkd'])
 
 type FileRouteSearch = {
   branch?: string
@@ -57,6 +61,15 @@ type FallbackEntry = {
 type FallbackNode =
   | { type: 'directory'; name: string; path: string; children: FallbackNode[] }
   | { type: 'file'; name: string; path: string; commitSha: string | null }
+
+function sortTreeEntries(entries: TreeEntry[]): TreeEntry[] {
+  return [...entries].sort((a, b) => {
+    if (a.type === b.type) {
+      return a.name.localeCompare(b.name)
+    }
+    return a.type === 'tree' ? -1 : 1
+  })
+}
 
 function buildFallbackEntries(rows: FileChangeRow[]): FallbackEntry[] {
   const map = new Map<string, string | null>()
@@ -289,12 +302,16 @@ function Files() {
     }
     if (indexProgress.total > 0) {
       const processed = Math.min(indexProgress.processed, indexProgress.total)
-      return `Repository content is syncing (${processed}/${indexProgress.total})…`
+      const percent = Math.min(100, Math.round((processed / indexProgress.total) * 100))
+      return `Repository content is syncing (${processed}/${indexProgress.total}, ${percent}%)…`
+    }
+    if (indexProgress.processed > 0 && indexProgress.total === 0) {
+      return `Repository content is syncing (${indexProgress.processed})…`
     }
     return 'Repository content is syncing…'
   }, [indexProgress])
 
-  const [expandedDirs, setExpandedDirs] = React.useState<Set<string>>(new Set(['']))
+  const [expandedDirs, setExpandedDirs] = React.useState<Set<string>>(new Set())
   const [treeCache, setTreeCache] = React.useState<Map<string, TreeEntry[]>>(new Map())
   const [treeErrors, setTreeErrors] = React.useState<Map<string, string>>(new Map())
   const [loadingDirs, setLoadingDirs] = React.useState<Set<string>>(new Set())
@@ -323,7 +340,7 @@ function Files() {
   }, [selectedPath, resolvePathKey, selectedBranchName])
 
   const resetTreeState = React.useCallback(() => {
-    setExpandedDirs(new Set(['']))
+    setExpandedDirs(new Set())
     setTreeCache(new Map())
     setTreeErrors(new Map())
     setLoadingDirs(new Set())
@@ -361,9 +378,10 @@ function Files() {
       })
       try {
         const entries = await gitStore.readTreeAtPath(commitOid, segments)
+        const sortedEntries = sortTreeEntries(entries)
         setTreeCache((prev) => {
           const next = new Map(prev)
-          next.set(path, entries)
+          next.set(path, sortedEntries)
           return next
         })
       } catch (error) {
@@ -524,7 +542,7 @@ function Files() {
           const dirButtonClass = isDark
             ? 'flex w-full items-center rounded-md px-2 py-1 text-left text-xs text-slate-300 transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
             : 'flex w-full items-center rounded-md px-2 py-1 text-left text-xs text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
-          const dirArrowClass = isDark ? 'mr-2 text-[10px] leading-none text-slate-400' : 'mr-2 text-[10px] leading-none text-slate-400'
+          const dirIconClass = isDark ? 'text-[12px] text-slate-400' : 'text-[12px] text-slate-400'
           const dirTextClass = isDark ? 'truncate font-medium text-slate-100' : 'truncate font-medium text-slate-700'
           return (
             <div key={entryPath} className="select-none">
@@ -535,7 +553,9 @@ function Files() {
                 onClick={() => handleToggleDirectory(entryPath)}
                 data-testid="file-tree-directory"
               >
-                <span className={dirArrowClass}>{expanded ? '▾' : '▸'}</span>
+                <span className="mr-2 flex shrink-0 items-center" aria-hidden>
+                  {expanded ? <IoChevronDownOutline className={dirIconClass} /> : <IoChevronForwardOutline className={dirIconClass} />}
+                </span>
                 <span className={dirTextClass}>{entry.name}</span>
               </button>
               {expanded && <div className="space-y-0.5">{renderTree(entryPath, depth + 1)}</div>}
@@ -552,7 +572,7 @@ function Files() {
           : isDark
             ? 'text-slate-200 hover:bg-slate-800'
             : 'text-slate-700 hover:bg-slate-100'
-        const fileIconClass = isDark ? 'mr-2 text-[11px] leading-none text-slate-400' : 'mr-2 text-[11px] leading-none text-slate-400'
+        const fileIconClass = isDark ? 'text-[13px] text-slate-400' : 'text-[13px] text-slate-500'
         const fileNameClass = selected
           ? isDark
             ? 'truncate text-emerald-100'
@@ -563,11 +583,13 @@ function Files() {
             <button
               type="button"
               className={`${fileButtonBase} ${fileButtonState}`}
-              style={{ paddingLeft: depth * 12 + 16 }}
+              style={{ paddingLeft: depth * 12 }}
               onClick={() => handleFileSelect(entryPath)}
               data-testid="file-tree-file"
             >
-              <span className={fileIconClass}>📄</span>
+              <span className="mr-2 flex shrink-0 items-center" aria-hidden>
+                <IoDocumentTextOutline className={fileIconClass} />
+              </span>
               <span className={fileNameClass}>{entry.name}</span>
             </button>
           </div>
@@ -724,7 +746,9 @@ function Files() {
             </button>
           </div>
         )
-      case 'ready':
+      case 'ready': {
+        const extension = viewerState.path.split('.').pop()?.toLowerCase()
+        const isMarkdownFile = Boolean(extension && MARKDOWN_EXTENSIONS.has(extension))
         return (
           <div className="flex h-full flex-col">
             <div className={blobHeaderClass}>
@@ -744,39 +768,45 @@ function Files() {
                 Download file
               </button>
             </div>
-            <div className="flex-1">
-              <Suspense
-                fallback={
-                  <div className={neutralStatusCenterClass}>
-                    Preparing editor…
-                  </div>
-                }
-              >
-                <MonacoEditor
-                  path={viewerState.path}
-                  defaultLanguage={inferLanguage(viewerState.path)}
-                  theme={isDark ? 'vs-dark' : 'vs-light'}
-                  value={viewerState.content}
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    fontSize: 13,
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                  }}
-                  height="100%"
-                />
-              </Suspense>
+            <div className="flex-1 overflow-auto">
+              {isMarkdownFile ? (
+                <div className={isDark ? 'prose prose-invert max-w-none px-6 py-4' : 'prose max-w-none px-6 py-4'}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{viewerState.content}</ReactMarkdown>
+                </div>
+              ) : (
+                <Suspense
+                  fallback={
+                    <div className={neutralStatusCenterClass}>
+                      Preparing editor…
+                    </div>
+                  }
+                >
+                  <MonacoEditor
+                    path={viewerState.path}
+                    defaultLanguage={inferLanguage(viewerState.path)}
+                    theme={isDark ? 'vs-dark' : 'vs-light'}
+                    value={viewerState.content}
+                    options={{
+                      readOnly: true,
+                      minimap: { enabled: false },
+                      fontSize: 13,
+                      scrollBeyondLastLine: false,
+                      wordWrap: 'on',
+                    }}
+                    height="100%"
+                  />
+                </Suspense>
+              )}
             </div>
           </div>
         )
+      }
       default:
         return null
     }
   })()
 
-  const branchCount = branchOptions.length
-  const packCount = packRows.length
+  const branchIconClass = isDark ? 'text-slate-200 text-base' : 'text-slate-500 text-base'
   const commitButtonClass = isDark
     ? 'inline-flex items-center gap-2 rounded-full border border-emerald-400/60 px-4 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60'
     : 'inline-flex items-center gap-2 rounded-full border border-emerald-500/30 px-4 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
@@ -786,7 +816,6 @@ function Files() {
     : 'rounded-3xl border border-slate-200 bg-white px-6 py-5 text-slate-900 shadow-lg'
   const repoHeadingClass = isDark ? 'text-xl font-semibold tracking-tight text-white' : 'text-xl font-semibold tracking-tight text-slate-900'
   const repoSlashClass = isDark ? 'text-slate-500' : 'text-slate-400'
-  const toolbarStatsClass = isDark ? 'flex items-center gap-4 text-xs text-slate-300' : 'flex items-center gap-4 text-xs text-slate-600'
   const branchLabelClass = isDark ? 'text-xs uppercase tracking-wide text-slate-400' : 'text-xs uppercase tracking-wide text-slate-500'
   const repoSearchInputClass = isDark
     ? 'w-48 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-400 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-300/40'
@@ -814,34 +843,21 @@ function Files() {
     : 'border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700'
 
   return (
-    <div className="space-y-5" data-testid="file-explorer-view">
+    <div className="space-y-4" data-testid="file-explorer-view">
+      <div>
+        <div className={repoHeadingClass}>
+          {orgId}
+          <span className={repoSlashClass}>/</span>
+          {repoId}
+        </div>
+      </div>
       <div className={toolbarClass} data-testid="repo-toolbar">
         <div className="flex flex-wrap items-center gap-3">
-          <div className={repoHeadingClass}>
-            {orgId}
-            <span className={repoSlashClass}>/</span>
-            {repoId}
-          </div>
-          <div className={toolbarStatsClass}>
-            <span>🌿 {branchCount} branch{branchCount === 1 ? '' : 'es'}</span>
-            <span>📦 {packCount} pack{packCount === 1 ? '' : 's'}</span>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <label htmlFor="branch-selector" className={branchLabelClass}>
-              Branch
-            </label>
-            {branchSelector}
-            {headCommitLabel ? (
-              <Link
-                to="/org/$orgId/repo/$repoId/commits"
-                params={{ orgId, repoId }}
-                search={{ branch: selectedBranch?.name ?? undefined }}
-                className={commitButtonClass}
-                data-testid="view-commits-button"
-              >
-                View commits · {headCommitLabel}
-              </Link>
-            ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <IoGitBranchOutline className={branchIconClass} aria-hidden />
+              {branchSelector}
+            </div>
             <div className="relative hidden sm:block">
               <input
                 id="repo-search"
@@ -850,6 +866,19 @@ function Files() {
                 className={repoSearchInputClass}
               />
               <span className={repoSearchShortcutClass}>⇧t</span>
+            </div>
+            <div className="ml-auto">
+              {headCommitLabel ? (
+                <Link
+                  to="/org/$orgId/repo/$repoId/commits"
+                  params={{ orgId, repoId }}
+                  search={{ branch: selectedBranch?.name ?? undefined }}
+                  className={commitButtonClass}
+                  data-testid="view-commits-button"
+                >
+                  View commits · {headCommitLabel}
+                </Link>
+              ) : null}
             </div>
           </div>
         </div>

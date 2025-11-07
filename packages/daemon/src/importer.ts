@@ -184,10 +184,19 @@ export class GithubImportManager {
     stepId: StepId,
     task: () => Promise<string | void>,
   ): Promise<void> {
+    const definition = STEP_DEFINITIONS.find((entry) => entry.id === stepId);
+    if (definition) {
+      this.addLog(job, 'info', `Starting ${definition.label.toLowerCase()}`);
+    }
     this.setStepStatus(job, stepId, 'active');
     try {
       const detail = await task();
       this.setStepStatus(job, stepId, 'done', typeof detail === 'string' ? detail : undefined);
+      if (detail) {
+        this.addLog(job, 'info', detail);
+      } else if (definition) {
+        this.addLog(job, 'info', `${definition.label} completed`);
+      }
     } catch (error) {
       const message = toErrorMessage(error);
       this.setStepStatus(job, stepId, 'error', message);
@@ -416,6 +425,8 @@ function escapeForCmd(value: string): string {
 }
 
 async function runGit(args: string[], options: { cwd: string }): Promise<{ stdout: string; stderr: string }> {
+  const display = `git ${args.join(' ')}`;
+  console.info(`[powersync-daemon] ${display} (cwd: ${options.cwd})`);
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, {
       cwd: options.cwd,
@@ -432,11 +443,23 @@ async function runGit(args: string[], options: { cwd: string }): Promise<{ stdou
     child.once('error', reject);
     child.once('close', (code) => {
       if (code === 0) {
+        if (stdout.trim()) {
+          console.info(`[powersync-daemon] ${display} stdout:`, stdout.trim());
+        }
+        if (stderr.trim()) {
+          console.info(`[powersync-daemon] ${display} stderr:`, stderr.trim());
+        }
         resolve({ stdout, stderr });
       } else {
         const error = new Error(`git ${args.join(' ')} failed (${code})${stderr ? `: ${stderr.trim()}` : ''}`);
         (error as Error & { stdout?: string; stderr?: string }).stdout = stdout;
         (error as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+        console.error(`[powersync-daemon] ${display} failed`, {
+          cwd: options.cwd,
+          code,
+          stdout: stdout.trim() || undefined,
+          stderr: stderr.trim() || undefined,
+        });
         reject(error);
       }
     });
