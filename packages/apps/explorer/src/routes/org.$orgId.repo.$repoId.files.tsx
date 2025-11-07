@@ -1259,7 +1259,7 @@ function MobileView({ treeProps, viewerProps }: ExplorerViewProps) {
               onClick={() => setPanel('tree')}
               className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600"
             >
-              <IoChevronBackOutline /> Back
+              File explorer
             </button>
           ) : null
         }
