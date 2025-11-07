@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Suspense } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/react-db'
 import { useRepoStreams } from '@ps/streams'
@@ -216,6 +216,7 @@ function Files() {
 
   const [selectedBranch, setSelectedBranch] = React.useState<{ name: string; target_sha: string } | null>(null)
   const [selectedCommit, setSelectedCommit] = React.useState<string | null>(null)
+  const headCommitLabel = React.useMemo(() => (selectedCommit ? selectedCommit.slice(0, 12) : null), [selectedCommit])
 
   React.useEffect(() => {
     if (!branchOptions.length) return
@@ -776,6 +777,9 @@ function Files() {
 
   const branchCount = branchOptions.length
   const packCount = packRows.length
+  const commitButtonClass = isDark
+    ? 'inline-flex items-center gap-2 rounded-full border border-emerald-400/60 px-4 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60'
+    : 'inline-flex items-center gap-2 rounded-full border border-emerald-500/30 px-4 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
 
   const toolbarClass = isDark
     ? 'rounded-3xl border border-slate-700 bg-slate-900 px-6 py-5 text-slate-100 shadow-xl shadow-slate-900/40'
@@ -827,6 +831,17 @@ function Files() {
               Branch
             </label>
             {branchSelector}
+            {headCommitLabel ? (
+              <Link
+                to="/org/$orgId/repo/$repoId/commits"
+                params={{ orgId, repoId }}
+                search={{ branch: selectedBranch?.name ?? undefined }}
+                className={commitButtonClass}
+                data-testid="view-commits-button"
+              >
+                View commits · {headCommitLabel}
+              </Link>
+            ) : null}
             <div className="relative hidden sm:block">
               <input
                 id="repo-search"

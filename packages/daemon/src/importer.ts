@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { chmod, mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join, resolve, delimiter } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildRepoStreamTargets, type PowerSyncImportJob } from '@shared/core';
 import type { StreamSubscriptionTarget } from './server.js';
 
@@ -17,6 +19,28 @@ const STEP_DEFINITIONS: Array<{ id: StepId; label: string }> = [
 ];
 
 const REMOTE_NAME = 'powersync';
+
+const REMOTE_HELPER_COMMAND = 'git-remote-powersync';
+const REMOTE_HELPER_FILENAMES = process.platform === 'win32'
+  ? ['git-remote-powersync.exe', 'git-remote-powersync.cmd', 'git-remote-powersync.bat', 'git-remote-powersync']
+  : ['git-remote-powersync'];
+const REMOTE_HELPER_NODE = process.env.POWERSYNC_REMOTE_HELPER_NODE ?? process.execPath;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const WORKSPACE_ROOT = resolve(__dirname, '../../..');
+const WORKSPACE_BIN_DIR = resolve(WORKSPACE_ROOT, 'node_modules', '.bin');
+const SHARED_CORE_DIST_ENTRY = resolve(WORKSPACE_ROOT, 'packages', 'shared', 'dist', 'index.js');
+const REMOTE_HELPER_DIST_ENTRY = resolve(
+  WORKSPACE_ROOT,
+  'packages',
+  'remote-helper',
+  'dist',
+  'remote-helper',
+  'src',
+  'bin.js',
+);
+
+let remoteHelperSetupPromise: Promise<void> | null = null;
 
 export interface GithubImportRequest {
   repoUrl: string;
@@ -207,6 +231,190 @@ export class GithubImportManager {
   }
 }
 
+async function ensurePowerSyncRemoteHelper(): Promise<void> {
+  if (!remoteHelperSetupPromise) {
+    remoteHelperSetupPromise = ensurePowerSyncRemoteHelperInternal();
+  }
+  await remoteHelperSetupPromise;
+}
+
+async function ensurePowerSyncRemoteHelperInternal(): Promise<void> {
+  await ensureSharedCoreArtifacts();
+  await ensureRemoteHelperArtifacts();
+  if (!findHelperOnPath()) {
+    const helperEntry = await resolveRemoteHelperEntry();
+    await ensureHelperShim(helperEntry);
+  }
+
+  ensurePathIncludesWorkspaceBin();
+
+  if (!findHelperOnPath()) {
+    throw new Error(
+      '[powersync-daemon] Unable to expose PowerSync remote helper on PATH. ' +
+        `Ensure ${WORKSPACE_BIN_DIR} is writable or install git-remote-powersync globally.`,
+    );
+  }
+}
+
+function findHelperOnPath(): string | null {
+  for (const dir of getPathDirectories()) {
+    for (const name of REMOTE_HELPER_FILENAMES) {
+      const candidate = join(dir, name);
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+function getPathDirectories(): string[] {
+  const currentPath = process.env.PATH ?? '';
+  return currentPath
+    .split(delimiter)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+}
+
+async function resolveRemoteHelperEntry(): Promise<string> {
+  const explicit = process.env.POWERSYNC_REMOTE_HELPER_PATH ?? process.env.POWERSYNC_REMOTE_HELPER_BIN;
+  const candidates = new Set<string>();
+  for (const candidate of resolveCandidatePaths(explicit)) {
+    candidates.add(candidate);
+  }
+  candidates.add(join(WORKSPACE_ROOT, 'node_modules', '@pkg', 'remote-helper', 'dist', 'remote-helper', 'src', 'bin.js'));
+  candidates.add(join(WORKSPACE_ROOT, 'packages', 'remote-helper', 'dist', 'remote-helper', 'src', 'bin.js'));
+
+  for (const candidate of candidates) {
+    try {
+      const stats = await stat(candidate);
+      if (stats.isFile()) {
+        return candidate;
+      }
+    } catch {
+      // ignore missing candidate — try next
+    }
+  }
+
+  throw new Error(
+    '[powersync-daemon] PowerSync remote helper entry not found. ' +
+      'Run "pnpm --filter @pkg/remote-helper build" to generate dist/remote-helper/src/bin.js.',
+  );
+}
+
+function resolveCandidatePaths(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return [];
+  const absolute = resolveFromWorkspacePath(trimmed);
+  return [absolute, join(absolute, 'bin.js'), join(absolute, REMOTE_HELPER_COMMAND)];
+}
+
+function resolveFromWorkspacePath(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('~/')) {
+    return resolve(homedir(), trimmed.slice(2));
+  }
+  if (trimmed === '~') {
+    return homedir();
+  }
+  if (/^[A-Za-z]:[\\/]/.test(trimmed) || trimmed.startsWith('/') || trimmed.startsWith('\\')) {
+    return trimmed;
+  }
+  return resolve(WORKSPACE_ROOT, trimmed);
+}
+
+async function ensureHelperShim(helperEntry: string): Promise<void> {
+  await mkdir(WORKSPACE_BIN_DIR, { recursive: true });
+
+  const shimPath = join(WORKSPACE_BIN_DIR, REMOTE_HELPER_COMMAND);
+  const posixContent = `#!/bin/sh\nexec "${escapeForPosixShell(REMOTE_HELPER_NODE)}" "${escapeForPosixShell(helperEntry)}" "\$@"\n`;
+  await writeFile(shimPath, posixContent, { mode: 0o755 });
+  await chmod(shimPath, 0o755).catch(() => undefined);
+
+  if (process.platform === 'win32') {
+    const cmdPath = `${shimPath}.cmd`;
+    const winContent = `@echo off\r\n"${escapeForCmd(REMOTE_HELPER_NODE)}" "${escapeForCmd(helperEntry)}" %*\r\n`;
+    await writeFile(cmdPath, winContent);
+  } else {
+    const cmdPath = `${shimPath}.cmd`;
+    if (existsSync(cmdPath)) {
+      await rm(cmdPath, { force: true }).catch(() => undefined);
+    }
+  }
+}
+
+function ensurePathIncludesWorkspaceBin(): void {
+  const currentPath = process.env.PATH ?? '';
+  const segments = currentPath.split(delimiter).filter((segment) => segment.length > 0);
+  if (!segments.includes(WORKSPACE_BIN_DIR)) {
+    segments.unshift(WORKSPACE_BIN_DIR);
+    process.env.PATH = segments.join(delimiter);
+  }
+}
+
+async function ensureSharedCoreArtifacts(): Promise<void> {
+  if (await fileExists(SHARED_CORE_DIST_ENTRY)) {
+    return;
+  }
+  await buildWorkspacePackage('@shared/core');
+  if (!(await fileExists(SHARED_CORE_DIST_ENTRY))) {
+    throw new Error(
+      '[powersync-daemon] Failed to build @shared/core. Ensure pnpm is installed and run "pnpm --filter @shared/core build".',
+    );
+  }
+}
+
+async function ensureRemoteHelperArtifacts(): Promise<void> {
+  if (await fileExists(REMOTE_HELPER_DIST_ENTRY)) {
+    return;
+  }
+  await buildWorkspacePackage('@pkg/remote-helper');
+  if (!(await fileExists(REMOTE_HELPER_DIST_ENTRY))) {
+    throw new Error(
+      '[powersync-daemon] Failed to build @pkg/remote-helper. Run "pnpm --filter @pkg/remote-helper build" and try again.',
+    );
+  }
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    const stats = await stat(filePath);
+    return stats.isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function buildWorkspacePackage(filter: string): Promise<void> {
+  await runWorkspaceCommand('pnpm', ['--filter', filter, 'build']);
+}
+
+async function runWorkspaceCommand(command: string, args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: WORKSPACE_ROOT,
+      stdio: 'inherit',
+    });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
+      }
+    });
+  });
+}
+
+function escapeForPosixShell(value: string): string {
+  return value.replace(/(["\\$`])/g, '\\$1');
+}
+
+function escapeForCmd(value: string): string {
+  return value.replace(/"/g, '""');
+}
+
 async function runGit(args: string[], options: { cwd: string }): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, {
@@ -241,6 +449,7 @@ async function ensureRemoteConfigured(repoDir: string, remoteUrl: string): Promi
 }
 
 async function pushAllReferences(repoDir: string): Promise<void> {
+  await ensurePowerSyncRemoteHelper();
   await runGit(['push', '--prune', REMOTE_NAME, '--all'], { cwd: repoDir });
   await runGit(['push', REMOTE_NAME, '--tags'], { cwd: repoDir });
 }

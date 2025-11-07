@@ -108,6 +108,15 @@ export class GitObjectStore {
     this.initialized = true
   }
 
+  private async packExists(packOid: string): Promise<boolean> {
+    await this.ensureInitialized()
+    const packPath = `${this.gitdir}/objects/pack/pack-${packOid}.pack`
+    return this.fs
+      .stat(packPath)
+      .then(() => true)
+      .catch(() => false)
+  }
+
   async indexPacks(packs: PackRow[]): Promise<void> {
     await this.ensureInitialized()
     if (!packs.length) {
@@ -125,7 +134,12 @@ export class GitObjectStore {
     let appended = false
     for (const pack of sorted) {
       if (!pack.pack_bytes || pack.pack_bytes.length === 0) continue
-      if (this.indexedPacks.has(pack.pack_oid)) continue
+      if (this.indexedPacks.has(pack.pack_oid)) {
+        const exists = await this.packExists(pack.pack_oid)
+        if (exists) continue
+        this.indexedPacks.delete(pack.pack_oid)
+        this.persistIndexedSet()
+      }
       if (this.queuedPackOids.has(pack.pack_oid)) continue
       this.queue.push(pack)
       this.queuedPackOids.add(pack.pack_oid)

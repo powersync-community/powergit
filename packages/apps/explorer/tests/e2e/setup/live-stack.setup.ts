@@ -22,6 +22,8 @@ if (!STOP_COMMAND[0]) {
 const TCP_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_STACK_PROBE_TIMEOUT_MS ?? '1000', 10)
 const TCP_RETRY_DELAY_MS = Number.parseInt(process.env.POWERSYNC_STACK_RETRY_DELAY_MS ?? '1000', 10)
 const STACK_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_STACK_START_TIMEOUT_MS ?? '120000', 10)
+const DEFAULT_WEB_HOST = process.env.HOST ?? 'localhost'
+const DEFAULT_WEB_PORT = process.env.PORT ?? process.env.VITE_PORT ?? '5191'
 
 async function delay(ms: number) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
@@ -171,6 +173,19 @@ function applyProfileEnvironment(): void {
       process.env[key] = value
     }
   }
+
+  ensureDeviceLoginUrl()
+}
+
+function ensureDeviceLoginUrl(): void {
+  const current = process.env.POWERSYNC_DAEMON_DEVICE_URL
+  if (current && current.trim().length > 0) {
+    return
+  }
+
+  const host = DEFAULT_WEB_HOST.trim().length > 0 ? DEFAULT_WEB_HOST : 'localhost'
+  const port = DEFAULT_WEB_PORT && DEFAULT_WEB_PORT.trim().length > 0 ? DEFAULT_WEB_PORT : '5191'
+  process.env.POWERSYNC_DAEMON_DEVICE_URL = `http://${host}:${port}/auth`
 }
 
 function shouldManageLocalStack(): boolean {
