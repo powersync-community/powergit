@@ -46,6 +46,33 @@ const REPO_FIXTURE: RepoFixturePayload = {
   ],
 }
 
+const BRANCH_TREE_FIXTURE: RepoFixturePayload = {
+  orgId: ORG_ID,
+  repoId: REPO_ID,
+  branches: [
+    { name: 'main', target_sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', updated_at: '2024-09-10T10:00:00Z' },
+    { name: 'feature/api', target_sha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', updated_at: '2024-09-11T11:00:00Z' },
+  ],
+  commits: [
+    {
+      sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      author_name: 'Main Dev',
+      message: 'Main branch update',
+      tree_sha: 'aaaa-tree',
+    },
+    {
+      sha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      author_name: 'Feature Dev',
+      message: 'Feature branch update',
+      tree_sha: 'bbbb-tree',
+    },
+  ],
+  fileChanges: [
+    { commit_sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', path: 'README-main.md', additions: 5, deletions: 0 },
+    { commit_sha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', path: 'FEATURE.md', additions: 5, deletions: 0 },
+  ],
+}
+
 test.describe('Explorer repo lists', () => {
   test.beforeEach(async ({ page }) => {
     await installDaemonAuthStub(page, { initialStatus: 'ready' })
@@ -187,6 +214,83 @@ test.describe('Explorer repo lists', () => {
     await page.reload()
     await setRepoFixture(page, REPO_FIXTURE)
     await expect(tree).toContainText('README.md')
+  })
+
+  test('switching branches refreshes the git tree', async ({ page }) => {
+    await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/files`)
+    await setRepoFixture(page, BRANCH_TREE_FIXTURE)
+
+    await page.waitForFunction(() => Boolean((window as typeof window & { __powersyncGitStore?: unknown }).__powersyncGitStore), undefined, { timeout: 5_000 })
+
+    const commitTrees = {
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa': {
+        trees: {
+          __root__: [
+            { type: 'blob', path: 'README-main.md', name: 'README-main.md', oid: 'main-readme', mode: '100644' },
+            { type: 'blob', path: 'infra.txt', name: 'infra.txt', oid: 'main-infra', mode: '100644' },
+          ],
+        },
+        files: {
+          'README-main.md': { content: 'Main branch docs', oid: 'main-readme' },
+          'infra.txt': { content: 'Infra notes', oid: 'main-infra' },
+        },
+      },
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb': {
+        trees: {
+          __root__: [
+            { type: 'blob', path: 'FEATURE.md', name: 'FEATURE.md', oid: 'feature-notes', mode: '100644' },
+            { type: 'blob', path: 'api.ts', name: 'api.ts', oid: 'feature-api', mode: '100644' },
+          ],
+        },
+        files: {
+          'FEATURE.md': { content: 'Feature branch docs', oid: 'feature-notes' },
+          'api.ts': { content: 'export const feature = true', oid: 'feature-api' },
+        },
+      },
+    }
+
+    await page.evaluate(({ trees }) => {
+      const global = window as typeof window & { __powersyncGitStore?: any }
+      const store = global.__powersyncGitStore
+      if (!store) throw new Error('gitStore bridge was not initialized')
+
+      const ready = { status: 'ready', processed: 0, total: 0, error: null }
+      store.getProgress = () => ready
+      store.subscribe = (listener: (progress: typeof ready) => void) => {
+        listener(ready)
+        return () => {}
+      }
+      store.indexPacks = async () => {}
+
+      store.readTreeAtPath = async (commitOid: string, segments: string[]) => {
+        const key = segments.filter(Boolean).join('/') || '__root__'
+        const branch = trees[commitOid as keyof typeof trees]
+        if (!branch) throw new Error(`Missing tree stub for ${commitOid}`)
+        const rows = branch.trees[key] ?? []
+        return rows.map((entry) => ({ ...entry }))
+      }
+
+      const encoder = new TextEncoder()
+      store.readFile = async (commitOid: string, filePath: string) => {
+        const branch = trees[commitOid as keyof typeof trees]
+        if (!branch) throw new Error(`Missing tree stub for ${commitOid}`)
+        const file = branch.files[filePath as keyof typeof branch.files]
+        if (!file) throw new Error(`Missing file stub for ${filePath}`)
+        return { content: encoder.encode(file.content), oid: file.oid }
+      }
+
+      store.updateProgress?.(ready)
+    }, { trees: commitTrees })
+
+    const tree = page.getByTestId('file-explorer-tree')
+    await expect(tree).toContainText('README-main.md')
+    await expect(tree).not.toContainText('FEATURE.md')
+
+    const selector = page.getByTestId('branch-selector')
+    await selector.selectOption('feature/api')
+    await expect(tree).toContainText('FEATURE.md')
+    await expect(tree).toContainText('api.ts')
+    await expect(tree).not.toContainText('README-main.md')
   })
 
   test('offers a download CTA for binary blobs in the viewer', async ({ page }) => {
