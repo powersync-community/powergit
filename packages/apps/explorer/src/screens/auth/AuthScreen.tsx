@@ -179,7 +179,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </div>
               </form>
               {allowGuest && onGuestSignIn ? (
-                <div className="space-y-3 border-t border-slate-200 pt-4">
+                <div className="space-y-3 border-slate-200 pt-4">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
                     <span className="h-px flex-1 bg-slate-200" />
                     <span>or</span>

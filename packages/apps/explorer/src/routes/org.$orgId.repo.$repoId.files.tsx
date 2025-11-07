@@ -989,7 +989,7 @@ function Files() {
         </div>
         <div className={toolbarClass} data-testid="repo-toolbar">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 w-full">
               <div className="flex items-center gap-1.5">
                 <IoGitBranchOutline className={branchIconClass} aria-hidden />
                 {branchSelector}

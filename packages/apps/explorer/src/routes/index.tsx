@@ -110,7 +110,7 @@ export function Home() {
             }`}
           >
             <p>
-              Nothing here yet. Run <code>psgit demo-seed</code> or explore a repository above to populate this list.
+              Nothing here yet.
             </p>
           </div>
         ) : (
