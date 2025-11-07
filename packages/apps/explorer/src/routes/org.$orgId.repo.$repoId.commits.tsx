@@ -123,6 +123,20 @@ function Commits() {
   const [diffStates, setDiffStates] = React.useState<Record<string, CommitDiffState>>({})
   const [filterResetKey, setFilterResetKey] = React.useState(0)
 
+  const dateBounds = React.useMemo(() => {
+    let min: string | null = null
+    let max: string | null = null
+    for (const commit of commits) {
+      if (!commit.authored_at) continue
+      const time = Date.parse(commit.authored_at)
+      if (Number.isNaN(time)) continue
+      const iso = new Date(time).toISOString().slice(0, 10)
+      if (!min || iso < min) min = iso
+      if (!max || iso > max) max = iso
+    }
+    return { min, max }
+  }, [commits])
+
   React.useEffect(() => {
     if (branchFilter === 'all') return
     if (!branchOptions.some((branch) => branch.name === branchFilter)) {
@@ -460,6 +474,8 @@ function Commits() {
               className={dateInputClass}
               value={fromDate}
               onChange={(event) => setFromDate(event.target.value)}
+              min={dateBounds.min ?? undefined}
+              max={(toDate || dateBounds.max) ?? undefined}
               data-testid="commit-date-from"
             />
           </label>
@@ -472,6 +488,8 @@ function Commits() {
               className={dateInputClass}
               value={toDate}
               onChange={(event) => setToDate(event.target.value)}
+              min={(fromDate || dateBounds.min) ?? undefined}
+              max={dateBounds.max ?? undefined}
               data-testid="commit-date-to"
             />
           </label>
