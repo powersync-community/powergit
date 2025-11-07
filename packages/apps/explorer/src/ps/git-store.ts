@@ -307,10 +307,18 @@ export class GitObjectStore {
     })
   }
 
-  async getCommitTree(commitOid: string): Promise<{ treeOid: string }> {
+  async getCommitInfo(commitOid: string): Promise<{ treeOid: string; parents: string[] }> {
     await this.ensureInitialized()
     const { commit } = await git.readCommit({ fs: this.fs, gitdir: this.gitdir, oid: commitOid })
-    return { treeOid: commit.tree }
+    return {
+      treeOid: commit.tree,
+      parents: Array.isArray(commit.parent) ? commit.parent : commit.parent ? [commit.parent] : [],
+    }
+  }
+
+  async getCommitTree(commitOid: string): Promise<{ treeOid: string }> {
+    const { treeOid } = await this.getCommitInfo(commitOid)
+    return { treeOid }
   }
 
   async readTreeAtPath(commitOid: string, pathSegments: string[]): Promise<TreeEntry[]> {

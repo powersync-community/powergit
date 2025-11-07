@@ -222,7 +222,12 @@ test.describe('Explorer repo lists', () => {
 
     await page.waitForFunction(() => Boolean((window as typeof window & { __powersyncGitStore?: unknown }).__powersyncGitStore), undefined, { timeout: 5_000 })
 
-    const commitTrees = {
+    type StubTreeEntry = { type: string; path: string; name: string; oid: string; mode: string }
+    type StubCommitTree = {
+      trees: Record<string, StubTreeEntry[]>
+      files: Record<string, { content: string; oid: string }>
+    }
+    const commitTrees: Record<string, StubCommitTree> = {
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa': {
         trees: {
           __root__: [
@@ -267,7 +272,7 @@ test.describe('Explorer repo lists', () => {
         const branch = trees[commitOid as keyof typeof trees]
         if (!branch) throw new Error(`Missing tree stub for ${commitOid}`)
         const rows = branch.trees[key] ?? []
-        return rows.map((entry) => ({ ...entry }))
+        return rows.map((entry: StubTreeEntry) => ({ ...entry }))
       }
 
       const encoder = new TextEncoder()

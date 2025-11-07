@@ -932,10 +932,6 @@ function Files() {
   const repoHeadingClass = isDark ? 'text-xl font-semibold tracking-tight text-white' : 'text-xl font-semibold tracking-tight text-slate-900'
   const repoSlashClass = isDark ? 'text-slate-500' : 'text-slate-400'
   const branchLabelClass = isDark ? 'text-xs uppercase tracking-wide text-slate-400' : 'text-xs uppercase tracking-wide text-slate-500'
-  const repoSearchInputClass = isDark
-    ? 'w-48 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-400 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-300/40'
-    : 'w-48 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200'
-  const repoSearchShortcutClass = isDark ? 'pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-slate-500' : 'pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-slate-400'
   const treePanelClass = isDark
     ? 'rounded-2xl border border-slate-700 bg-slate-900/70 text-slate-200 shadow-lg shadow-slate-900/40'
     : 'rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm'
@@ -997,15 +993,6 @@ function Files() {
               <div className="flex items-center gap-1.5">
                 <IoGitBranchOutline className={branchIconClass} aria-hidden />
                 {branchSelector}
-              </div>
-              <div className="relative hidden sm:block">
-                <input
-                  id="repo-search"
-                  type="search"
-                  placeholder="Go to file"
-                  className={repoSearchInputClass}
-                />
-                <span className={repoSearchShortcutClass}>⇧t</span>
               </div>
               <div className="ml-auto">
                 {headCommitLabel ? (
