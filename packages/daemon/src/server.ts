@@ -635,7 +635,12 @@ export function createDaemonServer(options: DaemonServerOptions): DaemonServer {
 async function parsePushPayload(req: http.IncomingMessage, contentType: string): Promise<DaemonPushRequest | null> {
   if (/multipart\/form-data/i.test(contentType)) {
     return new Promise<DaemonPushRequest | null>((resolve, reject) => {
-      const bb = busboy({ headers: req.headers });
+      const bb = busboy({
+        headers: req.headers,
+        limits: {
+          fieldSize: 25 * 1024 * 1024, // allow metadata payloads up to ~25MB
+        },
+      });
       const packChunks: Buffer[] = [];
       let metadata: unknown = null;
       let metadataError: Error | null = null;
