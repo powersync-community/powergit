@@ -1,24 +1,7 @@
--- PowerSync Git metadata tables managed by Supabase migrations.
--- Dev-only: we drop and recreate the PowerSync tables each run so relic views/tables never collide.
+-- PowerSync Git metadata tables
+-- Production-safe: no destructive drops; idempotent creates.
 
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'refs'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.refs cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.refs cascade';
-  end if;
-end
-$$;
-
+-- Refs
 create table if not exists public.refs (
   id text primary key,
   org_id text not null,
@@ -28,24 +11,7 @@ create table if not exists public.refs (
   updated_at timestamptz not null default now()
 );
 
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'commits'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.commits cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.commits cascade';
-  end if;
-end
-$$;
-
+-- Commits
 create table if not exists public.commits (
   id text primary key,
   org_id text not null,
@@ -58,24 +24,7 @@ create table if not exists public.commits (
   tree_sha text not null
 );
 
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'file_changes'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.file_changes cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.file_changes cascade';
-  end if;
-end
-$$;
-
+-- File changes
 create table if not exists public.file_changes (
   id text primary key,
   org_id text not null,
@@ -86,24 +35,7 @@ create table if not exists public.file_changes (
   deletions integer not null
 );
 
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'objects'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.objects cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.objects cascade';
-  end if;
-end
-$$;
-
+-- Pack metadata
 create table if not exists public.objects (
   id text primary key,
   org_id text not null,
@@ -114,6 +46,7 @@ create table if not exists public.objects (
   created_at timestamptz not null default now()
 );
 
+-- Indexes
 create index if not exists refs_org_repo_idx on public.refs (org_id, repo_id);
 create unique index if not exists refs_org_repo_name_idx on public.refs (org_id, repo_id, name);
 
@@ -127,3 +60,26 @@ create unique index if not exists file_changes_commit_path_idx on public.file_ch
 
 create index if not exists objects_recent_idx on public.objects (org_id, repo_id, created_at desc);
 create unique index if not exists objects_oid_idx on public.objects (org_id, repo_id, pack_oid);
+
+-- RLS
+alter table public.refs enable row level security;
+alter table public.commits enable row level security;
+alter table public.file_changes enable row level security;
+alter table public.objects enable row level security;
+
+-- Policies (dev-friendly defaults: open RW)
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'refs' and polname = 'allow_all_refs_rw') then
+    create policy allow_all_refs_rw on public.refs for all using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'commits' and polname = 'allow_all_commits_rw') then
+    create policy allow_all_commits_rw on public.commits for all using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'file_changes' and polname = 'allow_all_file_changes_rw') then
+    create policy allow_all_file_changes_rw on public.file_changes for all using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'objects' and polname = 'allow_all_objects_rw') then
+    create policy allow_all_objects_rw on public.objects for all using (true) with check (true);
+  end if;
+end$$;
