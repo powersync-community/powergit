@@ -124,6 +124,7 @@ export interface DaemonPushRequest {
   packOid?: string;
   summary?: GitPushSummary | null;
   dryRun?: boolean;
+  createdAt?: string | null;
 }
 
 export type DaemonPushResponse = PersistPushResult & { message?: string };

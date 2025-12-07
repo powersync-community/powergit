@@ -465,6 +465,27 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     scheduleConnect(`supabase-${source}`);
   };
 
+  const loginEmail =
+    (process.env.SUPABASE_EMAIL ?? process.env.POWERGIT_EMAIL)?.trim() ?? null;
+  const loginPassword =
+    (process.env.SUPABASE_PASSWORD ?? process.env.POWERGIT_PASSWORD)?.trim() ?? null;
+
+  if (loginEmail && loginPassword) {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: loginPassword,
+      });
+      if (error) {
+        console.warn('[powersync-daemon] Supabase password login failed', error.message ?? error);
+      } else {
+        await applySupabaseSession(data.session ?? null, 'password-login');
+      }
+    } catch (error) {
+      console.warn('[powersync-daemon] Supabase password login threw', error instanceof Error ? error.message : error);
+    }
+  }
+
   const initialSessionResult = await supabase.auth.getSession();
   if (initialSessionResult.error) {
     console.warn('[powersync-daemon] failed to read Supabase session', initialSessionResult.error);
