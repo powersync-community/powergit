@@ -70,6 +70,9 @@ jobs:
           if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
             echo "Missing Supabase configuration (SUPABASE_URL/SUPABASE_ANON_KEY)" && exit 1
           fi
+          if [ -z "$POWERGIT_EMAIL" ] || [ -z "$POWERGIT_PASSWORD" ]; then
+            echo "Missing Supabase login credentials (POWERGIT_EMAIL/POWERGIT_PASSWORD)" && exit 1
+          fi
           nohup pnpm --filter @svc/daemon start -- --port ${POWERSYNC_DAEMON_PORT:-5030} > daemon.log 2>&1 &
           echo $! > daemon.pid
           for i in $(seq 1 30); do
@@ -79,6 +82,19 @@ jobs:
             fi
             if [ "$i" -eq 30 ]; then
               echo "Daemon did not become healthy. Logs:" && cat daemon.log && exit 1
+            fi
+            sleep 1
+          done
+          # Verify auth status
+          for i in $(seq 1 20); do
+            STATUS_JSON=$(curl -sf "http://127.0.0.1:${POWERSYNC_DAEMON_PORT:-5030}/auth/status" || true)
+            STATUS=$(echo "$STATUS_JSON" | jq -r '.status // empty')
+            echo "Auth status attempt $i: ${STATUS_JSON:-<empty>}"
+            if [ "$STATUS" = "ready" ]; then
+              break
+            fi
+            if [ "$i" -eq 20 ]; then
+              echo "Daemon did not authenticate. Full log:" && cat daemon.log && exit 1
             fi
             sleep 1
           done
