@@ -70,16 +70,16 @@ alter table public.objects enable row level security;
 -- Policies (dev-friendly defaults: open RW)
 do $$
 begin
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'refs' and polname = 'allow_all_refs_rw') then
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'refs' and policyname = 'allow_all_refs_rw') then
     create policy allow_all_refs_rw on public.refs for all using (true) with check (true);
   end if;
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'commits' and polname = 'allow_all_commits_rw') then
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'commits' and policyname = 'allow_all_commits_rw') then
     create policy allow_all_commits_rw on public.commits for all using (true) with check (true);
   end if;
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'file_changes' and polname = 'allow_all_file_changes_rw') then
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'file_changes' and policyname = 'allow_all_file_changes_rw') then
     create policy allow_all_file_changes_rw on public.file_changes for all using (true) with check (true);
   end if;
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'objects' and polname = 'allow_all_objects_rw') then
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'objects' and policyname = 'allow_all_objects_rw') then
     create policy allow_all_objects_rw on public.objects for all using (true) with check (true);
   end if;
 end$$;
