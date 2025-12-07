@@ -3,7 +3,7 @@
 import { spawn, execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, relative } from 'node:path'
-import { writeFile, mkdir as mkdirAsync, readFile } from 'node:fs/promises'
+import { writeFile, mkdir as mkdirAsync, readFile, rm as rmAsync } from 'node:fs/promises'
 import { createWriteStream, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
@@ -54,6 +54,8 @@ function resolveSupabaseBinFromWorkspace() {
 const DEFAULT_SUPABASE_BIN = resolveSupabaseBinFromWorkspace() ?? 'supabase'
 const SUPABASE_BIN = process.env.SUPABASE_BIN ?? DEFAULT_SUPABASE_BIN
 const DOCKER_BIN = process.env.DOCKER_BIN ?? 'docker'
+const FUNCTIONS_PID_FILE = resolve(repoRoot, 'supabase', '.temp', 'functions-serve.pid')
+const FUNCTIONS_ENV_FILE = resolve(repoRoot, 'supabase', '.env')
 
 let cliOptions
 let logStream
@@ -244,6 +246,68 @@ async function initLogging() {
         logStream = null
       }),
   }
+}
+
+async function startEdgeFunctions() {
+  // Avoid starting twice if a PID file exists.
+  if (existsSync(FUNCTIONS_PID_FILE)) {
+    try {
+      const existingPid = Number.parseInt((await readFile(FUNCTIONS_PID_FILE, 'utf8')).trim(), 10)
+      if (Number.isInteger(existingPid)) {
+        try {
+          process.kill(existingPid, 0)
+          infoLog(`[dev:stack] Supabase functions already running (pid ${existingPid}).`)
+          return
+        } catch {
+          // stale PID, continue to spawn
+        }
+      }
+    } catch {
+      // ignore read errors; will recreate
+    }
+  }
+
+  const args = ['functions', 'serve', '--env-file', FUNCTIONS_ENV_FILE, '--no-verify-jwt']
+  if (!existsSync(FUNCTIONS_ENV_FILE)) {
+    warnLog(`[dev:stack] Supabase functions env file missing at ${FUNCTIONS_ENV_FILE}; skipping Edge serve.`)
+    return
+  }
+
+  infoLog(`→ ${SUPABASE_BIN} ${args.join(' ')} (background)`)
+  const child = spawn(SUPABASE_BIN, args, {
+    cwd: repoRoot,
+    stdio: 'ignore',
+    detached: true,
+    env: { ...process.env },
+  })
+  child.unref()
+  await mkdirAsync(dirname(FUNCTIONS_PID_FILE), { recursive: true })
+  await writeFile(FUNCTIONS_PID_FILE, String(child.pid), 'utf8')
+  infoLog(`[dev:stack] Supabase functions serve started (pid ${child.pid}).`)
+}
+
+async function stopEdgeFunctions() {
+  if (!existsSync(FUNCTIONS_PID_FILE)) return
+  let pid = null
+  try {
+    const raw = await readFile(FUNCTIONS_PID_FILE, 'utf8')
+    pid = Number.parseInt(raw.trim(), 10)
+  } catch {
+    // ignore
+  }
+
+  if (pid && Number.isInteger(pid)) {
+    try {
+      process.kill(pid)
+      infoLog(`[dev:stack] Stopped Supabase functions serve (pid ${pid}).`)
+    } catch (error) {
+      warnLog(`[dev:stack] Failed to stop functions serve pid ${pid}`, error?.message ?? error)
+    }
+  }
+
+  await rmAsync(FUNCTIONS_PID_FILE, { force: true }).catch(() => undefined)
+  // Try to stop the edge runtime container in case the pid was stale.
+  await runCommand(DOCKER_BIN, ['stop', 'supabase_edge_runtime_powersync-git-local']).catch(() => undefined)
 }
 
 async function runCommand(cmd, args, options = {}) {
@@ -828,6 +892,10 @@ async function startStack() {
 
   await seedSyncRules(env)
 
+  await startEdgeFunctions().catch((error) => {
+    warnLog('[dev:stack] Failed to start Supabase Edge Functions serve', error?.message ?? error)
+  })
+
   infoLog('✨ Supabase + PowerSync stack is ready.')
   infoLog(`   Remote name: ${DEFAULT_REMOTE_NAME}`)
   infoLog(`   Remote URL: ${env.remoteUrl}`)
@@ -843,6 +911,9 @@ async function startStack() {
 async function stopStack() {
   await stopDaemonViaCli().catch((error) => {
     warnLog('[dev:stack] Failed to stop PowerSync daemon via CLI', error?.message ?? error)
+  })
+  await stopEdgeFunctions().catch((error) => {
+    warnLog('[dev:stack] Failed to stop Supabase Edge Functions serve', error?.message ?? error)
   })
   await runCommand(DOCKER_BIN, ['compose', '-f', 'supabase/docker-compose.powersync.yml', 'down'])
   await runCommand(SUPABASE_BIN, ['stop'])
