@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies (workspace)
         run: pnpm install --frozen-lockfile
 
+      - name: Build shared core
+        run: pnpm --filter @shared/core build
+
       - name: Build remote-helper
         run: pnpm --filter @pkg/remote-helper build
 
