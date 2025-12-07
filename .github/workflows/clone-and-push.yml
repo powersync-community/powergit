@@ -60,14 +60,15 @@ jobs:
       - name: Start Powergit daemon
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.POWERSYNC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || secrets.POWERSYNC_SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET || secrets.POWERSYNC_SUPABASE_JWT_SECRET }}
           POWERGIT_EMAIL: ${{ secrets.POWERGIT_EMAIL }}
           POWERGIT_PASSWORD: ${{ secrets.POWERGIT_PASSWORD }}
           POWERSYNC_DAEMON_PORT: 5030
         run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ] || [ -z "$SUPABASE_JWT_SECRET" ]; then
-            echo "Missing Supabase configuration (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/SUPABASE_JWT_SECRET)" && exit 1
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Missing Supabase configuration (SUPABASE_URL/SUPABASE_ANON_KEY)" && exit 1
           fi
           nohup pnpm --filter @svc/daemon start -- --port ${POWERSYNC_DAEMON_PORT:-5030} > daemon.log 2>&1 &
           echo $! > daemon.pid

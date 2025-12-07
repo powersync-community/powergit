@@ -214,7 +214,7 @@ export async function authenticateDaemonWithSupabase({
     log(
       logger,
       'warn',
-      '[dev] Supabase email/password unavailable — skipping daemon authentication (provide POWERGIT_EMAIL/POWERGIT_PASSWORD or POWERSYNC_SUPABASE_EMAIL/PASSWORD).',
+      '[dev] Supabase email/password unavailable — skipping daemon authentication (provide POWERGIT_EMAIL/POWERGIT_PASSWORD or SUPABASE_EMAIL/PASSWORD).',
     );
     return { status: null, authenticated: false, challengeId: null };
   }
