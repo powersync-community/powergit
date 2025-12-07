@@ -12,6 +12,15 @@ pnpm dev
 
 > Requires Docker to be running for the PowerSync + Supabase stack.
 
+## Daemonless GitHub Actions flow (prod-mode)
+
+If you want to trigger the GitHub Actions workflow instead of the local daemon:
+
+1. Copy `.env.github.example` to `.env.github` and set `TOKEN`, `GITHUB_REPO_OWNER`, and `GITHUB_REPO_NAME`.
+2. Start the local stack: `pnpm dev:stack:up` (Edge Functions are available at `http://127.0.0.1:55431/functions/v1`).
+3. Run the explorer in prod mode: `pnpm dev:prod` (uses the Edge Function dispatcher, not the daemon).
+4. Paste a GitHub repo URL in the UI; this calls the `github-import` Edge Function, which dispatches the `clone-and-push.yml` workflow with your token. Watch the run in GitHub Actions to confirm it fired.
+
 ## Screenshots
 
 ![Powergit screenshot 1](s1.png)
@@ -24,6 +33,14 @@ You can view diffs.
 
 ## How it works
 In this repo we have built a custom git remote protocol that allows us to push git data into a Supabase database. We can later use PowerSync to see the data in the frontend. We use the powersync-tanstack-db package to query the database and show it reactively using the `@tanstack/powersync-db-collection` package.
+
+## Why PowerSync instead of TanStack DB alone
+TanStack DB gives us a great query layer, but it does not include a sync engine or durable storage. PowerSync is the replicated store that keeps the Git metadata and pack metadata in step across the daemon and the explorer.
+
+- Offline-first persistence: PowerSync streams `refs`, `commits`, `file_changes`, and `objects` into SQLite (daemon) and IndexedDB (browser), so TanStack DB queries stay fast and continue to work without network access.
+- Delta sync, not re-downloads: after the initial push of a large repo, only new refs/commits are streamed; the UI never has to resync the full history on each launch.
+- Shared cache across surfaces: the daemon, CLI, and browser all query the same replicated tables via `@tanstack/powersync-db-collection`, avoiding bespoke cache plumbing while honoring the Supabase/PowerSync auth model.
+- Pack handling: pack bytes stay in Supabase Storage while PowerSync ships the lightweight metadata we query. The explorer pulls packs lazily and indexes them locally, keeping PowerSync focused on the syncable metadata layer.
 
 ## Architecture Overview
 At a high level the happy path looks like this:

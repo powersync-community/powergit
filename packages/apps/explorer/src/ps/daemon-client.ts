@@ -1,5 +1,6 @@
 import type { PowerSyncImportJob } from '@shared/core'
 import { getAccessToken } from './supabase'
+import { dispatchGithubImport, type GithubActionsImportRequest } from './github-actions'
 
 const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8787'
 const REQUEST_TIMEOUT_MS = 5_000
@@ -19,8 +20,20 @@ function readEnvString(name: string): string | null {
 
 const daemonBaseUrl = readEnvString('VITE_POWERSYNC_DAEMON_URL') ?? DEFAULT_DAEMON_URL
 const daemonEnabled = readEnvFlag('VITE_POWERSYNC_USE_DAEMON')
+const actionsImportEnabled = readEnvFlag('VITE_POWERSYNC_ACTIONS_IMPORT', 'true')
 export function isDaemonEnabled(): boolean {
   return daemonEnabled
+}
+
+export function isGithubActionsImportEnabled(): boolean {
+  return !daemonEnabled && actionsImportEnabled
+}
+
+export type ImportMode = 'daemon' | 'actions'
+
+export function getImportMode(): ImportMode {
+  if (daemonEnabled) return 'daemon'
+  return actionsImportEnabled ? 'actions' : 'daemon'
 }
 
 type DaemonAuthStatusPayload = {
@@ -300,38 +313,44 @@ export interface DaemonGithubImportRequest {
 }
 
 export async function requestGithubImport(payload: DaemonGithubImportRequest): Promise<PowerSyncImportJob> {
-  if (!daemonEnabled) {
-    throw new Error('PowerSync daemon integration is disabled in this environment.')
-  }
-  const { status, data } = await fetchDaemonJson<{ job?: PowerSyncImportJob; error?: string }>('/repos/import', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      repoUrl: payload.repoUrl,
-      orgId: payload.orgId ?? null,
-      repoId: payload.repoId ?? null,
-      branch: payload.branch ?? null,
-    }),
-  })
+  if (daemonEnabled) {
+    const { status, data } = await fetchDaemonJson<{ job?: PowerSyncImportJob; error?: string }>('/repos/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        repoUrl: payload.repoUrl,
+        orgId: payload.orgId ?? null,
+        repoId: payload.repoId ?? null,
+        branch: payload.branch ?? null,
+      }),
+    })
 
-  if (status === 202 || status === 200) {
-    const job = data?.job ?? null
-    if (!job) {
-      throw new Error('Daemon did not return an import job payload.')
+    if (status === 202 || status === 200) {
+      const job = data?.job ?? null
+      if (!job) {
+        throw new Error('Daemon did not return an import job payload.')
+      }
+      return job
     }
-    return job
+
+    if (status === 400) {
+      const message =
+        typeof data?.error === 'string' && data.error.trim().length > 0 ? data.error : 'Invalid GitHub repository details.'
+      throw new Error(message)
+    }
+
+    if (status === 0) {
+      throw new Error('PowerSync daemon is unreachable. Ensure it is running locally.')
+    }
+
+    throw new Error(`Daemon import request failed (${status}).`)
   }
 
-  if (status === 400) {
-    const message = typeof data?.error === 'string' && data.error.trim().length > 0 ? data.error : 'Invalid GitHub repository details.'
-    throw new Error(message)
+  if (!actionsImportEnabled) {
+    throw new Error('GitHub Actions import is disabled in this environment.')
   }
 
-  if (status === 0) {
-    throw new Error('PowerSync daemon is unreachable. Ensure it is running locally.')
-  }
-
-  throw new Error(`Daemon import request failed (${status}).`)
+  return dispatchGithubImport(payload as GithubActionsImportRequest)
 }
 
 export async function fetchGithubImportJob(jobId: string): Promise<PowerSyncImportJob | null> {

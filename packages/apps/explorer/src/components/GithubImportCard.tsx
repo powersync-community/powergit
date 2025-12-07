@@ -2,6 +2,8 @@ import * as React from 'react'
 import { Link } from '@tanstack/react-router'
 import type { PowerSyncImportJob } from '@shared/core'
 import {
+  getImportMode,
+  isGithubActionsImportEnabled,
   isDaemonEnabled,
   requestGithubImport,
   fetchGithubImportJob,
@@ -14,9 +16,12 @@ export const REPO_IMPORT_EVENT = '__powergit:repo-imported'
 const POLL_INTERVAL_MS = 1_500
 
 type ImportPhase = 'idle' | 'submitting' | 'queued' | 'running' | 'success' | 'error'
+type ImportMode = ReturnType<typeof getImportMode>
 
 export function GithubImportCard(): React.JSX.Element | null {
   const daemonAvailable = React.useMemo(() => isDaemonEnabled(), [])
+  const actionsImportAvailable = React.useMemo(() => isGithubActionsImportEnabled(), [])
+  const importMode = React.useMemo<ImportMode>(() => getImportMode(), [])
   const [repoUrl, setRepoUrl] = React.useState('')
   const [status, setStatus] = React.useState<ImportPhase>('idle')
   const [error, setError] = React.useState<string | null>(null)
@@ -24,9 +29,11 @@ export function GithubImportCard(): React.JSX.Element | null {
   const lastAnnouncedJob = React.useRef<string | null>(null)
   const { theme } = useTheme()
   const isDark = theme === 'dark'
+  const workflowUrl = (job as { workflowUrl?: string } | null)?.workflowUrl
 
   React.useEffect(() => {
     if (!job) return undefined
+    if (importMode !== 'daemon') return undefined
     if (job.status === 'success' || job.status === 'error') return undefined
 
     let cancelled = false
@@ -56,16 +63,16 @@ export function GithubImportCard(): React.JSX.Element | null {
       cancelled = true
       window.clearInterval(poll)
     }
-  }, [job])
+  }, [job, importMode])
 
-  if (!daemonAvailable) {
+  if (!daemonAvailable && !actionsImportAvailable) {
     const disabledClasses = isDark
       ? 'rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-3 text-sm text-slate-200'
       : 'rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600'
     return (
       <div className={disabledClasses}>
-        PowerSync daemon is disabled. Enable <code className="font-mono">VITE_POWERSYNC_USE_DAEMON=true</code> so the explorer can
-        clone public GitHub repositories.
+        Imports are disabled. Enable <code className="font-mono">VITE_POWERSYNC_USE_DAEMON=true</code> or{' '}
+        <code className="font-mono">VITE_POWERSYNC_ACTIONS_IMPORT=true</code> to queue GitHub clones.
       </div>
     )
   }
@@ -118,8 +125,10 @@ export function GithubImportCard(): React.JSX.Element | null {
       } else if (queued.status === 'error') {
         setStatus('error')
         setError(queued.error ?? 'Import failed unexpectedly.')
+      } else if (queued.status === 'queued') {
+        setStatus(importMode === 'actions' ? 'queued' : 'queued')
       } else {
-        setStatus(queued.status === 'queued' ? 'queued' : 'running')
+        setStatus('running')
       }
     } catch (submitError) {
       setStatus('error')
@@ -134,11 +143,17 @@ export function GithubImportCard(): React.JSX.Element | null {
       case 'submitting':
         return 'Queuing import…'
       case 'queued':
-        return 'Import queued — waiting for the daemon to start cloning.'
+        return importMode === 'actions'
+          ? 'GitHub Actions workflow dispatched. Monitor the run in GitHub.'
+          : 'Import queued — waiting for the daemon to start cloning.'
       case 'running':
-        return 'Cloning repository...'
+        return importMode === 'actions'
+          ? 'GitHub Actions run in progress. Data will sync when the workflow finishes.'
+          : 'Cloning repository...'
       case 'success':
-        return 'Repository imported successfully.'
+        return importMode === 'actions'
+          ? 'GitHub Actions dispatch accepted. Watch the workflow to see progress.'
+          : 'Repository imported successfully.'
       case 'error':
         return error ?? 'Import encountered an error.'
       default:
@@ -194,7 +209,7 @@ export function GithubImportCard(): React.JSX.Element | null {
         <div className={`${statusTextClass} mt-4`}>
           {statusMessage}{' '}
           {status === 'error' && error ? <span className="text-red-400">({error})</span> : null}
-          {status === 'success' && resultOrgId && resultRepoId ? (
+          {status === 'success' && importMode === 'daemon' && resultOrgId && resultRepoId ? (
             <span
               className={`inline-flex items-center gap-1 ${isDark ? 'text-emerald-200' : 'text-emerald-600'}`}
             >
@@ -210,6 +225,19 @@ export function GithubImportCard(): React.JSX.Element | null {
               →
             </span>
           ) : null}
+          {importMode === 'actions' && workflowUrl ? (
+            <span className="ml-2 inline-flex items-center gap-1">
+              <a
+                href={workflowUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={isDark ? 'text-emerald-200 underline' : 'text-emerald-700 underline'}
+              >
+                View GitHub Actions run
+              </a>
+              →
+            </span>
+          ) : null}
         </div>
       ) : null}
 
@@ -221,6 +249,11 @@ export function GithubImportCard(): React.JSX.Element | null {
           <div className={isDark ? 'text-slate-200' : 'text-slate-600'}>
             Status: <span className="uppercase tracking-wide text-[11px]">{job?.status ?? 'queued'}</span>
           </div>
+          {importMode === 'actions' && workflowUrl ? (
+            <div className={isDark ? 'text-slate-200' : 'text-slate-600'}>
+              Workflow: <a className="underline" href={workflowUrl} target="_blank" rel="noreferrer">{workflowUrl}</a>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

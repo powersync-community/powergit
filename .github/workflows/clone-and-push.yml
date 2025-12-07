@@ -1,0 +1,58 @@
+name: Clone and Push to PowerSync
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_url:
+        description: "Git repository URL to clone"
+        required: true
+      org:
+        description: "PowerSync org id"
+        required: true
+      repo:
+        description: "PowerSync repo id"
+        required: true
+      edge_base_url:
+        description: "Edge base URL (functions/v1/powersync-remote)"
+        required: false
+
+jobs:
+  clone-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        run: corepack enable && corepack prepare pnpm@10 --activate
+
+      - name: Install dependencies (remote-helper only)
+        run: pnpm install --filter @pkg/remote-helper --ignore-scripts
+
+      - name: Build remote-helper
+        run: pnpm --filter @pkg/remote-helper build
+
+      - name: Clone target repo
+        run: |
+          git clone "${{ github.event.inputs.git_url }}" workdir
+          cd workdir
+          git rev-parse HEAD
+
+      - name: Push via PowerSync edge
+        env:
+          POWERSYNC_EDGE_BASE_URL: ${{ github.event.inputs.edge_base_url || secrets.POWERSYNC_EDGE_BASE_URL }}
+          POWERSYNC_ORG: ${{ github.event.inputs.org }}
+          POWERSYNC_REPO: ${{ github.event.inputs.repo }}
+        run: |
+          cd workdir
+          if [ -z "$POWERSYNC_EDGE_BASE_URL" ]; then
+            echo "POWERSYNC_EDGE_BASE_URL is required" && exit 1
+          fi
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git remote add powersync "powersync::$POWERSYNC_EDGE_BASE_URL/orgs/$POWERSYNC_ORG/repos/$POWERSYNC_REPO"
+          git push powersync --all
+          git push powersync --tags || true
