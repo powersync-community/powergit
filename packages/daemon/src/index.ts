@@ -367,6 +367,12 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   let database: PowerSyncDatabase | null = null;
   let connectPromise: Promise<void> | null = null;
   const scheduleConnect = (reason: string) => {
+    if (SUPABASE_ONLY_MODE) {
+      console.info(`[powersync-daemon] skipping PowerSync connect (${reason}) — SUPABASE_ONLY_MODE enabled`);
+      connected = true;
+      connectedAt = connectedAt ?? new Date();
+      return;
+    }
     if (!authEndpoint || !authToken) {
       console.warn(`[powersync-daemon] skipping PowerSync connect (${reason}) — credentials missing`);
       connected = false;
@@ -936,7 +942,9 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   const listenHost = address.family === 'IPv6' ? `[${address.address}]` : address.address;
   console.info(`[powersync-daemon] listening on http://${listenHost}:${address.port}`);
 
-  scheduleConnect('initial-start');
+  if (!SUPABASE_ONLY_MODE) {
+    scheduleConnect('initial-start');
+  }
 
   process.once('SIGINT', () => requestShutdown('SIGINT'));
   process.once('SIGTERM', () => requestShutdown('SIGTERM'));
