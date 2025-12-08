@@ -6,8 +6,10 @@ type LogLevel = 'info' | 'warn' | 'error'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  // Allow common Supabase/SB-JS headers and fall back to wildcard for safety.
+  'Access-Control-Allow-Headers': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400',
 }
 
 interface GithubImportPayload {
