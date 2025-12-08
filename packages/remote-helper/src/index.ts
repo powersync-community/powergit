@@ -768,7 +768,8 @@ async function readCommitSummary(sha: string): Promise<GitPushSummary['commits']
 }
 
 async function readCommitFileChanges(sha: string): Promise<GitPushSummary['commits'][number]['files']> {
-  const output = await execGit(['diff-tree', '--no-commit-id', '--numstat', '-r', sha]).catch((error) => {
+  // --root includes changes for root commits (otherwise initial commit shows no files)
+  const output = await execGit(['diff-tree', '--root', '--no-commit-id', '--numstat', '-r', sha]).catch((error) => {
     console.warn('[powersync] failed to read commit file changes', sha, error)
     return ''
   })
