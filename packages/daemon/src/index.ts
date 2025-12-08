@@ -22,7 +22,8 @@ import { resolveSessionPath } from './auth/index.js';
 import { createSupabaseFileStorage, resolveSupabaseSessionPath } from '@shared/core';
 import { PackStorage } from './storage.js';
 
-const SUPABASE_ONLY_MODE = (process.env.POWERSYNC_SUPABASE_ONLY ?? 'false').toLowerCase() === 'true';
+const SUPABASE_ONLY_MODE =
+  (process.env.SUPABASE_ONLY_MODE ?? process.env.POWERSYNC_SUPABASE_ONLY ?? 'false').toLowerCase() === 'true';
 
 function normalizeAuthToken(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
@@ -324,8 +325,8 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
         }) as SupabaseClient)
       : (supabase as SupabaseClient);
 
-  const packBucket = (process.env.POWERSYNC_SUPABASE_STORAGE_BUCKET ?? 'git-packs').trim();
-  const packSignTtl = Number.parseInt(process.env.POWERSYNC_SUPABASE_STORAGE_TTL ?? '120', 10);
+  const packBucket = (process.env.SUPABASE_STORAGE_BUCKET ?? process.env.POWERSYNC_SUPABASE_STORAGE_BUCKET ?? 'git-packs').trim();
+  const packSignTtl = Number.parseInt(process.env.SUPABASE_STORAGE_TTL ?? process.env.POWERSYNC_SUPABASE_STORAGE_TTL ?? '120', 10);
   let packStorage: PackStorage | null = null;
 
   let supabaseSession: Session | null = null;
@@ -559,7 +560,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   if (!supabaseWriterDisabled) {
     if (!supabaseUrl) {
       throw new Error(
-        '[powersync-daemon] Supabase writer requires POWERSYNC_SUPABASE_URL (or SUPABASE_URL). Set POWERSYNC_DISABLE_SUPABASE_WRITER=true to run without Supabase replication.',
+        '[powersync-daemon] Supabase writer requires SUPABASE_URL. Set POWERSYNC_DISABLE_SUPABASE_WRITER=true to run without Supabase replication.',
       );
     }
 

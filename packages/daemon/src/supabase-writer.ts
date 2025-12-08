@@ -38,7 +38,9 @@ export class SupabaseWriter {
   constructor(options: SupabaseWriterOptions) {
     this.database = options.database;
     this.supabase = options.client;
-    this.debug = (process.env.POWERSYNC_SUPABASE_WRITER_DEBUG ?? 'false').toLowerCase() === 'true';
+    this.debug =
+      (process.env.SUPABASE_WRITER_DEBUG ?? process.env.POWERSYNC_SUPABASE_WRITER_DEBUG ?? 'false').toLowerCase() ===
+      'true';
 
     this.pollIntervalMs = options.pollIntervalMs ?? 1_000;
     this.retryDelayMs = options.retryDelayMs ?? 5_000;

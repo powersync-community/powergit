@@ -20,10 +20,10 @@ interface DaemonBranch {
 }
 
 const REQUIRED_ENV_VARS = [
-  'POWERSYNC_SUPABASE_URL',
-  'POWERSYNC_SUPABASE_ANON_KEY',
-  'POWERSYNC_SUPABASE_EMAIL',
-  'POWERSYNC_SUPABASE_PASSWORD',
+  'SUPABASE_URL',
+  'SUPABASE_ANON_KEY',
+  'SUPABASE_EMAIL',
+  'SUPABASE_PASSWORD',
   'POWERSYNC_ENDPOINT',
   'POWERSYNC_DAEMON_URL',
   'PSGIT_TEST_REMOTE_URL',
@@ -255,8 +255,8 @@ test.describe('CLI-seeded repo (live PowerSync)', () => {
     resetDaemonSession()
     REQUIRED_ENV_VARS.forEach(requireEnv)
 
-    supabaseEmail = requireEnv('POWERSYNC_SUPABASE_EMAIL')
-    supabasePassword = requireEnv('POWERSYNC_SUPABASE_PASSWORD')
+    supabaseEmail = requireEnv('SUPABASE_EMAIL')
+    supabasePassword = requireEnv('SUPABASE_PASSWORD')
     daemonBaseUrl = normalizeBaseUrl(requireEnv('POWERSYNC_DAEMON_URL'))
 
     const remoteUrl = requireEnv('PSGIT_TEST_REMOTE_URL')

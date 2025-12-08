@@ -18,8 +18,8 @@ services:
       PS_DATABASE_URL: "${POWERSYNC_DATABASE_URL:-postgres://postgres:postgres@host.docker.internal:55432/postgres}"
       PS_STORAGE_URI: "${POWERSYNC_STORAGE_URI:-postgres://postgres:postgres@host.docker.internal:55432/postgres}"
       PS_PORT: "3000"
-      PS_SUPABASE_JWT_SECRET: "${POWERSYNC_SUPABASE_JWT_SECRET:-${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}}"
-      PS_SUPABASE_JWT_SECRET_B64: "${POWERSYNC_SUPABASE_JWT_SECRET_B64:-}"
+      PS_SUPABASE_JWT_SECRET: "${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}"
+      PS_SUPABASE_JWT_SECRET_B64: "${SUPABASE_JWT_SECRET_B64:-}"
     ports:
       - "${POWERSYNC_PORT:-55440}:3000"
     volumes:

@@ -9,11 +9,11 @@ The PowerSync-first architecture stores Git metadata in Supabase while the Power
 | `VITE_SUPABASE_URL` | Supabase project URL used by the explorer (e.g. `https://xyzcompany.supabase.co`). |
 | `VITE_SUPABASE_ANON_KEY` | Supabase anon/public key that the browser can embed. |
 | `VITE_SUPABASE_SCHEMA` | Optional schema override for browser reads (defaults to `public`). |
-| `POWERSYNC_SUPABASE_URL` | Supabase project URL used by the daemon/CLI for server-side access. |
-| `POWERSYNC_SUPABASE_SERVICE_ROLE_KEY` | Service role key consumed by the daemon’s Supabase writer. |
-| `POWERSYNC_SUPABASE_EMAIL` | Supabase user email used by the CLI/daemon for password-based login in development. |
-| `POWERSYNC_SUPABASE_PASSWORD` | Matching Supabase user password; exported automatically by `pnpm dev:stack`. |
-| `POWERSYNC_SUPABASE_JWT_SECRET` | The Supabase JWT secret required by the PowerSync service and daemon. |
+| `SUPABASE_URL` | Supabase project URL used by the daemon/CLI for server-side access. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key consumed by the daemon’s Supabase writer. |
+| `SUPABASE_EMAIL` | Supabase user email used by the CLI/daemon for password-based login in development. |
+| `SUPABASE_PASSWORD` | Matching Supabase user password; exported automatically by `pnpm dev:stack`. |
+| `SUPABASE_JWT_SECRET` | The Supabase JWT secret required by the PowerSync service and daemon. |
 | `POWERSYNC_DAEMON_DEVICE_URL` | Optional verification URL the daemon prints for device flows (e.g. `http://localhost:5783/auth`). |
 | `POWERSYNC_DAEMON_DEVICE_AUTO_LAUNCH` | When `true`, the daemon attempts to open the verification URL in the default browser. |
 | `POWERSYNC_DAEMON_DEVICE_TTL_MS` | Override (in milliseconds) for how long a device challenge remains valid (default 5 minutes). |

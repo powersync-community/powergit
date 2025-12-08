@@ -191,7 +191,7 @@ function ensureDeviceLoginUrl(): void {
 function shouldManageLocalStack(): boolean {
   const profileName = process.env.STACK_PROFILE ?? 'local-dev'
   if (profileName === 'local-dev') return true
-  const supabaseUrl = (process.env.POWERSYNC_SUPABASE_URL ?? '').toLowerCase()
+  const supabaseUrl = (process.env.SUPABASE_URL ?? '').toLowerCase()
   if (supabaseUrl.includes('127.0.0.1') || supabaseUrl.includes('localhost')) {
     return true
   }

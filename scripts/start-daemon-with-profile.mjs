@@ -122,8 +122,8 @@ async function main() {
   }
 
   const combinedEnv = { ...process.env, ...envResult?.combinedEnv };
-  if (!combinedEnv.POWERSYNC_SUPABASE_WRITER_FAILURE_THRESHOLD) {
-    combinedEnv.POWERSYNC_SUPABASE_WRITER_FAILURE_THRESHOLD = '20';
+  if (!combinedEnv.SUPABASE_WRITER_FAILURE_THRESHOLD && !combinedEnv.POWERSYNC_SUPABASE_WRITER_FAILURE_THRESHOLD) {
+    combinedEnv.SUPABASE_WRITER_FAILURE_THRESHOLD = '20';
   }
   const child = launchDaemon(combinedEnv, passThrough);
   void refreshDaemonAfterLaunch(combinedEnv);

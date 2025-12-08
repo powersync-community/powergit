@@ -49,8 +49,8 @@ const getEnvOrEmpty = (...keys: string[]) => {
   return ''
 }
 
-const SUPABASE_URL = getEnvOrEmpty('VITE_SUPABASE_URL', 'POWERSYNC_SUPABASE_URL') || 'https://example.supabase.co'
-const SUPABASE_ANON_KEY = getEnvOrEmpty('VITE_SUPABASE_ANON_KEY', 'POWERSYNC_SUPABASE_ANON_KEY') || 'test-anon-key'
+const SUPABASE_URL = getEnvOrEmpty('VITE_SUPABASE_URL') || 'https://example.supabase.co'
+const SUPABASE_ANON_KEY = getEnvOrEmpty('VITE_SUPABASE_ANON_KEY') || 'test-anon-key'
 
 const TEST_TIMEOUT_MS = 30_000
 export const BASE_URL = BASE_HTTP

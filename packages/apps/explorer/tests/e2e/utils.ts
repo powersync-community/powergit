@@ -9,10 +9,7 @@ const FIXTURE_BRIDGE_TIMEOUT_MS = 5_000
 
 export type { RepoFixturePayload } from '../../src/testing/fixtures'
 
-const REQUIRED_ENV_VARS = [
-  'POWERSYNC_SUPABASE_URL',
-  'POWERSYNC_SUPABASE_SERVICE_ROLE_KEY',
-]
+const REQUIRED_ENV_VARS = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
 
 function stripQuotes(value: string): string {
   if (!value) return value
@@ -37,8 +34,8 @@ function getSupabaseAdminClient(): SupabaseClient {
       throw new Error(`Environment variable ${key} is required for live PowerSync tests.`)
     }
   })
-  const url = getEnv('POWERSYNC_SUPABASE_URL')
-  const serviceRoleKey = getEnv('POWERSYNC_SUPABASE_SERVICE_ROLE_KEY')
+  const url = getEnv('SUPABASE_URL')
+  const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY')
   cachedClient = createClient(url, serviceRoleKey, {
     auth: { persistSession: false },
     db: { schema: 'public' },

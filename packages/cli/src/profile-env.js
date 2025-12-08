@@ -93,36 +93,36 @@ function buildEnvFromProfile(profile) {
 
   if (profile?.supabase?.url) {
     const url = profile.supabase.url
-    result.POWERSYNC_SUPABASE_URL = url
+    result.SUPABASE_URL = url
     result.PSGIT_TEST_SUPABASE_URL = url
   }
 
   if (profile?.supabase?.anonKey) {
     const anonKey = profile.supabase.anonKey
-    result.POWERSYNC_SUPABASE_ANON_KEY = anonKey
+    result.SUPABASE_ANON_KEY = anonKey
     result.PSGIT_TEST_SUPABASE_ANON_KEY = anonKey
   }
 
   if (profile?.supabase?.serviceRoleKey) {
     const serviceRoleKey = profile.supabase.serviceRoleKey
-    result.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
+    result.SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
     result.PSGIT_TEST_SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
   }
 
   if (profile?.supabase?.email) {
     const email = profile.supabase.email
-    result.POWERSYNC_SUPABASE_EMAIL = email
+    result.SUPABASE_EMAIL = email
     result.PSGIT_TEST_SUPABASE_EMAIL = email
   }
 
   if (profile?.supabase?.password) {
     const password = profile.supabase.password
-    result.POWERSYNC_SUPABASE_PASSWORD = password
+    result.SUPABASE_PASSWORD = password
     result.PSGIT_TEST_SUPABASE_PASSWORD = password
   }
 
   if (profile?.supabase?.schema) {
-    result.POWERSYNC_SUPABASE_SCHEMA = profile.supabase.schema
+    result.SUPABASE_SCHEMA = profile.supabase.schema
   }
 
   if (profile?.env && typeof profile.env === 'object') {
@@ -298,11 +298,11 @@ export function loadProfileEnvironment(options = {}) {
   }
   // Provide sensible fallbacks between historical/local env names
   const fallbackPairs = [
-    ['POWERSYNC_SUPABASE_URL', 'PSGIT_TEST_SUPABASE_URL'],
-    ['POWERSYNC_SUPABASE_ANON_KEY', 'PSGIT_TEST_SUPABASE_ANON_KEY'],
-    ['POWERSYNC_SUPABASE_SERVICE_ROLE_KEY', 'PSGIT_TEST_SUPABASE_SERVICE_ROLE_KEY'],
-    ['POWERSYNC_SUPABASE_EMAIL', 'PSGIT_TEST_SUPABASE_EMAIL'],
-    ['POWERSYNC_SUPABASE_PASSWORD', 'PSGIT_TEST_SUPABASE_PASSWORD'],
+    ['SUPABASE_URL', 'PSGIT_TEST_SUPABASE_URL'],
+    ['SUPABASE_ANON_KEY', 'PSGIT_TEST_SUPABASE_ANON_KEY'],
+    ['SUPABASE_SERVICE_ROLE_KEY', 'PSGIT_TEST_SUPABASE_SERVICE_ROLE_KEY'],
+    ['SUPABASE_EMAIL', 'PSGIT_TEST_SUPABASE_EMAIL'],
+    ['SUPABASE_PASSWORD', 'PSGIT_TEST_SUPABASE_PASSWORD'],
     ['POWERSYNC_ENDPOINT', 'PSGIT_TEST_ENDPOINT'],
   ]
   for (const [target, fallback] of fallbackPairs) {

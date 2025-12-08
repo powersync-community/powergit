@@ -19,19 +19,10 @@ describe('supabase env fallbacks', () => {
   beforeEach(() => {
     __resetSupabaseClientForTests()
     vi.unstubAllEnvs()
-    delete process.env.POWERSYNC_SUPABASE_URL
-    delete process.env.POWERSYNC_SUPABASE_ANON_KEY
     delete process.env.PSGIT_TEST_SUPABASE_URL
     delete process.env.PSGIT_TEST_SUPABASE_ANON_KEY
     delete process.env.VITE_SUPABASE_URL
     delete process.env.VITE_SUPABASE_ANON_KEY
-  })
-
-  it('falls back to POWERSYNC_SUPABASE_* when VITE_* vars are absent', () => {
-    process.env.POWERSYNC_SUPABASE_URL = 'http://127.0.0.1:55431'
-    process.env.POWERSYNC_SUPABASE_ANON_KEY = 'anon-key'
-
-    expect(isSupabaseConfigured()).toBe(true)
   })
 
   it('falls back to PSGIT_TEST_SUPABASE_* when available', () => {

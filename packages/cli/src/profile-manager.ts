@@ -143,36 +143,36 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
 
   if (profile.supabase?.url) {
     const url = profile.supabase.url
-    result.POWERSYNC_SUPABASE_URL = url
+    result.SUPABASE_URL = url
     result.PSGIT_TEST_SUPABASE_URL = url
   }
 
   if (profile.supabase?.anonKey) {
     const anonKey = profile.supabase.anonKey
-    result.POWERSYNC_SUPABASE_ANON_KEY = anonKey
+    result.SUPABASE_ANON_KEY = anonKey
     result.PSGIT_TEST_SUPABASE_ANON_KEY = anonKey
   }
 
   if (profile.supabase?.serviceRoleKey) {
     const serviceRoleKey = profile.supabase.serviceRoleKey
-    result.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
+    result.SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
     result.PSGIT_TEST_SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
   }
 
   if (profile.supabase?.email) {
     const email = profile.supabase.email
-    result.POWERSYNC_SUPABASE_EMAIL = email
+    result.SUPABASE_EMAIL = email
     result.PSGIT_TEST_SUPABASE_EMAIL = email
   }
 
   if (profile.supabase?.password) {
     const password = profile.supabase.password
-    result.POWERSYNC_SUPABASE_PASSWORD = password
+    result.SUPABASE_PASSWORD = password
     result.PSGIT_TEST_SUPABASE_PASSWORD = password
   }
 
   if (profile.supabase?.schema) {
-    result.POWERSYNC_SUPABASE_SCHEMA = profile.supabase.schema
+    result.SUPABASE_SCHEMA = profile.supabase.schema
   }
 
   if (profile.env) {

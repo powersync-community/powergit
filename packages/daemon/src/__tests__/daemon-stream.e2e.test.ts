@@ -151,7 +151,7 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
       await stopStack({ force: true }).catch(() => undefined);
       throw error;
     }
-    const supabaseUrl = resolveEnv('POWERSYNC_SUPABASE_URL');
+    const supabaseUrl = resolveEnv('SUPABASE_URL');
     if (supabaseUrl) {
       await waitForSupabaseHealth(supabaseUrl, WAIT_TIMEOUT_MS);
       console.info('[daemon-e2e] Supabase HTTP endpoint is reachable');

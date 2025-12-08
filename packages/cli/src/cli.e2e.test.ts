@@ -285,13 +285,12 @@ describeLive('psgit sync against live PowerSync stack', () => {
       }
 
       const supabaseAnonKey =
-        process.env.POWERSYNC_SUPABASE_ANON_KEY ??
-        process.env.PSGIT_TEST_SUPABASE_ANON_KEY ??
-        process.env.SUPABASE_ANON_KEY
-      const supabaseUrl = process.env.PSGIT_TEST_SUPABASE_URL ?? process.env.POWERSYNC_SUPABASE_URL
-      const supabaseEmail = process.env.PSGIT_TEST_SUPABASE_EMAIL ?? process.env.POWERSYNC_SUPABASE_EMAIL
+        process.env.SUPABASE_ANON_KEY ??
+        process.env.PSGIT_TEST_SUPABASE_ANON_KEY
+      const supabaseUrl = process.env.SUPABASE_URL ?? process.env.PSGIT_TEST_SUPABASE_URL
+      const supabaseEmail = process.env.SUPABASE_EMAIL ?? process.env.PSGIT_TEST_SUPABASE_EMAIL
       const supabasePassword =
-        process.env.PSGIT_TEST_SUPABASE_PASSWORD ?? process.env.POWERSYNC_SUPABASE_PASSWORD
+        process.env.SUPABASE_PASSWORD ?? process.env.PSGIT_TEST_SUPABASE_PASSWORD
       const endpoint = process.env.PSGIT_TEST_ENDPOINT ?? process.env.POWERSYNC_ENDPOINT
 
       if (!supabaseAnonKey || !supabaseUrl || !supabaseEmail || !supabasePassword || !endpoint) {
@@ -361,9 +360,9 @@ describeLive('psgit sync against live PowerSync stack', () => {
           cwd: repoRoot,
           env: {
             ...process.env,
-            POWERSYNC_SUPABASE_URL: liveStackConfig.supabaseUrl,
-            POWERSYNC_SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
-            POWERSYNC_SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
+            SUPABASE_URL: liveStackConfig.supabaseUrl,
+            SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
+            SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
             POWERSYNC_ENDPOINT: liveStackConfig.endpoint,
           },
         },
@@ -401,9 +400,9 @@ describeLive('psgit sync against live PowerSync stack', () => {
         cwd: repoDir,
         env: {
           ...process.env,
-          POWERSYNC_SUPABASE_URL: liveStackConfig.supabaseUrl,
-          POWERSYNC_SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
-          POWERSYNC_SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
+          SUPABASE_URL: liveStackConfig.supabaseUrl,
+          SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
+          SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
           POWERSYNC_ENDPOINT: liveStackConfig.endpoint,
           ...env,
         },
@@ -419,9 +418,9 @@ describeLive('psgit sync against live PowerSync stack', () => {
         cwd: targetDir,
         env: {
           ...process.env,
-          POWERSYNC_SUPABASE_URL: liveStackConfig.supabaseUrl,
-          POWERSYNC_SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
-          POWERSYNC_SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
+          SUPABASE_URL: liveStackConfig.supabaseUrl,
+          SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
+          SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
           POWERSYNC_ENDPOINT: liveStackConfig.endpoint,
           ...env,
         },

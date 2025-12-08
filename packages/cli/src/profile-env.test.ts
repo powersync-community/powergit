@@ -69,7 +69,7 @@ describe('loadProfileEnvironment', () => {
     writeFileSync(
       stackEnvFile,
       [
-        'export POWERSYNC_SUPABASE_ANON_KEY=anon-key-staging',
+        'export SUPABASE_ANON_KEY=anon-key-staging',
         'export VITE_CUSTOM_FLAG=enabled',
       ].join('\n'),
       'utf8',
@@ -89,17 +89,17 @@ describe('loadProfileEnvironment', () => {
     expect(result.profileEnv).toMatchObject({
       POWERSYNC_ENDPOINT: 'https://powersync.example.com',
       POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
-      POWERSYNC_SUPABASE_URL: 'https://supabase.example.com',
+      SUPABASE_URL: 'https://supabase.example.com',
     })
     expect(result.stackEnvValues).toMatchObject({
-      POWERSYNC_SUPABASE_ANON_KEY: 'anon-key-staging',
+      SUPABASE_ANON_KEY: 'anon-key-staging',
       VITE_CUSTOM_FLAG: 'enabled',
     })
     expect(result.combinedEnv).toMatchObject({
       POWERSYNC_ENDPOINT: 'https://powersync.example.com',
       POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
-      POWERSYNC_SUPABASE_URL: 'https://supabase.example.com',
-      POWERSYNC_SUPABASE_ANON_KEY: 'anon-key-staging',
+      SUPABASE_URL: 'https://supabase.example.com',
+      SUPABASE_ANON_KEY: 'anon-key-staging',
       VITE_CUSTOM_FLAG: 'enabled',
       STACK_PROFILE: 'staging',
       PSGIT_ACTIVE_PROFILE: 'staging',
