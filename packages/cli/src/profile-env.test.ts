@@ -87,7 +87,7 @@ describe('loadProfileEnvironment', () => {
     expect(result.profile.name).toBe('staging')
     expect(result.stackEnvPath).toBe(stackEnvFile)
     expect(result.profileEnv).toMatchObject({
-      POWERSYNC_ENDPOINT: 'https://powersync.example.com',
+      POWERSYNC_URL: 'https://powersync.example.com',
       POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
       SUPABASE_URL: 'https://supabase.example.com',
     })
@@ -96,7 +96,7 @@ describe('loadProfileEnvironment', () => {
       VITE_CUSTOM_FLAG: 'enabled',
     })
     expect(result.combinedEnv).toMatchObject({
-      POWERSYNC_ENDPOINT: 'https://powersync.example.com',
+      POWERSYNC_URL: 'https://powersync.example.com',
       POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
       SUPABASE_URL: 'https://supabase.example.com',
       SUPABASE_ANON_KEY: 'anon-key-staging',

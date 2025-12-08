@@ -9,10 +9,10 @@ if (cliArgs.length === 0) {
   process.exit(1)
 }
 
-const envPath = resolve(process.cwd(), '.env.local')
-if (existsSync(envPath)) {
+function loadEnvFile(path, { overwrite = false } = {}) {
+  if (!existsSync(path)) return
   try {
-    const content = readFileSync(envPath, 'utf8')
+    const content = readFileSync(path, 'utf8')
     for (const line of content.split(/\r?\n/)) {
       const trimmed = line.trim()
       if (!trimmed || trimmed.startsWith('#')) continue
@@ -20,18 +20,32 @@ if (existsSync(envPath)) {
       if (idx === -1) continue
       const key = trimmed.slice(0, idx).trim()
       if (!key) continue
-      let value = trimmed.slice(idx + 1)
-      value = value.trim()
+      let value = trimmed.slice(idx + 1).trim()
       if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
         value = value.slice(1, -1)
       }
-      if (!(key in process.env)) {
+      if (overwrite || !(key in process.env)) {
         process.env[key] = value
       }
     }
   } catch (error) {
-    console.warn('[run-with-local-env] Failed to load .env.local:', error.message ?? error)
+    console.warn(`[run-with-local-env] Failed to load ${path}:`, error.message ?? error)
   }
+}
+
+const cwd = process.cwd()
+const envLocalPath = resolve(cwd, '.env.local')
+const envProdPath = resolve(cwd, '.env.prod')
+const isProdMode =
+  process.env.STACK_PROFILE === 'prod' ||
+  process.env.NODE_ENV === 'production' ||
+  cliArgs.some((arg) => typeof arg === 'string' && arg.includes('dev:prod'))
+
+// Base defaults
+loadEnvFile(envLocalPath, { overwrite: false })
+// In prod mode, allow .env.prod to override anything previously loaded
+if (isProdMode) {
+  loadEnvFile(envProdPath, { overwrite: true })
 }
 
 const [command, ...args] = cliArgs

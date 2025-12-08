@@ -19,6 +19,7 @@
       "VITE_SUPABASE_ANON_KEY": "anon-placeholder",
       "VITE_SUPABASE_SCHEMA": "public",
       "VITE_POWERSYNC_ENDPOINT": "http://127.0.0.1:55440",
+      "POWERSYNC_URL": "http://127.0.0.1:55440",
       "VITE_POWERSYNC_DEFAULT_REPOS": "infra",
       "VITE_POWERSYNC_DISABLED": "false"
     }

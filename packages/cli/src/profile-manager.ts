@@ -119,7 +119,7 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
     profile.powersync?.url ?? profile.powersync?.endpoint ?? undefined
   if (powersyncEndpoint) {
     const endpoint = powersyncEndpoint
-    result.POWERSYNC_ENDPOINT = endpoint
+    result.POWERSYNC_URL = endpoint
     result.POWERSYNC_DAEMON_ENDPOINT = endpoint
     result.PSGIT_TEST_ENDPOINT = endpoint
   }

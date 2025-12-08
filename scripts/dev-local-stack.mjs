@@ -432,7 +432,7 @@ async function probePowerSyncEndpoint(endpoint, requestTimeoutMs) {
 
 async function waitForPowerSyncReady(endpoint) {
   if (!endpoint) {
-    throw new Error('PowerSync endpoint is not defined; set POWERSYNC_ENDPOINT or ensure Supabase status output includes API_URL.')
+    throw new Error('PowerSync endpoint is not defined; set POWERSYNC_URL or ensure Supabase status output includes API_URL.')
   }
 
   if (cliOptions?.dryRun) {
@@ -563,7 +563,7 @@ function buildStackEnv(statusEnv) {
     process.env.PS_STORAGE_URI ?? statusEnv.PS_STORAGE_URI ?? containerStorageUri
   const psPort = `${process.env.PS_PORT ?? statusEnv.PS_PORT ?? POWERSYNC_INTERNAL_PORT}`
   const powersyncEndpoint =
-    process.env.POWERSYNC_ENDPOINT ?? statusEnv.POWERSYNC_ENDPOINT ?? `http://127.0.0.1:${powersyncPort}`
+    process.env.POWERSYNC_URL ?? statusEnv.POWERSYNC_URL ?? `http://127.0.0.1:${powersyncPort}`
   const remoteUrl = `powersync::${powersyncEndpoint.replace(/\/$/, '')}/orgs/${DEFAULT_ORG}/repos/${DEFAULT_REPO}`
   const databaseUrl = resolvedDatabaseUrl
   const daemonDeviceLoginUrl =
@@ -648,7 +648,7 @@ function applyDaemonStatusToStackEnv(env, status) {
     status.context && typeof status.context.endpoint === 'string' ? status.context.endpoint.trim() : null
   if (endpoint) {
     env.powersyncEndpoint = endpoint
-    process.env.POWERSYNC_ENDPOINT = endpoint
+    process.env.POWERSYNC_URL = endpoint
     env.remoteUrl = `powersync::${endpoint.replace(/\/$/, '')}/orgs/${DEFAULT_ORG}/repos/${DEFAULT_REPO}`
   }
 }
@@ -663,7 +663,7 @@ function buildExportLines(env, authUser) {
     `export PSGIT_TEST_ENDPOINT=${JSON.stringify(env.powersyncEndpoint)}`,
     '',
     '# Optional extras for explorer / local tooling',
-    `export POWERSYNC_ENDPOINT=${JSON.stringify(env.powersyncEndpoint)}`,
+    `export POWERSYNC_URL=${JSON.stringify(env.powersyncEndpoint)}`,
     `export SUPABASE_URL=${JSON.stringify(env.supabaseUrl)}`,
     `export SUPABASE_ANON_KEY=${JSON.stringify(env.anonKey)}`,
     `export SUPABASE_SERVICE_ROLE_KEY=${JSON.stringify(env.serviceRoleKey)}`,

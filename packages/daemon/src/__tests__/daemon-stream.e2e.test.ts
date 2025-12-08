@@ -191,9 +191,9 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
       const endpoint =
         daemonAuth?.context && typeof daemonAuth.context.endpoint === 'string' && daemonAuth.context.endpoint.length > 0
           ? daemonAuth.context.endpoint
-          : resolveEnv('POWERSYNC_ENDPOINT');
+          : resolveEnv('POWERSYNC_URL');
       if (!endpoint) {
-        throw new Error('PowerSync endpoint environment missing; ensure dev stack exports POWERSYNC_ENDPOINT.');
+        throw new Error('PowerSync endpoint environment missing; ensure dev stack exports POWERSYNC_URL.');
       }
 
       const daemonToken =

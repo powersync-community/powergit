@@ -43,7 +43,7 @@ export async function resolveDaemonConfig(options: ResolveDaemonConfigOptions = 
   const dbPath = resolve(options.dbPath ?? process.env.POWERSYNC_DAEMON_DB_PATH ?? resolve(homedir(), DEFAULT_DB_RELATIVE_PATH));
   await ensureDirectoryExists(dirname(dbPath));
 
-  const endpoint = options.endpoint ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? process.env.POWERSYNC_ENDPOINT ?? undefined;
+  const endpoint = options.endpoint ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? process.env.POWERSYNC_URL ?? undefined;
 
   const explicitStreams = options.initialStreams ?? resolveEnvList(process.env.POWERSYNC_DAEMON_STREAMS);
 

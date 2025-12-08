@@ -85,7 +85,7 @@ export async function loginWithSupabasePassword(options: LoginOptions = {}): Pro
   const supabaseAnonKey = inferSupabaseAnonKey(options.supabaseAnonKey)
   const email = inferSupabaseEmail(options.supabaseEmail)
   const password = inferSupabasePassword(options.supabasePassword)
-  const endpoint = options.endpoint ?? process.env.POWERSYNC_ENDPOINT ?? process.env.PSGIT_TEST_ENDPOINT
+  const endpoint = options.endpoint ?? process.env.POWERSYNC_URL ?? process.env.PSGIT_TEST_ENDPOINT
 
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error('Supabase URL and anon key are required for Supabase login. Set SUPABASE_URL and SUPABASE_ANON_KEY.')
@@ -94,7 +94,7 @@ export async function loginWithSupabasePassword(options: LoginOptions = {}): Pro
     throw new Error('Supabase email and password are required. Use --supabase-email/--supabase-password or set SUPABASE_EMAIL/SUPABASE_PASSWORD.')
   }
   if (!endpoint) {
-    throw new Error('PowerSync endpoint is required. Set POWERSYNC_ENDPOINT or provide --endpoint.')
+    throw new Error('PowerSync endpoint is required. Set POWERSYNC_URL or provide --endpoint.')
   }
 
   const persistSession = options.persistSession ?? true

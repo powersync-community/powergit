@@ -291,7 +291,7 @@ describeLive('psgit sync against live PowerSync stack', () => {
       const supabaseEmail = process.env.SUPABASE_EMAIL ?? process.env.PSGIT_TEST_SUPABASE_EMAIL
       const supabasePassword =
         process.env.SUPABASE_PASSWORD ?? process.env.PSGIT_TEST_SUPABASE_PASSWORD
-      const endpoint = process.env.PSGIT_TEST_ENDPOINT ?? process.env.POWERSYNC_ENDPOINT
+      const endpoint = process.env.PSGIT_TEST_ENDPOINT ?? process.env.POWERSYNC_URL
 
       if (!supabaseAnonKey || !supabaseUrl || !supabaseEmail || !supabasePassword || !endpoint) {
         throw new Error('Missing Supabase credentials or PowerSync endpoint for live stack login.')
@@ -363,7 +363,7 @@ describeLive('psgit sync against live PowerSync stack', () => {
             SUPABASE_URL: liveStackConfig.supabaseUrl,
             SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
             SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
-            POWERSYNC_ENDPOINT: liveStackConfig.endpoint,
+            POWERSYNC_URL: liveStackConfig.endpoint,
           },
         },
       )
@@ -403,7 +403,7 @@ describeLive('psgit sync against live PowerSync stack', () => {
           SUPABASE_URL: liveStackConfig.supabaseUrl,
           SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
           SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
-          POWERSYNC_ENDPOINT: liveStackConfig.endpoint,
+          POWERSYNC_URL: liveStackConfig.endpoint,
           ...env,
         },
       },
@@ -421,7 +421,7 @@ describeLive('psgit sync against live PowerSync stack', () => {
           SUPABASE_URL: liveStackConfig.supabaseUrl,
           SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
           SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
-          POWERSYNC_ENDPOINT: liveStackConfig.endpoint,
+          POWERSYNC_URL: liveStackConfig.endpoint,
           ...env,
         },
       },

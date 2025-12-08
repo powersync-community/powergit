@@ -54,7 +54,7 @@ function applyDefaults(env) {
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0'
   }
   if (!env.VITE_POWERSYNC_ENDPOINT || env.VITE_POWERSYNC_ENDPOINT.trim().length === 0) {
-    env.VITE_POWERSYNC_ENDPOINT = 'http://127.0.0.1:55440'
+    env.VITE_POWERSYNC_ENDPOINT = env.POWERSYNC_URL ?? 'http://127.0.0.1:55440'
   }
   if (!env.POWERSYNC_DAEMON_DEVICE_URL || env.POWERSYNC_DAEMON_DEVICE_URL.trim().length === 0) {
     env.POWERSYNC_DAEMON_DEVICE_URL = `http://localhost:${env.VITE_PORT}/auth`

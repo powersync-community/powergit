@@ -70,7 +70,7 @@ function buildEnvFromProfile(profile) {
     profile?.powersync?.url ?? profile?.powersync?.endpoint
   if (powersyncEndpoint) {
     const endpoint = powersyncEndpoint
-    result.POWERSYNC_ENDPOINT = endpoint
+    result.POWERSYNC_URL = endpoint
     result.POWERSYNC_DAEMON_ENDPOINT = endpoint
     result.PSGIT_TEST_ENDPOINT = endpoint
   }
@@ -303,7 +303,7 @@ export function loadProfileEnvironment(options = {}) {
     ['SUPABASE_SERVICE_ROLE_KEY', 'PSGIT_TEST_SUPABASE_SERVICE_ROLE_KEY'],
     ['SUPABASE_EMAIL', 'PSGIT_TEST_SUPABASE_EMAIL'],
     ['SUPABASE_PASSWORD', 'PSGIT_TEST_SUPABASE_PASSWORD'],
-    ['POWERSYNC_ENDPOINT', 'PSGIT_TEST_ENDPOINT'],
+    ['POWERSYNC_URL', 'PSGIT_TEST_ENDPOINT'],
   ]
   for (const [target, fallback] of fallbackPairs) {
     if (!combinedEnv[target] && combinedEnv[fallback]) {

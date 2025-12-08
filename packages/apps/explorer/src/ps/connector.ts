@@ -36,7 +36,8 @@ export class Connector implements PowerSyncBackendConnector {
   private readonly getToken: () => Promise<string | null>
 
   constructor(options?: ConnectorOptions) {
-    const fallbackEndpoint = resolveEnv('VITE_POWERSYNC_ENDPOINT')
+    const fallbackEndpoint =
+      resolveEnv('VITE_POWERSYNC_ENDPOINT') ?? resolveEnv('POWERSYNC_URL')
     const fallbackToken = resolveEnv('VITE_POWERSYNC_TOKEN')
 
     this.endpoint = options?.endpoint?.trim() || fallbackEndpoint || null
@@ -50,7 +51,7 @@ export class Connector implements PowerSyncBackendConnector {
 
   async fetchCredentials(): Promise<PowerSyncCredentials> {
     if (!this.endpoint) {
-      throw new Error('PowerSync endpoint is not configured. Set VITE_POWERSYNC_ENDPOINT to continue.')
+      throw new Error('PowerSync endpoint is not configured. Set VITE_POWERSYNC_ENDPOINT (from POWERSYNC_URL) to continue.')
     }
     console.debug('[PowerSync][connector] resolving credentials for endpoint', this.endpoint)
     const token = await this.getToken()

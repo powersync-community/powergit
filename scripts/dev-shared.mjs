@@ -61,10 +61,10 @@ function resolveSupabaseAuthConfig(env) {
 function resolvePowerSyncEndpoint(env, explicit) {
   return firstNonEmpty(
     explicit,
-    env?.POWERSYNC_ENDPOINT,
+    env?.POWERSYNC_URL,
     env?.POWERSYNC_DAEMON_ENDPOINT,
     env?.PSGIT_TEST_ENDPOINT,
-    process.env.POWERSYNC_ENDPOINT,
+    process.env.POWERSYNC_URL,
     process.env.POWERSYNC_DAEMON_ENDPOINT,
     process.env.PSGIT_TEST_ENDPOINT,
   );
