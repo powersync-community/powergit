@@ -10,6 +10,13 @@ pnpm dev:stack:up
 pnpm dev
 ```
 
+## Run prod locally
+
+```bash
+pnpm install
+pnpm dev:prod   
+```
+
 > Requires Docker to be running for the PowerSync + Supabase stack.
 
 ## Daemonless GitHub Actions flow (prod-mode)
