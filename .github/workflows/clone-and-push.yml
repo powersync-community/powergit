@@ -66,6 +66,7 @@ jobs:
           POWERGIT_EMAIL: ${{ secrets.POWERGIT_EMAIL }}
           POWERGIT_PASSWORD: ${{ secrets.POWERGIT_PASSWORD }}
           POWERSYNC_DAEMON_PORT: 5030
+          POWERSYNC_SUPABASE_ONLY: "true"
         run: |
           if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
             echo "Missing Supabase configuration (SUPABASE_URL/SUPABASE_ANON_KEY)" && exit 1

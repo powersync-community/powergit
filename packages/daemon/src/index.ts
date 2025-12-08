@@ -22,6 +22,8 @@ import { resolveSessionPath } from './auth/index.js';
 import { createSupabaseFileStorage, resolveSupabaseSessionPath } from '@shared/core';
 import { PackStorage } from './storage.js';
 
+const SUPABASE_ONLY_MODE = (process.env.POWERSYNC_SUPABASE_ONLY ?? 'false').toLowerCase() === 'true';
+
 function normalizeAuthToken(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
@@ -289,6 +291,10 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     );
   }
 
+  if (SUPABASE_ONLY_MODE && !authEndpoint) {
+    authEndpoint = supabaseUrl ?? 'supabase-only';
+  }
+
   const supabaseStorage = createSupabaseFileStorage(supabaseAuthPath);
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
@@ -449,22 +455,39 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       const canStartWriter = writerUsesServiceRole || !isJwtExpired(authToken, 5_000);
       if (canStartWriter) {
         supabaseWriter.start();
+        if (!writerUsesServiceRole) {
+          console.info('[powersync-daemon] Supabase writer now using the authenticated Supabase session for writes');
+        }
       }
     }
     if (!packStorage) {
       try {
-        packStorage = new PackStorage(supabaseWriterClient, {
+        const storage = new PackStorage(supabaseWriterClient, {
           bucket: packBucket,
           baseUrl: supabaseUrl,
           signExpiresIn: Number.isFinite(packSignTtl) ? packSignTtl : 120,
         });
-        await packStorage.ensureBucket();
+        try {
+          await storage.ensureBucket();
+        } catch (error) {
+          const statusCode = (error as { status?: unknown; statusCode?: unknown })?.status ?? (error as { statusCode?: unknown })?.statusCode;
+          console.warn(
+            `[powersync-daemon] pack storage bucket check failed (${statusCode ?? 'unknown status'}); continuing. ` +
+              'Ensure the bucket exists and allows writes for this Supabase user or provide SUPABASE_SERVICE_ROLE_KEY.',
+          );
+        }
+        packStorage = storage;
       } catch (error) {
         console.error('[powersync-daemon] failed to initialize pack storage after login', error);
         packStorage = null;
       }
     }
-    scheduleConnect(`supabase-${source}`);
+    if (SUPABASE_ONLY_MODE) {
+      connected = true;
+      connectedAt = new Date();
+    } else {
+      scheduleConnect(`supabase-${source}`);
+    }
   };
 
   const loginEmail =
@@ -540,26 +563,24 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       );
     }
 
-    if (!writerUsesServiceRole) {
-      console.warn(
-        '[powersync-daemon] Supabase writer running in UNSAFE mode — using anon/public key for writes. Configure POWERSYNC_SUPABASE_SERVICE_ROLE_KEY to lock this down.',
-      );
-    }
-
     supabaseWriter = new SupabaseWriter({
       database: databaseInstance,
       client: supabaseWriterClient,
     });
     const hasActiveSession = Boolean(supabaseSession && authToken && !isJwtExpired(authToken, 5_000));
     const writerReady = writerUsesServiceRole || hasActiveSession;
+    const writerMode = writerUsesServiceRole ? 'service-role key' : hasActiveSession ? 'Supabase session' : 'anon/public key';
+    if (!writerUsesServiceRole) {
+      console.warn(
+        '[powersync-daemon] Supabase writer will use the authenticated Supabase session when available; provide SUPABASE_SERVICE_ROLE_KEY to enforce server-side permissions.',
+      );
+    }
     if (writerReady) {
       supabaseWriter.start();
-      console.info(
-        `[powersync-daemon] Supabase writer started (${writerUsesServiceRole ? 'service-role key' : 'anon/public key'})`,
-      );
+      console.info(`[powersync-daemon] Supabase writer started (${writerMode})`);
     } else {
       console.info(
-        `[powersync-daemon] Supabase writer initialised (${writerUsesServiceRole ? 'service-role key' : 'anon/public key'}) — waiting for Supabase auth before starting`,
+        `[powersync-daemon] Supabase writer initialised (${writerMode}) — waiting for Supabase auth before starting`,
       );
     }
   } else {
@@ -617,6 +638,15 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     },
     getAuthStatus: () => {
+      const supabaseOnly = SUPABASE_ONLY_MODE || !authEndpoint;
+      if (supabaseOnly && authToken) {
+        return {
+          status: 'ready',
+          token: authToken,
+          expiresAt: authExpiresAt,
+          context: buildAuthContext(),
+        };
+      }
       if (authEndpoint && authToken) {
         if (connected) {
           return {
