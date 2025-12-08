@@ -150,6 +150,8 @@ jobs:
           }
 
           const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+          const deadline = Date.now() + 120_000; // wait up to 2 minutes for writer to catch up
+          const pollDelayMs = 5_000;
 
           async function main() {
             const { error: loginError } = await supabase.auth.signInWithPassword({
@@ -159,21 +161,30 @@ jobs:
             if (loginError) throw new Error(`Supabase login failed: ${loginError.message}`);
 
             const tables = ['refs','commits','file_changes','objects'];
-            const counts = {};
-            for (const table of tables) {
-              const { count, error } = await supabase
-                .from(table)
-                .select('id', { count: 'exact', head: true })
-                .eq('org_id', process.env.ORG_ID)
-                .eq('repo_id', process.env.REPO_ID);
-              if (error) throw new Error(`Count query failed for ${table}: ${error.message}`);
-              counts[table] = count ?? 0;
+            let lastCounts = {};
+
+            while (Date.now() < deadline) {
+              const counts = {};
+              for (const table of tables) {
+                const { count, error } = await supabase
+                  .from(table)
+                  .select('id', { count: 'exact', head: true })
+                  .eq('org_id', process.env.ORG_ID)
+                  .eq('repo_id', process.env.REPO_ID);
+                if (error) throw new Error(`Count query failed for ${table}: ${error.message}`);
+                counts[table] = count ?? 0;
+              }
+              lastCounts = counts;
+              console.log('Supabase counts:', counts);
+              if ((counts.refs ?? 0) > 0 && (counts.commits ?? 0) > 0) {
+                return;
+              }
+              await new Promise((r) => setTimeout(r, pollDelayMs));
             }
 
-            console.log('Supabase counts:', counts);
-            if ((counts.refs ?? 0) === 0 || (counts.commits ?? 0) === 0) {
-              throw new Error(`Supabase replication incomplete (refs=${counts.refs}, commits=${counts.commits})`);
-            }
+            throw new Error(
+              `Supabase replication incomplete after waiting: refs=${lastCounts.refs ?? 0}, commits=${lastCounts.commits ?? 0}`,
+            );
           }
 
           main().catch((err) => {
