@@ -29,6 +29,9 @@
     "prod:supabase:db:reset": "pnpx supabase db reset",
     "prod:supabase:start": "pnpx supabase start",
     "prod:supabase:stop": "pnpx supabase stop",
+    "prod:supabase:functions:list": "pnpx supabase functions list",
+    "prod:supabase:functions:deploy": "pnpx supabase functions deploy",
+    "prod:supabase:functions:deploy:github-import": "pnpx supabase functions deploy github-import",
     "prod:migrate": "pnpx supabase db push",
     "prod:migrate:reset": "pnpx supabase db reset",
     "create:test-user": "node ./scripts/create-test-user.mjs"
