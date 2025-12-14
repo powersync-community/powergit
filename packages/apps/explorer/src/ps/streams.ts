@@ -148,6 +148,46 @@ export async function openOrg(ps: PowerSyncDatabase, orgId: string, repoIds: rea
   return subscriptions.flat()
 }
 
+export function useCoreStreams() {
+  const ps = usePowerSync() as PowerSyncDatabase | null
+
+  React.useEffect(() => {
+    if (!ps || isPowerSyncDisabled()) return undefined
+
+    let disposed = false
+    let active: SyncStreamSubscription[] = []
+
+    const task = async () => {
+      try {
+        const subscriptions = await subscribeToStreams(ps, [
+          { id: 'repositories', params: null },
+          { id: 'import_jobs', params: null },
+        ])
+
+        if (disposed) {
+          subscriptions.forEach((subscription) => subscription.unsubscribe())
+          return
+        }
+
+        active = subscriptions
+        if (import.meta.env.DEV) {
+          console.debug('[PowerSync][streams] core subscriptions active', active.length)
+        }
+      } catch (error) {
+        if (!disposed) console.error('[PowerSync] failed to subscribe core streams', error)
+      }
+    }
+
+    void task()
+
+    return () => {
+      disposed = true
+      active.forEach((subscription) => subscription.unsubscribe())
+      active = []
+    }
+  }, [ps])
+}
+
 export function useRepoStreams(orgId: string, repoId: string) {
   const ps = usePowerSync() as PowerSyncDatabase | null
 

@@ -19,7 +19,7 @@ export const PROFILE_DEFAULTS = {
   },
   prod: {
     powersync: {
-      url: 'https://68c3d3b001f94ee805c4ab52.powersync.journeyapps.com',
+      url: 'https://68f143d248cadbdadc3eef16.powersync.journeyapps.com',
     },
     supabase: {
       url: 'https://mcvxpinhffmvwutgsdua.supabase.co',
@@ -35,4 +35,3 @@ export function cloneProfileDefaults() {
   }
   return JSON.parse(JSON.stringify(PROFILE_DEFAULTS))
 }
-

@@ -28,37 +28,37 @@ export function useCollections(): Collections {
           database: db,
           table: refs,
         })
-      ) as unknown as CollectionImpl<Database['refs']>,
+      ) as CollectionImpl<Database['refs']>,
       commits: createCollection(
         powerSyncCollectionOptions<Database['commits']>({
           database: db,
           table: commits,
         })
-      ) as unknown as CollectionImpl<Database['commits']>,
+      ) as CollectionImpl<Database['commits']>,
       file_changes: createCollection(
         powerSyncCollectionOptions<Database['file_changes']>({
           database: db,
           table: file_changes,
         })
-      ) as unknown as CollectionImpl<Database['file_changes']>,
+      ) as CollectionImpl<Database['file_changes']>,
       objects: createCollection(
         powerSyncCollectionOptions<Database['objects']>({
           database: db,
           table: objects,
         })
-      ) as unknown as CollectionImpl<Database['objects']>,
+      ) as CollectionImpl<Database['objects']>,
       repositories: createCollection(
         powerSyncCollectionOptions<Database['repositories']>({
           database: db,
           table: repositories,
         })
-      ) as unknown as CollectionImpl<Database['repositories']>,
+      ) as CollectionImpl<Database['repositories']>,
       import_jobs: createCollection(
         powerSyncCollectionOptions<Database['import_jobs']>({
           database: db,
           table: import_jobs,
         })
-      ) as unknown as CollectionImpl<Database['import_jobs']>,
+      ) as CollectionImpl<Database['import_jobs']>,
     }
   }, [db])
 }

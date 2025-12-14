@@ -156,7 +156,7 @@ jobs:
           cd workdir
           git rev-parse HEAD
 
-      - name: Push via PowerSync edge
+      - name: Push
         env:
           POWERSYNC_EDGE_BASE_URL: ${{ github.event.inputs.edge_base_url || secrets.POWERSYNC_EDGE_BASE_URL }}
           POWERSYNC_ORG: ${{ github.event.inputs.org }}
