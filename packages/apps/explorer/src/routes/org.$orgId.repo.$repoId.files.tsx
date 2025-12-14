@@ -587,6 +587,7 @@ function Files() {
       const commitReady = readyCommits.has(selectedCommit)
       if (indexStatus !== 'ready' && !commitReady) {
         setViewerState({ status: 'indexing' })
+        setPendingPath(fullPath)
         return
       }
       setViewerState({ status: 'loading', path: fullPath })
