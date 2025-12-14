@@ -3,6 +3,7 @@ import * as React from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useLiveQuery } from '@tanstack/react-db'
 import { useCollections } from '@tsdb/collections'
+import { useStatus } from '@powersync/react'
 import { GithubImportCard } from '../components/GithubImportCard'
 import type { Database } from '@ps/schema'
 import { useTheme } from '../ui/theme-context'
@@ -25,6 +26,7 @@ type RepoSummary = {
 export function Home() {
   const { theme } = useTheme()
   const { refs, repositories } = useCollections()
+  const status = useStatus()
   const preferDaemon = React.useMemo(() => isDaemonPreferred(), [])
   type RefRow = Pick<Database['refs'], 'org_id' | 'repo_id' | 'name' | 'updated_at'>
   const { data: refRows = [] } = useLiveQuery(
@@ -126,6 +128,7 @@ export function Home() {
   const deleteButtonClasses = isDark
     ? 'inline-flex items-center justify-center rounded-xl border border-red-500/40 px-3 py-2 text-sm text-red-200 transition hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400'
     : 'inline-flex items-center justify-center rounded-xl border border-red-200 px-3 py-2 text-sm text-red-600 transition hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200'
+  const isSyncing = !status.hasSynced
 
   const handleDeleteRepo = React.useCallback(
     async (repo: RepoSummary) => {
@@ -158,7 +161,7 @@ export function Home() {
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-              Recently explored repositories
+              Explored repositories
             </h2>
           </div>
           <span className={repoBadge}>
@@ -171,10 +174,24 @@ export function Home() {
             className={`rounded-2xl border border-dashed px-6 py-8 text-center text-sm ${
               isDark ? 'border-slate-700 text-slate-400 bg-slate-900/60' : 'border-slate-200 text-slate-500 bg-white/80'
             }`}
+            data-testid="repositories-empty-state"
           >
-            <p>
-              Nothing here yet.
-            </p>
+            {isSyncing ? (
+              <div className="flex flex-col items-center justify-center gap-3">
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <span
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                    aria-hidden
+                  />
+                  {status.connected ? 'Syncing repositories…' : 'Waiting for PowerSync…'}
+                </span>
+                <p className="text-xs">
+                  This list updates automatically once the initial sync completes.
+                </p>
+              </div>
+            ) : (
+              <p>Nothing here yet.</p>
+            )}
           </div>
         ) : (
           <ul className="space-y-3">
