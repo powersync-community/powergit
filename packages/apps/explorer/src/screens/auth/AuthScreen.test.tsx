@@ -10,7 +10,7 @@ describe('AuthScreen', () => {
     vi.clearAllMocks()
   })
 
-  it('submits sign-in and sign-up requests', async () => {
+  it('submits sign-in, sign-up, and reset requests', async () => {
     const onSignIn = vi.fn().mockResolvedValue(undefined)
     const onSignUp = vi.fn().mockResolvedValue(undefined)
     const onResetPassword = vi.fn().mockResolvedValue(undefined)
@@ -33,7 +33,7 @@ describe('AuthScreen', () => {
       expect(onSignIn).toHaveBeenCalledWith(TEST_EMAIL, TEST_PASSWORD)
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create Account' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }))
 
     await waitFor(() => {
       expect(onSignUp).toHaveBeenCalledWith(TEST_EMAIL, TEST_PASSWORD)
@@ -69,4 +69,3 @@ describe('AuthScreen', () => {
     })
   })
 })
-
