@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeRepoList, resolveRepoTargets, resolveDefaultRepos } from './streams'
+import { normalizeRepoList, resolveRepoTargets, resolveDefaultRepos } from '../streams'
 
 describe('stream helpers', () => {
   it('normalizes repo ids', () => {

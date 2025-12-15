@@ -13,7 +13,7 @@ vi.mock('@supabase/supabase-js', () => ({
   })),
 }))
 
-import { isSupabaseConfigured, __resetSupabaseClientForTests } from './supabase.js'
+import { isSupabaseConfigured, __resetSupabaseClientForTests } from '../supabase.js'
 
 describe('supabase env fallbacks', () => {
   beforeEach(() => {

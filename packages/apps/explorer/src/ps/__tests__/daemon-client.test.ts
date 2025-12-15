@@ -19,10 +19,10 @@ afterEach(() => {
 describe('daemon-client', () => {
   it('returns null when daemon support disabled', async () => {
     vi.unstubAllEnvs()
-    vi.doMock('./supabase', () => ({
+    vi.doMock('../supabase', () => ({
       getAccessToken: vi.fn().mockResolvedValue('supabase-token'),
     }))
-    const mod = await import('./daemon-client')
+    const mod = await import('../daemon-client')
     expect(mod.isDaemonPreferred()).toBe(false)
     expect(await mod.getDaemonToken()).toBeNull()
     expect(await mod.obtainPowerSyncToken()).toBe('supabase-token')
@@ -39,11 +39,11 @@ describe('daemon-client', () => {
 
     globalThis.fetch = mockFetch
 
-    vi.doMock('./supabase', () => ({
+    vi.doMock('../supabase', () => ({
       getAccessToken: vi.fn().mockResolvedValue('supabase-token'),
     }))
 
-    const mod = await import('./daemon-client')
+    const mod = await import('../daemon-client')
     expect(mod.isDaemonPreferred()).toBe(true)
     await expect(mod.getDaemonToken()).resolves.toBe('daemon-token')
     await expect(mod.obtainPowerSyncToken()).resolves.toBe('daemon-token')
@@ -59,9 +59,9 @@ describe('daemon-client', () => {
 
     globalThis.fetch = mockFetch
 
-    vi.doMock('./supabase', () => ({ getAccessToken: vi.fn() }))
+    vi.doMock('../supabase', () => ({ getAccessToken: vi.fn() }))
 
-    const mod = await import('./daemon-client')
+    const mod = await import('../daemon-client')
     const status = await mod.fetchDaemonAuthStatus()
     expect(status).toEqual({ status: 'ready', token: 'nested-token', expiresAt: '2099-01-01T00:00:00Z', context: null })
     await expect(mod.getDaemonToken()).resolves.toBe('nested-token')
@@ -76,9 +76,9 @@ describe('daemon-client', () => {
     globalThis.fetch = mockFetch
 
     const getAccessToken = vi.fn().mockResolvedValue('supabase-token')
-    vi.doMock('./supabase', () => ({ getAccessToken }))
+    vi.doMock('../supabase', () => ({ getAccessToken }))
 
-    const mod = await import('./daemon-client')
+    const mod = await import('../daemon-client')
     expect(mod.isDaemonPreferred()).toBe(true)
     await expect(mod.getDaemonToken()).resolves.toBeNull()
     await expect(mod.obtainPowerSyncToken()).resolves.toBeNull()
@@ -90,9 +90,9 @@ describe('daemon-client', () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch
     globalThis.fetch = mockFetch
 
-    vi.doMock('./supabase', () => ({ getAccessToken: vi.fn() }))
+    vi.doMock('../supabase', () => ({ getAccessToken: vi.fn() }))
 
-    const mod = await import('./daemon-client')
+    const mod = await import('../daemon-client')
     expect(mod.isDaemonPreferred()).toBe(true)
     await expect(mod.notifyDaemonLogout()).resolves.toBe(true)
     expect(mockFetch).toHaveBeenCalledWith('http://127.0.0.1:8787/auth/logout', expect.objectContaining({ method: 'POST' }))
@@ -115,9 +115,9 @@ describe('daemon-client', () => {
 
     globalThis.fetch = mockFetch
 
-    vi.doMock('./supabase', () => ({ getAccessToken: vi.fn() }))
+    vi.doMock('../supabase', () => ({ getAccessToken: vi.fn() }))
 
-    const mod = await import('./daemon-client')
+    const mod = await import('../daemon-client')
     const status = await mod.fetchDaemonAuthStatus()
     expect(status?.status).toBe('pending')
     expect(mod.extractDeviceChallenge(status)).toEqual({
