@@ -361,8 +361,8 @@ function Commits() {
   const diffHeaderClass = 'flex flex-wrap items-center justify-between gap-2 text-xs font-medium'
   const diffStatsClass = isDark ? 'text-slate-400' : 'text-slate-500'
   const diffBlockClass = isDark
-    ? 'max-h-[60vh] overflow-auto rounded-xl border border-slate-700 bg-slate-950/70 font-mono text-[13px]'
-    : 'max-h-[60vh] overflow-auto rounded-xl border border-slate-200 bg-slate-900/5 font-mono text-[13px]'
+    ? 'max-h-[60vh] overflow-auto rounded-xl border border-slate-700 bg-slate-950 text-[13px] font-mono text-slate-100'
+    : 'max-h-[60vh] overflow-auto rounded-xl border border-slate-200 bg-slate-100 text-[13px] font-mono text-slate-800'
 
   const diffLineClass = (type: DiffLine['type']) => {
     const base = 'flex gap-3 px-4 py-1 whitespace-pre-wrap'
@@ -379,7 +379,17 @@ function Commits() {
     const state = diffStates[commitSha]
     if (!state || state.status === 'idle') return null
     if (state.status === 'loading') {
-      return <div className={diffContainerClass}>Loading diff…</div>
+      return (
+        <div className={diffContainerClass}>
+          <div className={`flex items-center gap-2 text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+            <span
+              className={`h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${isDark ? 'border-slate-400' : 'border-slate-500'}`}
+              aria-hidden
+            />
+            <span>Loading changes…</span>
+          </div>
+        </div>
+      )
     }
     if (state.status === 'error') {
       return <div className={diffContainerClass}>Failed to load diff: {state.message}</div>

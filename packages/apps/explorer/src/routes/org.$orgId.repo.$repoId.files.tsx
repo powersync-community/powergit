@@ -31,6 +31,54 @@ const DESKTOP_TREE_DEFAULT_WIDTH = 360
 
 const clampTreeWidth = (width: number) => Math.min(DESKTOP_TREE_MAX_WIDTH, Math.max(DESKTOP_TREE_MIN_WIDTH, width))
 
+let monacoThemesRegistered = false
+function ensureMonacoThemes(monaco: typeof import('monaco-editor')) {
+  if (monacoThemesRegistered) return
+  monaco.editor.defineTheme('powergit-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '6b7280' },
+      { token: 'keyword', foreground: '7dd3fc' },
+      { token: 'string', foreground: 'bbf7d0' },
+      { token: 'number', foreground: 'fca5a5' },
+      { token: 'type', foreground: 'c4b5fd' },
+    ],
+    colors: {
+      'editor.background': '#0f172a',
+      'editor.foreground': '#e2e8f0',
+      'editor.lineHighlightBackground': '#1e293b',
+      'editorLineNumber.foreground': '#64748b',
+      'editorGutter.background': '#0b1220',
+      'editor.selectionBackground': '#1e40af44',
+      'editor.inactiveSelectionBackground': '#1e293b66',
+      'editorCursor.foreground': '#f8fafc',
+    },
+  })
+  monaco.editor.defineTheme('powergit-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '94a3b8' },
+      { token: 'keyword', foreground: '2563eb' },
+      { token: 'string', foreground: '15803d' },
+      { token: 'number', foreground: 'b91c1c' },
+      { token: 'type', foreground: '6b21a8' },
+    ],
+    colors: {
+      'editor.background': '#f8fafc',
+      'editor.foreground': '#0f172a',
+      'editor.lineHighlightBackground': '#e2e8f0',
+      'editorLineNumber.foreground': '#94a3b8',
+      'editorGutter.background': '#f1f5f9',
+      'editor.selectionBackground': '#bfdbfe66',
+      'editor.inactiveSelectionBackground': '#e2e8f099',
+      'editorCursor.foreground': '#0f172a',
+    },
+  })
+  monacoThemesRegistered = true
+}
+
 const markdownSanitizeSchema: RehypeSanitizeOptions = {
   ...defaultSchema,
   tagNames: Array.from(
@@ -790,8 +838,8 @@ function Files() {
     ? 'inline-flex items-center gap-2 rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50'
     : 'inline-flex items-center gap-2 rounded-md bg-red-500 px-3 py-1 text-xs font-medium text-white hover:bg-red-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300'
   const blobHeaderClass = isDark
-    ? 'flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-700 bg-slate-900/70 px-4 py-2 text-xs text-slate-300'
-    : 'flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600'
+    ? 'flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-700 bg-slate-800 px-4 py-2 text-xs text-slate-200'
+    : 'flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-100 px-4 py-2 text-xs text-slate-700'
   const markdownProseClass = isDark
     ? 'markdown-prose markdown-prose-dark prose prose-invert max-w-none px-6 py-4'
     : 'markdown-prose markdown-prose-light prose max-w-none px-6 py-4'
@@ -829,20 +877,25 @@ function Files() {
       case 'indexing':
         return (
           <div className={neutralStatusCenterClass} data-testid="file-viewer-status">
-            {!hasPackMetadata ? (
-              <span className="flex items-center gap-2 text-sm">
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />
-                Waiting for pack metadata from the daemon…
-              </span>
-            ) : (
-              indexingLabel
-            )}
+            <span className="flex items-center gap-2 text-sm">
+              <span
+                className={`h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${isDark ? 'border-slate-400' : 'border-slate-500'}`}
+                aria-hidden
+              />
+              {hasPackMetadata ? indexingLabel : 'Waiting for pack metadata from the daemon…'}
+            </span>
           </div>
         )
       case 'loading':
         return (
           <div className={neutralStatusCenterClass} data-testid="file-viewer-status">
-            Loading {viewerState.path}…
+            <span className="flex items-center gap-2 text-sm">
+              <span
+                className={`h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${isDark ? 'border-slate-400' : 'border-slate-500'}`}
+                aria-hidden
+              />
+              Loading {viewerState.path}…
+            </span>
           </div>
         )
       case 'error':
@@ -893,6 +946,7 @@ function Files() {
       case 'ready': {
         const extension = viewerState.path.split('.').pop()?.toLowerCase()
         const isMarkdownFile = Boolean(extension && MARKDOWN_EXTENSIONS.has(extension))
+        const monacoTheme = isDark ? 'powergit-dark' : 'powergit-light'
         return (
           <div className="flex h-full flex-col">
             <div className={blobHeaderClass}>
@@ -937,8 +991,9 @@ function Files() {
                   <MonacoEditor
                     path={viewerState.path}
                     defaultLanguage={inferLanguage(viewerState.path)}
-                    theme={isDark ? 'vs-dark' : 'vs-light'}
+                    theme={monacoTheme}
                     value={viewerState.content}
+                    beforeMount={ensureMonacoThemes}
                     options={{
                       readOnly: true,
                       minimap: { enabled: false },
@@ -985,11 +1040,11 @@ function Files() {
     : 'rounded-lg border border-slate-200 px-3 py-4 text-xs text-slate-500'
   const treeEmptyClass = fallbackNoticeClass
   const viewerContainerClass = isDark
-    ? 'flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/70 text-slate-200 shadow-lg shadow-slate-900/40'
-    : 'flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm'
+    ? 'flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 text-slate-100 shadow-lg shadow-slate-900/40'
+    : 'flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 text-slate-800 shadow-sm'
   const viewerHeaderClass = isDark
-    ? 'border-b border-slate-700 bg-slate-900/60 px-4 py-2 text-sm font-medium text-slate-100 flex items-center justify-between gap-2'
-    : 'border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 flex items-center justify-between gap-2'
+    ? 'border-b border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-100 flex items-center justify-between gap-2'
+    : 'border-b border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-800 flex items-center justify-between gap-2'
 
   const selectedCommitReady = selectedCommit ? readyCommits.has(selectedCommit) : false
   const showFallbackTree = indexStatus !== 'ready' || !selectedCommitReady || !selectedCommit
