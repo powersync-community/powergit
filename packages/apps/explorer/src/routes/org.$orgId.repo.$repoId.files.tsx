@@ -414,14 +414,6 @@ function Files() {
     if (indexProgress.status === 'error') {
       return 'Repository content failed to sync.'
     }
-    if (indexProgress.total > 0) {
-      const processed = Math.min(indexProgress.processed, indexProgress.total)
-      const percent = Math.min(100, Math.round((processed / indexProgress.total) * 100))
-      return `Repository content is syncing (${processed}/${indexProgress.total}, ${percent}%)…`
-    }
-    if (indexProgress.processed > 0 && indexProgress.total === 0) {
-      return `Repository content is syncing (${indexProgress.processed})…`
-    }
     return 'Repository content is syncing…'
   }, [indexProgress])
   const indexingPercent = React.useMemo(() => {
