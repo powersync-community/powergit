@@ -38,6 +38,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           VITE_POWERSYNC_ENDPOINT: ${{ secrets.POWERSYNC_URL }}
           VITE_POWERSYNC_USE_DAEMON: "false"
+          GITHUB_PAGES: "true"
         run: pnpm --filter @app/explorer build:prod
 
       - name: Upload artifact
