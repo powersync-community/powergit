@@ -128,7 +128,8 @@ export function Home() {
   const deleteButtonClasses = isDark
     ? 'inline-flex items-center justify-center rounded-xl border border-red-500/40 px-3 py-2 text-sm text-red-200 transition hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400'
     : 'inline-flex items-center justify-center rounded-xl border border-red-200 px-3 py-2 text-sm text-red-600 transition hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200'
-  const isSyncing = !status.hasSynced
+  const showSyncPlaceholder = combinedSummaries.length === 0 && (!status.connected || status.connecting || !status.hasSynced)
+  const syncLabel = status.connected ? 'Syncing repositories…' : status.connecting ? 'Connecting to PowerSync…' : 'Waiting for PowerSync…'
 
   const handleDeleteRepo = React.useCallback(
     async (repo: RepoSummary) => {
@@ -176,14 +177,14 @@ export function Home() {
             }`}
             data-testid="repositories-empty-state"
           >
-            {isSyncing ? (
+            {showSyncPlaceholder ? (
               <div className="flex flex-col items-center justify-center gap-3">
                 <span className="flex items-center gap-2 text-sm font-medium">
                   <span
                     className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
                     aria-hidden
                   />
-                  {status.connected ? 'Syncing repositories…' : 'Waiting for PowerSync…'}
+                  {syncLabel}
                 </span>
                 <p className="text-xs">
                   This list updates automatically once the initial sync completes.

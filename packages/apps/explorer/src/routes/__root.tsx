@@ -121,8 +121,8 @@ const AppShell: React.FC = () => {
             <div>
               <h1 className="text-2xl font-bold">Git Explorer</h1>
               <div className={`text-sm ${headerSubText}`}>
-                {status.connected ? 'Connected' : 'Offline'}
-                {!status.hasSynced ? ' · syncing…' : ''}
+                {status.connected ? 'Connected' : status.connecting ? 'Connecting…' : 'Offline'}
+                {status.connected || status.connecting ? (!status.hasSynced ? ' · syncing…' : '') : ''}
               </div>
             </div>
             <div className="flex items-center gap-3">
