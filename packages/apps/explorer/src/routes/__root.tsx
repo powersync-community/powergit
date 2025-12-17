@@ -1,7 +1,7 @@
 
 import * as React from 'react'
-import { Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
-import { useStatus } from '@powersync/react'
+import { Outlet, useLocation, useNavigate } from '@tanstack/react-router'
+import { usePowerSync, useStatus } from '@powersync/react'
 import { signOut } from '@ps/supabase'
 import { isDaemonPreferred, notifyDaemonLogout } from '@ps/daemon-client'
 import { useSupabaseAuth } from '@ps/auth-context'
@@ -19,10 +19,30 @@ const AppShell: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { status: authStatus, session } = useSupabaseAuth()
+  const powerSync = usePowerSync()
   const status = useStatus()
   const [signingOut, setSigningOut] = React.useState(false)
   const preferDaemon = React.useMemo(() => isDaemonPreferred(), [])
   const { theme, toggleTheme } = useTheme()
+  const [storagePersisted, setStoragePersisted] = React.useState<boolean | null>(null)
+  const [sqliteConfig, setSqliteConfig] = React.useState<
+    | {
+        vfs: string | null
+        useWebWorker: boolean | null
+        multiTabs: boolean | null
+      }
+    | null
+  >()
+  const runtimeSupport = React.useMemo(() => {
+    if (typeof window === 'undefined') {
+      return { opfs: false, idb: false, secure: false, isolated: false }
+    }
+    const opfs = typeof navigator !== 'undefined' && Boolean(navigator.storage && 'getDirectory' in navigator.storage)
+    const idb = typeof indexedDB !== 'undefined'
+    const secure = window.isSecureContext
+    const isolated = typeof crossOriginIsolated === 'boolean' ? crossOriginIsolated : false
+    return { opfs, idb, secure, isolated }
+  }, [])
   const isAuthRoute = React.useMemo(() => {
     const path = location.pathname ?? ''
     return path.startsWith('/auth') || path.startsWith('/reset-password')
@@ -34,6 +54,58 @@ const AppShell: React.FC = () => {
       void navigate({ to: '/auth', replace: true })
     }
   }, [authStatus, isAuthRoute, pathname, navigate])
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!navigator.storage?.persisted) return
+    let cancelled = false
+    navigator.storage
+      .persisted()
+      .then((value) => {
+        if (!cancelled) setStoragePersisted(value)
+      })
+      .catch(() => {
+        if (!cancelled) setStoragePersisted(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const loadConfig = async () => {
+      try {
+        await powerSync.waitForReady()
+        const adapter = powerSync.database as unknown as {
+          getConfiguration?: () => unknown
+        }
+        const config = typeof adapter.getConfiguration === 'function' ? adapter.getConfiguration() : null
+        if (cancelled) return
+        if (!config) {
+          setSqliteConfig(null)
+          return
+        }
+        const configAny = config as {
+          vfs?: unknown
+          flags?: { useWebWorker?: unknown; enableMultiTabs?: unknown }
+        }
+        setSqliteConfig({
+          vfs: typeof configAny.vfs === 'string' ? configAny.vfs : null,
+          useWebWorker: typeof configAny.flags?.useWebWorker === 'boolean' ? configAny.flags.useWebWorker : null,
+          multiTabs: typeof configAny.flags?.enableMultiTabs === 'boolean' ? configAny.flags.enableMultiTabs : null,
+        })
+      } catch (_error) {
+        if (!cancelled) setSqliteConfig(null)
+      }
+    }
+
+    void loadConfig()
+
+    return () => {
+      cancelled = true
+    }
+  }, [powerSync])
 
   if (isAuthRoute) {
     return <Outlet />
@@ -108,7 +180,49 @@ const AppShell: React.FC = () => {
   const shellBackground = isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
   const headerSubText = isDark ? 'text-slate-400' : 'text-slate-500'
   const userText = isDark ? 'text-slate-400' : 'text-slate-500'
-  const navLink = isDark ? 'text-slate-200 hover:text-white' : 'text-slate-700 hover:text-slate-900'
+  const chipBase =
+    'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
+  const chipClass = (() => {
+    const persisted = storagePersisted
+    if (persisted === true) {
+      return isDark
+        ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100'
+        : 'border-emerald-500/30 bg-emerald-50 text-emerald-800'
+    }
+    if (persisted === false) {
+      return isDark
+        ? 'border-amber-400/40 bg-amber-500/10 text-amber-100'
+        : 'border-amber-500/30 bg-amber-50 text-amber-800'
+    }
+    return isDark
+      ? 'border-slate-700 bg-slate-900/70 text-slate-200'
+      : 'border-slate-200 bg-white text-slate-700 shadow-sm'
+  })()
+  const persistedLabel =
+    storagePersisted === true ? 'persisted' : storagePersisted === false ? 'best-effort' : 'unknown'
+  const backendLabel = (() => {
+    if (sqliteConfig === undefined) return 'DB'
+    const vfs = sqliteConfig?.vfs
+    if (vfs === 'OPFSCoopSyncVFS') return 'OPFS'
+    if (vfs === 'AccessHandlePoolVFS') return 'OPFS'
+    if (vfs === 'IDBBatchAtomicVFS') return 'IDB'
+    if (runtimeSupport.opfs) return 'OPFS'
+    if (runtimeSupport.idb) return 'IDB'
+    return 'Storage'
+  })()
+  const webWorkerLabel =
+    sqliteConfig?.useWebWorker == null ? 'unknown' : sqliteConfig.useWebWorker ? 'yes' : 'no'
+  const multiTabsLabel = sqliteConfig?.multiTabs == null ? 'unknown' : sqliteConfig.multiTabs ? 'yes' : 'no'
+  const storageTitle = [
+    `Backend: ${backendLabel}`,
+    `VFS: ${sqliteConfig?.vfs ?? 'unknown'}`,
+    `Persistence: ${persistedLabel}`,
+    `Web worker: ${webWorkerLabel}`,
+    `Multi-tabs: ${multiTabsLabel}`,
+    `Secure context: ${runtimeSupport.secure ? 'yes' : 'no'}`,
+    `Cross-origin isolated: ${runtimeSupport.isolated ? 'yes' : 'no'}`,
+    `Daemon mode: ${preferDaemon ? 'on' : 'off'}`,
+  ].join('\n')
   const signOutClasses = isDark
     ? 'inline-flex items-center rounded-md border border-slate-600 px-3 py-2 text-xs font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
     : 'inline-flex items-center rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
@@ -126,11 +240,9 @@ const AppShell: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <nav className="space-x-4 text-sm">
-                <Link to="/" className={`${navLink} [&.active]:font-semibold`}>
-                  Home
-                </Link>
-              </nav>
+              <span className={`${chipBase} ${chipClass}`} title={storageTitle} data-testid="storage-status">
+                {backendLabel} · {persistedLabel}
+              </span>
               <button
                 type="button"
                 onClick={toggleTheme}
