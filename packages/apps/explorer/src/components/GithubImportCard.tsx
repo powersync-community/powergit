@@ -145,7 +145,7 @@ export function GithubImportCard(): React.JSX.Element | null {
   const statusMessage = (() => {
     switch (status) {
       case 'idle':
-        return 'Paste a GitHub URL to import.'
+        return ''
       case 'submitting':
         return 'Queuing import…'
       case 'queued':

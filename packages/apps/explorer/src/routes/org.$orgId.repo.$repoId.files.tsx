@@ -5,7 +5,6 @@ import {
   IoGitBranchOutline,
   IoChevronForwardOutline,
   IoChevronDownOutline,
-  IoChevronBackOutline,
   IoDocumentTextOutline,
   IoRefreshOutline,
 } from 'react-icons/io5'
@@ -23,6 +22,8 @@ import rehypeRaw from 'rehype-raw'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeSanitize, { defaultSchema, type Options as RehypeSanitizeOptions } from 'rehype-sanitize'
 import { useTheme } from '../ui/theme-context'
+import { InlineSpinner } from '../components/InlineSpinner'
+import { BreadcrumbChips } from '../components/BreadcrumbChips'
 
 const MonacoEditor = React.lazy(() => import('@monaco-editor/react'))
 const decoder = 'TextDecoder' in globalThis ? new TextDecoder('utf-8') : null
@@ -289,7 +290,7 @@ function Files() {
   useRepoStreams(orgId, repoId)
   const fixture = useRepoFixture(orgId, repoId)
 
-  const { objects, refs, file_changes: fileChanges, repositories } = useCollections()
+  const { objects, refs, file_changes: fileChanges, repositories, import_jobs: importJobs } = useCollections()
 
   const { data: packRows = [] } = useLiveQuery(
     (q) =>
@@ -356,6 +357,82 @@ function Files() {
   const repoUrl = repositoryRows[0]?.repo_url ?? null
   const repoDefaultBranch = repositoryRows[0]?.default_branch ?? null
 
+  const { data: repositoryListRows = [] } = useLiveQuery(
+    (q) =>
+      q.from({ r: repositories }).select(({ r }) => ({
+        org_id: r.org_id,
+        repo_id: r.repo_id,
+      })),
+    [repositories],
+  ) as { data: Array<{ org_id: string | null; repo_id: string | null }> }
+
+  const { data: latestImportJobs = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ j: importJobs })
+        .where(({ j }) => eq(j.org_id, orgId))
+        .where(({ j }) => eq(j.repo_id, repoId))
+        .orderBy(({ j }) => j.updated_at ?? '', 'desc')
+        .limit(1)
+        .select(({ j }) => ({
+          id: j.id,
+          status: j.status,
+          error: j.error,
+          updated_at: j.updated_at,
+        })),
+    [importJobs, orgId, repoId],
+  ) as { data: Array<{ id: string; status: string | null; error: string | null; updated_at: string | null }> }
+
+  const orgMenuOptions = React.useMemo(() => {
+    const orgs = new Set<string>()
+    repositoryListRows.forEach((row) => {
+      if (row.org_id) orgs.add(row.org_id)
+    })
+    orgs.add(orgId)
+    return Array.from(orgs).map((org) => ({
+      key: org,
+      label: org,
+      onSelect: () => {
+        const repos = new Set<string>()
+        repositoryListRows.forEach((row) => {
+          if (row.org_id !== org) return
+          if (row.repo_id) repos.add(row.repo_id)
+        })
+        if (org === orgId) repos.add(repoId)
+        const nextRepoId = Array.from(repos).sort((a, b) => a.localeCompare(b))[0] ?? null
+        if (!nextRepoId) {
+          void navigate({ to: '/', search: { org } as any })
+          return
+        }
+        void navigate({
+          to: '/org/$orgId/repo/$repoId/files',
+          params: { orgId: org, repoId: nextRepoId } as any,
+          search: {} as any,
+        })
+      },
+    }))
+  }, [navigate, orgId, repositoryListRows])
+
+  const repoMenuOptions = React.useMemo(() => {
+    const repos = new Set<string>()
+    repositoryListRows.forEach((row) => {
+      if (row.org_id !== orgId) return
+      if (row.repo_id) repos.add(row.repo_id)
+    })
+    repos.add(repoId)
+    return Array.from(repos).map((repo) => ({
+      key: repo,
+      label: repo,
+      onSelect: () => {
+        void navigate({
+          to: '/org/$orgId/repo/$repoId/files',
+          params: { orgId, repoId: repo } as any,
+          search: {} as any,
+        })
+      },
+    }))
+  }, [navigate, orgId, repoId, repositoryListRows])
+
   const branchOptions = React.useMemo(() => {
     if (fixture?.branches?.length) {
       return fixture.branches
@@ -370,6 +447,43 @@ function Files() {
       .filter((row) => row.name && row.target_sha)
       .map((row) => ({ name: row.name!, target_sha: row.target_sha!, updated_at: row.updated_at }))
   }, [branchRows, fixture])
+
+  const branchMenuOptions = React.useMemo(
+    () =>
+      branchOptions.map((branch) => ({
+        key: branch.name,
+        label: branch.name.replace(/^refs\/heads\//, ''),
+        onSelect: () => {
+          void navigate({
+            to: '.',
+            search: { branch: branch.name } as any,
+          })
+        },
+      })),
+    [branchOptions, navigate],
+  )
+
+  const latestRepoUpdatedAt = React.useMemo(() => {
+    let latest: string | null = null
+    for (const branch of branchOptions) {
+      if (!branch.name || branch.name === 'HEAD') continue
+      const ts = branch.updated_at ?? null
+      if (!ts) continue
+      if (!latest || ts > latest) {
+        latest = ts
+      }
+    }
+    return latest
+  }, [branchOptions])
+
+  const formatTimestamp = React.useCallback((iso: string | null | undefined) => {
+    if (!iso) return null
+    try {
+      return new Date(iso).toLocaleString()
+    } catch {
+      return iso
+    }
+  }, [])
 
   const defaultBranch = React.useMemo(() => {
     if (branchOptions.length === 0) return null
@@ -453,6 +567,10 @@ function Files() {
   )
 
   const selectedBranchName = selectedBranch?.name ?? null
+  const selectedBranchLabel = React.useMemo(() => {
+    if (!selectedBranchName) return 'Branch'
+    return selectedBranchName.replace(/^refs\/heads\//, '')
+  }, [selectedBranchName])
 
   React.useEffect(() => {
     setPendingPath(loadStoredPath(selectedBranchName))
@@ -502,8 +620,42 @@ function Files() {
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null)
   const [viewerState, setViewerState] = React.useState<ViewerState>({ status: 'idle' })
   const [readyCommits, setReadyCommits] = React.useState<Set<string>>(() => new Set())
-  const [refreshStatus, setRefreshStatus] = React.useState<'idle' | 'loading' | 'queued' | 'error'>('idle')
+  const [refreshStatus, setRefreshStatus] = React.useState<'idle' | 'loading' | 'queued' | 'running' | 'done' | 'error'>('idle')
+  const [refreshJobId, setRefreshJobId] = React.useState<string | null>(null)
   const [refreshMessage, setRefreshMessage] = React.useState<string | null>(null)
+  const trackedJob = React.useMemo(() => {
+    const job = latestImportJobs[0] ?? null
+    if (!job) return null
+    if (refreshJobId && job.id !== refreshJobId) return null
+    return job
+  }, [latestImportJobs, refreshJobId])
+
+  React.useEffect(() => {
+    if (!trackedJob) return
+    const status = (trackedJob.status ?? '').toLowerCase()
+    if (status === 'queued' || status === 'pending') {
+      setRefreshStatus('queued')
+      setRefreshMessage(null)
+    } else if (status === 'running') {
+      setRefreshStatus('running')
+      setRefreshMessage(null)
+    } else if (status === 'success') {
+      setRefreshStatus('done')
+      setRefreshMessage(null)
+    } else if (status === 'error') {
+      setRefreshStatus('error')
+      setRefreshMessage(trackedJob.error ?? 'Refresh failed.')
+    }
+  }, [trackedJob?.status, trackedJob?.error])
+
+  React.useEffect(() => {
+    if (refreshStatus !== 'done') return
+    const timeout = window.setTimeout(() => {
+      setRefreshStatus('idle')
+      setRefreshMessage(null)
+    }, 2500)
+    return () => window.clearTimeout(timeout)
+  }, [refreshStatus])
 
   const rootLoaded = treeCache.has('')
   const rootLoading = loadingDirs.has('')
@@ -811,36 +963,6 @@ function Files() {
     ],
   )
 
-  const branchSelectorClass = isDark
-    ? 'rounded-md border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 shadow-inner transition focus:border-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
-    : 'rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-inner transition focus:border-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
-
-  const branchSelector = (
-    <select
-      value={selectedBranch?.name ?? ''}
-      onChange={(event) => {
-        const name = event.target.value
-        const next = branchOptions.find((opt) => opt.name === name) ?? null
-        setSelectedBranch(next)
-        setSelectedCommit(next?.target_sha ?? null)
-        setPendingPath(loadStoredPath(next?.name ?? null))
-        void navigate({
-          to: '.',
-          search: { branch: next?.name ?? undefined } as any,
-        })
-      }}
-      className={branchSelectorClass}
-      data-testid="branch-selector"
-    >
-      {branchOptions.length === 0 && <option value="">No branches</option>}
-      {branchOptions.map((branch) => (
-        <option key={branch.name ?? branch.target_sha} value={branch.name ?? ''}>
-          {(branch.name ?? '(unknown)').replace(/^refs\/heads\//, '')}
-        </option>
-      ))}
-    </select>
-  )
-
   const neutralStatusClass = isDark ? 'text-sm text-slate-400' : 'text-sm text-slate-600'
   const neutralStatusCenterClass = `flex items-center justify-center h-full ${neutralStatusClass}`
   const neutralStatusStackClass = `flex flex-col items-center justify-center h-full text-center gap-3 ${neutralStatusClass}`
@@ -899,10 +1021,7 @@ function Files() {
         return (
           <div className={neutralStatusCenterClass} data-testid="file-viewer-status">
             <span className="flex items-center gap-2 text-sm">
-              <span
-                className={`h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${isDark ? 'border-slate-400' : 'border-slate-500'}`}
-                aria-hidden
-              />
+              <InlineSpinner size={14} color={isDark ? '#cbd5f5' : '#0f172a'} aria-label="Indexing repository" />
               {hasPackMetadata ? indexingLabel : 'Waiting for pack metadata from the daemon…'}
             </span>
           </div>
@@ -911,10 +1030,7 @@ function Files() {
         return (
           <div className={neutralStatusCenterClass} data-testid="file-viewer-status">
             <span className="flex items-center gap-2 text-sm">
-              <span
-                className={`h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${isDark ? 'border-slate-400' : 'border-slate-500'}`}
-                aria-hidden
-              />
+              <InlineSpinner size={14} color={isDark ? '#cbd5f5' : '#0f172a'} aria-label="Loading file" />
               Loading {viewerState.path}…
             </span>
           </div>
@@ -1035,21 +1151,18 @@ function Files() {
     }
   })()
 
-  const branchIconClass = isDark ? 'text-slate-200 text-base' : 'text-slate-500 text-base'
   const commitButtonClass = isDark
     ? 'inline-flex items-center gap-2 rounded-full border border-emerald-400/60 px-4 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60'
     : 'inline-flex items-center gap-2 rounded-full border border-emerald-500/30 px-4 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
+  const repoUpdatedAtLabel = formatTimestamp(latestRepoUpdatedAt)
 
-  const toolbarClass = isDark
-    ? 'rounded-3xl border border-slate-700 bg-slate-900 px-6 py-5 text-slate-100 shadow-xl shadow-slate-900/40'
-    : 'rounded-3xl border border-slate-200 bg-white px-6 py-5 text-slate-900 shadow-lg'
-  const repoHeadingClass = isDark ? 'text-xl font-semibold tracking-tight text-white' : 'text-xl font-semibold tracking-tight text-slate-900'
-  const repoSlashClass = isDark ? 'text-slate-500' : 'text-slate-400'
-  const branchLabelClass = isDark ? 'text-xs uppercase tracking-wide text-slate-400' : 'text-xs uppercase tracking-wide text-slate-500'
   const refreshButtonClass = isDark
     ? 'inline-flex items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-xs font-medium text-slate-100 transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60'
     : 'inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
   const refreshStatusClass = isDark ? 'text-xs text-slate-300' : 'text-xs text-slate-600'
+  const repoUpdatedAtClass = isDark ? 'text-xs text-slate-400' : 'text-xs text-slate-500'
+  const refreshBusy = refreshStatus === 'loading' || refreshStatus === 'queued' || refreshStatus === 'running'
+  const refreshSpinnerColor = isDark ? '#34d399' : '#0f766e'
   const treePanelClass = isDark
     ? 'rounded-2xl border border-slate-700 bg-slate-900/70 text-slate-200 shadow-lg shadow-slate-900/40'
     : 'rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm'
@@ -1108,74 +1221,104 @@ function Files() {
     <div className="space-y-6" data-testid="file-explorer-view">
       <div className="mx-auto max-w-6xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className={repoHeadingClass}>
-            {orgId}
-            <span className={repoSlashClass}>/</span>
-            {repoId}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={refreshButtonClass}
-              onClick={async () => {
-                if (refreshStatus === 'loading') return
-                if (!repoUrl) {
-                  setRefreshStatus('error')
-                  setRefreshMessage('Repository URL is unavailable.')
-                  return
-                }
-                setRefreshStatus('loading')
-                setRefreshMessage('Dispatching refresh…')
-                try {
-                  const job = await requestGithubImport({
-                    repoUrl,
-                    orgId,
-                    repoId,
-                    branch: selectedBranch?.name ?? repoDefaultBranch ?? null,
-                  })
-                  setRefreshStatus(job.status === 'error' ? 'error' : 'queued')
-                  setRefreshMessage(
-                    job.status === 'error'
-                      ? job.error ?? 'Refresh failed.'
-                      : 'Refresh queued. New data will appear once the import finishes.',
-                  )
-                } catch (error) {
-                  const message = error instanceof Error ? error.message : 'Failed to refresh repository.'
-                  setRefreshStatus('error')
-                  setRefreshMessage(message)
-                }
-              }}
-              title="Re-run import for this repository"
-              data-testid="repo-refresh"
-              disabled={refreshStatus === 'loading'}
-            >
-              <IoRefreshOutline aria-hidden />
-              {refreshStatus === 'loading' ? 'Refreshing…' : 'Refresh'}
-            </button>
-            {refreshMessage ? <span className={refreshStatusClass}>{refreshMessage}</span> : null}
-          </div>
-        </div>
-        <div className={toolbarClass} data-testid="repo-toolbar">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex flex-wrap items-center gap-2 w-full">
-              <div className="flex items-center gap-1.5">
-                <IoGitBranchOutline className={branchIconClass} aria-hidden />
-                {branchSelector}
-              </div>
-              <div className="ml-auto">
-                {headCommitLabel ? (
-                  <Link
-                    to="/org/$orgId/repo/$repoId/commits"
-                    params={{ orgId, repoId }}
-                    search={{ branch: selectedBranch?.name ?? undefined }}
-                    className={commitButtonClass}
-                    data-testid="view-commits-button"
-                  >
-                    View commits · {headCommitLabel}
-                  </Link>
-                ) : null}
-              </div>
+          <BreadcrumbChips
+            isDark={isDark}
+            items={[
+              { key: 'home', label: 'Home', to: '/' },
+              {
+                key: `org-${orgId}`,
+                label: orgId,
+                menu: { placeholder: 'Filter orgs…', options: orgMenuOptions },
+              },
+              {
+                key: `repo-${repoId}`,
+                label: repoId,
+                menu: { placeholder: 'Filter repos…', options: repoMenuOptions },
+              },
+              {
+                key: `branch-${selectedBranchName ?? 'none'}`,
+                label: selectedBranchLabel,
+                icon: <IoGitBranchOutline aria-hidden />,
+                menu: { placeholder: 'Filter branches…', options: branchMenuOptions },
+                current: true,
+                testId: 'breadcrumb-branch',
+              },
+            ]}
+          />
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              {headCommitLabel ? (
+                <Link
+                  to="/org/$orgId/repo/$repoId/commits"
+                  params={{ orgId, repoId }}
+                  search={{ branch: selectedBranch?.name ?? undefined }}
+                  className={commitButtonClass}
+                  data-testid="view-commits-button"
+                >
+                  View commits · {headCommitLabel}
+                </Link>
+              ) : null}
+              <button
+                type="button"
+                className={refreshButtonClass}
+                onClick={async () => {
+                  if (refreshBusy) return
+                  if (!repoUrl) {
+                    setRefreshStatus('error')
+                    setRefreshMessage('Repository URL is unavailable.')
+                    return
+                  }
+                  setRefreshStatus('loading')
+                  setRefreshJobId(null)
+                  setRefreshMessage(null)
+                  try {
+                    const job = await requestGithubImport({
+                      repoUrl,
+                      orgId,
+                      repoId,
+                      branch: selectedBranch?.name ?? repoDefaultBranch ?? null,
+                    })
+                    setRefreshJobId(job.id ?? null)
+                    const initialStatus = (job.status ?? '').toLowerCase()
+                    if (initialStatus === 'error') {
+                      setRefreshStatus('error')
+                      setRefreshMessage(job.error ?? 'Refresh failed.')
+                    } else if (initialStatus === 'success') {
+                      setRefreshStatus('done')
+                    } else if (initialStatus === 'running') {
+                      setRefreshStatus('running')
+                    } else {
+                      setRefreshStatus('queued')
+                    }
+                  } catch (error) {
+                    const message = error instanceof Error ? error.message : 'Failed to refresh repository.'
+                    setRefreshStatus('error')
+                    setRefreshMessage(message)
+                  }
+                }}
+                title="Re-run import for this repository"
+                data-testid="repo-refresh"
+                disabled={refreshBusy}
+              >
+                {refreshBusy ? (
+                  <>
+                    <InlineSpinner size={12} color={refreshSpinnerColor} aria-label="Refreshing repository" />
+                    <span>Refreshing…</span>
+                  </>
+                ) : (
+                  <>
+                    <IoRefreshOutline aria-hidden />
+                    <span>Refresh</span>
+                  </>
+                )}
+              </button>
             </div>
+            {repoUpdatedAtLabel || (refreshStatus === 'error' && refreshMessage) ? (
+              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+                {repoUpdatedAtLabel ? <span className={repoUpdatedAtClass}>Updated {repoUpdatedAtLabel}</span> : null}
+                {refreshStatus === 'error' && refreshMessage ? <span className={refreshStatusClass}>{refreshMessage}</span> : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1240,10 +1383,7 @@ const FileTreePane = React.forwardRef<HTMLDivElement, FileTreePaneProps>(functio
 
   const waitingMessage = (
     <div className={`flex items-center gap-2 text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-      <span
-        className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
-        aria-hidden
-      />
+      <InlineSpinner size={12} color={isDark ? '#cbd5f5' : '#0f172a'} aria-label="Waiting for metadata" />
       <span>Waiting for pack metadata from the daemon…</span>
     </div>
   )
@@ -1480,7 +1620,7 @@ function DesktopView({ treeProps, viewerProps, isDark }: ExplorerViewProps) {
   )
 }
 
-function MobileView({ treeProps, viewerProps }: ExplorerViewProps) {
+function MobileView({ treeProps, viewerProps, isDark }: ExplorerViewProps) {
   const [panel, setPanel] = React.useState<'tree' | 'viewer'>('tree')
   const treeRef = React.useRef<HTMLDivElement | null>(null)
   const viewerRef = React.useRef<HTMLDivElement | null>(null)
@@ -1526,7 +1666,11 @@ function MobileView({ treeProps, viewerProps }: ExplorerViewProps) {
             <button
               type="button"
               onClick={() => setPanel('tree')}
-              className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600"
+              className={
+                isDark
+                  ? 'inline-flex items-center gap-1 rounded-md border border-slate-600 px-2 py-1 text-xs font-medium text-slate-100 bg-slate-800/80 hover:bg-slate-700/80'
+                  : 'inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50'
+              }
             >
               File explorer
             </button>
@@ -1540,7 +1684,10 @@ function MobileView({ treeProps, viewerProps }: ExplorerViewProps) {
 export { Files as FilesComponent }
 
 function inferLanguage(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase()
+  const filename = path.split('/').pop()?.toLowerCase() ?? ''
+  if (filename === 'dockerfile') return 'dockerfile'
+
+  const ext = filename.split('.').pop()?.toLowerCase()
   switch (ext) {
     case 'ts':
     case 'tsx':
@@ -1561,6 +1708,47 @@ function inferLanguage(path: string): string {
     case 'yml':
     case 'yaml':
       return 'yaml'
+    case 'rs':
+      return 'rust'
+    case 'go':
+      return 'go'
+    case 'py':
+      return 'python'
+    case 'rb':
+      return 'ruby'
+    case 'php':
+      return 'php'
+    case 'java':
+      return 'java'
+    case 'kt':
+    case 'kts':
+      return 'kotlin'
+    case 'swift':
+      return 'swift'
+    case 'c':
+    case 'h':
+      return 'c'
+    case 'cc':
+    case 'cpp':
+    case 'cxx':
+    case 'hpp':
+    case 'hh':
+      return 'cpp'
+    case 'cs':
+      return 'csharp'
+    case 'sh':
+    case 'bash':
+    case 'zsh':
+      return 'shell'
+    case 'ps1':
+      return 'powershell'
+    case 'sql':
+      return 'sql'
+    case 'graphql':
+    case 'gql':
+      return 'graphql'
+    case 'proto':
+      return 'proto'
     default:
       return 'plaintext'
   }

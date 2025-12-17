@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { IoRefreshOutline } from 'react-icons/io5'
+import { IoGitBranchOutline, IoRefreshOutline } from 'react-icons/io5'
 import { eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/react-db'
 import { diffLines } from 'diff'
@@ -11,9 +11,21 @@ import type { Database } from '@ps/schema'
 import { gitStore, type PackRow } from '@ps/git-store'
 import { requestGithubImport } from '@ps/daemon-client'
 import { useTheme } from '../ui/theme-context'
+import { InlineSpinner } from '../components/InlineSpinner'
+import { BreadcrumbChips } from '../components/BreadcrumbChips'
+
+type CommitsRouteSearch = {
+  branch?: string
+}
 
 export const Route = createFileRoute('/org/$orgId/repo/$repoId/commits' as any)({
   component: Commits,
+  validateSearch: (search: Record<string, unknown>): CommitsRouteSearch => ({
+    branch:
+      typeof search.branch === 'string' && search.branch.length > 0 && search.branch !== 'all'
+        ? search.branch
+        : undefined,
+  }),
 })
 
 const decoder = 'TextDecoder' in globalThis ? new TextDecoder('utf-8') : null
@@ -53,6 +65,9 @@ type CommitDiffState =
 
 function Commits() {
   const { orgId, repoId } = Route.useParams()
+  const { branch: branchParam } = Route.useSearch() as CommitsRouteSearch
+  const navigate = Route.useNavigate()
+  const branchFilter = branchParam ?? 'all'
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   useRepoStreams(orgId, repoId)
@@ -64,6 +79,7 @@ function Commits() {
     file_changes: fileChangesCollection,
     objects: objectsCollection,
     repositories,
+    import_jobs: importJobs,
   } = useCollections()
 
   const { data: liveCommits = [] } = useLiveQuery(
@@ -111,6 +127,82 @@ function Commits() {
   const repoUrl = repositoryRows[0]?.repo_url ?? null
   const repoDefaultBranch = repositoryRows[0]?.default_branch ?? null
 
+  const { data: repositoryListRows = [] } = useLiveQuery(
+    (q) =>
+      q.from({ r: repositories }).select(({ r }) => ({
+        org_id: r.org_id,
+        repo_id: r.repo_id,
+      })),
+    [repositories],
+  ) as { data: Array<{ org_id: string | null; repo_id: string | null }> }
+
+  const orgMenuOptions = React.useMemo(() => {
+    const orgs = new Set<string>()
+    repositoryListRows.forEach((row) => {
+      if (row.org_id) orgs.add(row.org_id)
+    })
+    orgs.add(orgId)
+    return Array.from(orgs).map((org) => ({
+      key: org,
+      label: org,
+      onSelect: () => {
+        const repos = new Set<string>()
+        repositoryListRows.forEach((row) => {
+          if (row.org_id !== org) return
+          if (row.repo_id) repos.add(row.repo_id)
+        })
+        if (org === orgId) repos.add(repoId)
+        const nextRepoId = Array.from(repos).sort((a, b) => a.localeCompare(b))[0] ?? null
+        if (!nextRepoId) {
+          void navigate({ to: '/', search: { org } as any })
+          return
+        }
+        void navigate({
+          to: '/org/$orgId/repo/$repoId/commits',
+          params: { orgId: org, repoId: nextRepoId } as any,
+          search: {} as any,
+        })
+      },
+    }))
+  }, [navigate, orgId, repositoryListRows])
+
+  const repoMenuOptions = React.useMemo(() => {
+    const repos = new Set<string>()
+    repositoryListRows.forEach((row) => {
+      if (row.org_id !== orgId) return
+      if (row.repo_id) repos.add(row.repo_id)
+    })
+    repos.add(repoId)
+    return Array.from(repos).map((repo) => ({
+      key: repo,
+      label: repo,
+      onSelect: () => {
+        void navigate({
+          to: '/org/$orgId/repo/$repoId/commits',
+          params: { orgId, repoId: repo } as any,
+          search: {} as any,
+        })
+      },
+    }))
+  }, [navigate, orgId, repoId, repositoryListRows])
+
+  const { data: latestImportJobs = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ j: importJobs })
+        .where(({ j }) => eq(j.org_id, orgId))
+        .where(({ j }) => eq(j.repo_id, repoId))
+        .orderBy(({ j }) => j.updated_at ?? '', 'desc')
+        .limit(1)
+        .select(({ j }) => ({
+          id: j.id,
+          status: j.status,
+          error: j.error,
+          updated_at: j.updated_at,
+        })),
+    [importJobs, orgId, repoId],
+  ) as { data: Array<{ id: string; status: string | null; error: string | null; updated_at: string | null }> }
+
   const packRows = useLiveQuery(
     (q) =>
       q
@@ -149,6 +241,34 @@ function Commits() {
       .map((branch) => ({ name: branch.name!, targetSha: branch.target_sha! }))
   }, [branchRows, fixture])
 
+  const branchMenuOptions = React.useMemo(
+    () => [
+      {
+        key: 'all',
+        label: 'All branches',
+        onSelect: () => {
+          void navigate({ to: '.', search: {} as any })
+        },
+      },
+      ...branchOptions.map((branch) => ({
+        key: branch.name,
+        label: branch.name.replace(/^refs\/heads\//, ''),
+        onSelect: () => {
+          void navigate({
+            to: '.',
+            search: { branch: branch.name } as any,
+          })
+        },
+      })),
+    ],
+    [branchOptions, navigate],
+  )
+
+  const selectedBranchLabel = React.useMemo(() => {
+    if (branchFilter === 'all') return 'All branches'
+    return branchFilter.replace(/^refs\/heads\//, '')
+  }, [branchFilter])
+
   const authorOptions = React.useMemo(() => {
     const labels = new Set<string>()
     for (const commit of commits) {
@@ -170,15 +290,48 @@ function Commits() {
     return map
   }, [repoFileChanges])
 
-  const [branchFilter, setBranchFilter] = React.useState<string>('all')
   const [authorFilter, setAuthorFilter] = React.useState<string>('all')
   const [fromDate, setFromDate] = React.useState<string>('')
   const [toDate, setToDate] = React.useState<string>('')
   const [expandedCommit, setExpandedCommit] = React.useState<string | null>(null)
   const [diffStates, setDiffStates] = React.useState<Record<string, CommitDiffState>>({})
   const [filterResetKey, setFilterResetKey] = React.useState(0)
-  const [refreshStatus, setRefreshStatus] = React.useState<'idle' | 'loading' | 'queued' | 'error'>('idle')
+  const [refreshStatus, setRefreshStatus] = React.useState<'idle' | 'loading' | 'queued' | 'running' | 'done' | 'error'>('idle')
+  const [refreshJobId, setRefreshJobId] = React.useState<string | null>(null)
   const [refreshMessage, setRefreshMessage] = React.useState<string | null>(null)
+  const trackedJob = React.useMemo(() => {
+    const job = latestImportJobs[0] ?? null
+    if (!job) return null
+    if (refreshJobId && job.id !== refreshJobId) return null
+    return job
+  }, [latestImportJobs, refreshJobId])
+
+  React.useEffect(() => {
+    if (!trackedJob) return
+    const status = (trackedJob.status ?? '').toLowerCase()
+    if (status === 'queued' || status === 'pending') {
+      setRefreshStatus('queued')
+      setRefreshMessage(null)
+    } else if (status === 'running') {
+      setRefreshStatus('running')
+      setRefreshMessage(null)
+    } else if (status === 'success') {
+      setRefreshStatus('done')
+      setRefreshMessage(null)
+    } else if (status === 'error') {
+      setRefreshStatus('error')
+      setRefreshMessage(trackedJob.error ?? 'Refresh failed.')
+    }
+  }, [trackedJob?.status, trackedJob?.error])
+
+  React.useEffect(() => {
+    if (refreshStatus !== 'done') return
+    const timeout = window.setTimeout(() => {
+      setRefreshStatus('idle')
+      setRefreshMessage(null)
+    }, 2500)
+    return () => window.clearTimeout(timeout)
+  }, [refreshStatus])
 
   const dateBounds = React.useMemo(() => {
     let min: string | null = null
@@ -195,11 +348,11 @@ function Commits() {
   }, [commits])
 
   React.useEffect(() => {
-    if (branchFilter === 'all') return
-    if (!branchOptions.some((branch) => branch.name === branchFilter)) {
-      setBranchFilter('all')
+    if (!branchParam) return
+    if (!branchOptions.some((branch) => branch.name === branchParam)) {
+      void navigate({ to: '.', search: {} as any, replace: true })
     }
-  }, [branchFilter, branchOptions])
+  }, [branchOptions, branchParam, navigate])
 
   React.useEffect(() => {
     if (authorFilter === 'all') return
@@ -217,14 +370,14 @@ function Commits() {
   }, [commits, expandedCommit])
 
   const resetFilters = React.useCallback(() => {
-    setBranchFilter('all')
+    void navigate({ to: '.', search: {} as any })
     setAuthorFilter('all')
     setFromDate('')
     setToDate('')
     setExpandedCommit(null)
     setDiffStates({})
     setFilterResetKey((prev) => prev + 1)
-  }, [])
+  }, [navigate])
 
   const filteredCommits = React.useMemo(() => {
     const branchMap = new Map(branchOptions.map((branch) => [branch.name, branch.targetSha]))
@@ -423,6 +576,9 @@ function Commits() {
     ? 'inline-flex cursor-pointer items-center rounded-full border border-slate-600 px-3 py-1 text-xs font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
     : 'inline-flex cursor-pointer items-center rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
 
+  const refreshBusy = refreshStatus === 'loading' || refreshStatus === 'queued' || refreshStatus === 'running'
+  const refreshSpinnerColor = isDark ? '#34d399' : '#0f766e'
+
   const diffContainerClass = isDark
     ? 'space-y-3 rounded-2xl border border-slate-700 bg-slate-900/60 p-4 text-sm'
     : 'space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm'
@@ -450,10 +606,7 @@ function Commits() {
       return (
         <div className={diffContainerClass}>
           <div className={`flex items-center gap-2 text-xs ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-            <span
-              className={`h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${isDark ? 'border-slate-400' : 'border-slate-500'}`}
-              aria-hidden
-            />
+            <InlineSpinner size={12} color={isDark ? '#cbd5f5' : '#0f172a'} aria-label="Loading changes" />
             <span>Loading changes…</span>
           </div>
         </div>
@@ -498,13 +651,38 @@ function Commits() {
   return (
     <div className="mx-auto max-w-6xl space-y-4" data-testid="commit-view">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h3 className={headingClass} data-testid="commit-heading">
-            {repoId} - Commits
-          </h3>
-          <span className={countClass}>
-            Showing {filteredCommits.length} commit{filteredCommits.length === 1 ? '' : 's'}
-          </span>
+        <div className="space-y-1">
+          <BreadcrumbChips
+            isDark={isDark}
+            items={[
+              { key: 'home', label: 'Home', to: '/' },
+              {
+                key: `org-${orgId}`,
+                label: orgId,
+                menu: { placeholder: 'Filter orgs…', options: orgMenuOptions },
+              },
+              {
+                key: `repo-${repoId}`,
+                label: repoId,
+                menu: { placeholder: 'Filter repos…', options: repoMenuOptions },
+              },
+              {
+                key: `branch-${branchFilter}`,
+                label: selectedBranchLabel,
+                icon: <IoGitBranchOutline aria-hidden />,
+                menu: { placeholder: 'Filter branches…', options: branchMenuOptions },
+              },
+              { key: 'commits', label: 'Commits', current: true },
+            ]}
+          />
+          <div className="flex flex-col gap-1">
+            <h3 className={headingClass} data-testid="commit-heading">
+              Commits
+            </h3>
+            <span className={countClass}>
+              Showing {filteredCommits.length} commit{filteredCommits.length === 1 ? '' : 's'}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -515,14 +693,15 @@ function Commits() {
                 : 'inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
             }
             onClick={async () => {
-              if (refreshStatus === 'loading') return
+              if (refreshBusy) return
               if (!repoUrl) {
                 setRefreshStatus('error')
                 setRefreshMessage('Repository URL is unavailable.')
                 return
               }
               setRefreshStatus('loading')
-              setRefreshMessage('Dispatching refresh…')
+              setRefreshJobId(null)
+              setRefreshMessage(null)
               try {
                 const job = await requestGithubImport({
                   repoUrl,
@@ -530,12 +709,18 @@ function Commits() {
                   repoId,
                   branch: branchFilter !== 'all' ? branchFilter : repoDefaultBranch,
                 })
-                setRefreshStatus(job.status === 'error' ? 'error' : 'queued')
-                setRefreshMessage(
-                  job.status === 'error'
-                    ? job.error ?? 'Refresh failed.'
-                    : 'Refresh queued. New data will appear once the import finishes.',
-                )
+                setRefreshJobId(job.id ?? null)
+                const initialStatus = (job.status ?? '').toLowerCase()
+                if (initialStatus === 'error') {
+                  setRefreshStatus('error')
+                  setRefreshMessage(job.error ?? 'Refresh failed.')
+                } else if (initialStatus === 'success') {
+                  setRefreshStatus('done')
+                } else if (initialStatus === 'running') {
+                  setRefreshStatus('running')
+                } else {
+                  setRefreshStatus('queued')
+                }
               } catch (error) {
                 const message = error instanceof Error ? error.message : 'Failed to refresh repository.'
                 setRefreshStatus('error')
@@ -544,12 +729,21 @@ function Commits() {
             }}
             title="Re-run import for this repository"
             data-testid="commit-refresh"
-            disabled={refreshStatus === 'loading'}
+            disabled={refreshBusy}
           >
-            <IoRefreshOutline aria-hidden />
-            {refreshStatus === 'loading' ? 'Refreshing…' : 'Refresh'}
+            {refreshBusy ? (
+              <>
+                <InlineSpinner size={12} color={refreshSpinnerColor} aria-label="Refreshing repository" />
+                <span>Refreshing…</span>
+              </>
+            ) : (
+              <>
+                <IoRefreshOutline aria-hidden />
+                <span>Refresh</span>
+              </>
+            )}
           </button>
-          {refreshMessage ? (
+          {refreshStatus === 'error' && refreshMessage ? (
             <span className={isDark ? 'text-xs text-slate-300' : 'text-xs text-slate-600'}>{refreshMessage}</span>
           ) : null}
         </div>
@@ -557,24 +751,6 @@ function Commits() {
 
       <div className={toolbarClass}>
         <div className="flex flex-wrap items-end gap-4">
-          <label className={controlGroupClass}>
-            <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Branch</span>
-            <select
-              key={`branch-${filterResetKey}`}
-              className={selectClass}
-              value={branchFilter}
-              onChange={(event) => setBranchFilter(event.target.value)}
-              data-testid="commit-branch-filter"
-            >
-              <option value="all">All branches</option>
-              {branchOptions.map((branch) => (
-                <option key={branch.name} value={branch.name}>
-                  {branch.name.replace(/^refs\/heads\//, '')}
-                </option>
-              ))}
-            </select>
-          </label>
-
           <label className={controlGroupClass}>
             <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Author</span>
             <select

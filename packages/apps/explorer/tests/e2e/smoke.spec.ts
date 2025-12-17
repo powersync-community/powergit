@@ -128,8 +128,8 @@ test.describe('Explorer repo lists', () => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/files`)
     await setRepoFixture(page, REPO_FIXTURE)
 
-    await expect(page.getByTestId('repo-toolbar')).toBeVisible()
-    await expect(page.getByTestId('branch-selector')).toBeVisible()
+    await expect(page.getByTestId('repo-refresh')).toBeVisible()
+    await expect(page.getByTestId('breadcrumb-branch')).toBeVisible()
     await expect(page.getByTestId('file-explorer-tree')).toContainText('Waiting for pack metadata from the daemon')
     await expect(page.getByTestId('file-viewer-placeholder')).toContainText('Select a file')
   })
@@ -195,15 +195,17 @@ test.describe('Explorer repo lists', () => {
     await page.goto(`${BASE_URL}/org/${ORG_ID}/repo/${REPO_ID}/files`)
     await setRepoFixture(page, REPO_FIXTURE)
 
-    const selector = page.getByTestId('branch-selector')
-    await expect(selector).toContainText('main')
-    await selector.selectOption('develop')
+    const branchChip = page.getByTestId('breadcrumb-branch')
+    await expect(branchChip).toContainText('main')
+    await branchChip.click()
+    await expect(page.getByPlaceholder('Filter branches…')).toBeVisible()
+    await page.getByRole('button', { name: 'develop' }).click()
     await expect(page).toHaveURL(/branch=develop/)
 
     await page.reload()
     await setRepoFixture(page, REPO_FIXTURE)
     await expect(page).toHaveURL(/branch=develop/)
-    await expect(page.getByTestId('branch-selector')).toHaveValue('develop')
+    await expect(page.getByTestId('breadcrumb-branch')).toContainText('develop')
   })
 
   test('renders file tree after reloading the explorer view', async ({ page }) => {
@@ -293,8 +295,10 @@ test.describe('Explorer repo lists', () => {
     await expect(tree).toContainText('README-main.md')
     await expect(tree).not.toContainText('FEATURE.md')
 
-    const selector = page.getByTestId('branch-selector')
-    await selector.selectOption('feature/api')
+    const branchChip = page.getByTestId('breadcrumb-branch')
+    await branchChip.click()
+    await expect(page.getByPlaceholder('Filter branches…')).toBeVisible()
+    await page.getByRole('button', { name: 'feature/api' }).click()
     await expect(tree).toContainText('FEATURE.md')
     await expect(tree).toContainText('api.ts')
     await expect(tree).not.toContainText('README-main.md')

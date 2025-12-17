@@ -104,3 +104,11 @@ button,
 a[role='button'] {
   cursor: pointer;
 }
+
+.breadcrumb-summary::-webkit-details-marker {
+  display: none;
+}
+
+.breadcrumb-summary::marker {
+  content: '';
+}

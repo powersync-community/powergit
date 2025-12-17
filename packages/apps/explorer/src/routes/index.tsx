@@ -9,9 +9,19 @@ import type { Database } from '@ps/schema'
 import { useTheme } from '../ui/theme-context'
 import { deleteDaemonRepo, isDaemonPreferred } from '@ps/daemon-client'
 import { IoTrashOutline } from 'react-icons/io5'
+import { InlineSpinner } from '../components/InlineSpinner'
+
+type HomeSearch = {
+  org?: string | null
+  sort?: 'updated' | 'name'
+}
 
 export const Route = createFileRoute('/' as any)({
   component: Home,
+  validateSearch: (search: Record<string, unknown>): HomeSearch => ({
+    org: typeof search.org === 'string' && search.org.length > 0 ? search.org : null,
+    sort: search.sort === 'name' ? 'name' : 'updated',
+  }),
 })
 
 type RepoSummary = {
@@ -23,9 +33,13 @@ type RepoSummary = {
   defaultBranch?: string | null
 }
 
+type SortKey = 'updated' | 'name'
+
 export function Home() {
   const { theme } = useTheme()
   const { refs, repositories } = useCollections()
+  const { org: orgFilter, sort: sortSearch } = Route.useSearch()
+  const navigate = Route.useNavigate()
   const status = useStatus()
   const preferDaemon = React.useMemo(() => isDaemonPreferred(), [])
   type RefRow = Pick<Database['refs'], 'org_id' | 'repo_id' | 'name' | 'updated_at'>
@@ -106,6 +120,28 @@ export function Home() {
     })
   }, [repoRows, refRows])
 
+  const [sortKey, setSortKey] = React.useState<SortKey>(sortSearch ?? 'updated')
+  React.useEffect(() => {
+    setSortKey(sortSearch ?? 'updated')
+  }, [sortSearch])
+
+  const sortedSummaries = React.useMemo(() => {
+    const list = [...combinedSummaries]
+    const filtered = orgFilter ? list.filter((repo) => repo.orgId === orgFilter) : list
+    if (sortKey === 'name') {
+      return filtered.sort((a, b) => `${a.orgId}/${a.repoId}`.localeCompare(`${b.orgId}/${b.repoId}`))
+    }
+    return filtered
+  }, [combinedSummaries, sortKey, orgFilter])
+
+  const orgOptions = React.useMemo(() => {
+    const ids = new Set<string>()
+    for (const repo of combinedSummaries) {
+      ids.add(repo.orgId)
+    }
+    return Array.from(ids).sort((a, b) => a.localeCompare(b))
+  }, [combinedSummaries])
+
   const formatTimestamp = React.useCallback((iso: string | null | undefined) => {
     if (!iso) return '–'
     try {
@@ -165,12 +201,60 @@ export function Home() {
               Explored repositories
             </h2>
           </div>
-          <span className={repoBadge}>
-            {combinedSummaries.length} repo{combinedSummaries.length === 1 ? '' : 's'}
-          </span>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide">
+              <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Org</span>
+              <select
+                value={orgFilter ?? ''}
+                onChange={(event) => {
+                  const nextOrg = event.target.value || null
+                  navigate({
+                    search: { org: nextOrg, sort: sortKey } as any,
+                    replace: true,
+                  } as any)
+                }}
+                className={
+                  isDark
+                    ? 'rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1 text-xs text-slate-100 shadow-sm focus:border-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
+                    : 'rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 shadow-sm focus:border-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
+                }
+              >
+                <option value="">All orgs</option>
+                {orgOptions.map((org) => (
+                  <option key={org} value={org}>
+                    {org}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs uppercase tracking-wide">
+              <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Sort</span>
+              <select
+                value={sortKey}
+                onChange={(event) => {
+                  const nextSort = event.target.value as SortKey
+                  navigate({
+                    search: { org: orgFilter ?? null, sort: nextSort } as any,
+                    replace: true,
+                  } as any)
+                }}
+                className={
+                  isDark
+                    ? 'rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1 text-xs text-slate-100 shadow-sm focus:border-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
+                    : 'rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 shadow-sm focus:border-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
+                }
+              >
+                <option value="updated">Latest updated</option>
+                <option value="name">Name</option>
+              </select>
+            </label>
+            <span className={repoBadge}>
+              {combinedSummaries.length} repo{combinedSummaries.length === 1 ? '' : 's'}
+            </span>
+          </div>
         </header>
 
-        {combinedSummaries.length === 0 ? (
+        {sortedSummaries.length === 0 ? (
           <div
             className={`rounded-2xl border border-dashed px-6 py-8 text-center text-sm ${
               isDark ? 'border-slate-700 text-slate-400 bg-slate-900/60' : 'border-slate-200 text-slate-500 bg-white/80'
@@ -180,10 +264,7 @@ export function Home() {
             {showSyncPlaceholder ? (
               <div className="flex flex-col items-center justify-center gap-3">
                 <span className="flex items-center gap-2 text-sm font-medium">
-                  <span
-                    className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
-                    aria-hidden
-                  />
+                  <InlineSpinner size={14} color={isDark ? '#cbd5f5' : '#0f172a'} aria-label="Syncing repositories" />
                   {syncLabel}
                 </span>
                 <p className="text-xs">
@@ -196,7 +277,7 @@ export function Home() {
           </div>
         ) : (
           <ul className="space-y-3">
-            {combinedSummaries.map((repo) => {
+            {sortedSummaries.map((repo) => {
               const branchCount = Array.from(repo.branches).filter((name) => name && name !== 'HEAD').length
               const repoKey = `${repo.orgId}/${repo.repoId}`
               return (
