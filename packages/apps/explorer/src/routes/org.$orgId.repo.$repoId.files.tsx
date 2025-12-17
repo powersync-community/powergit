@@ -86,12 +86,41 @@ function ensureMonacoThemes(monaco: typeof import('monaco-editor')) {
 const markdownSanitizeSchema: RehypeSanitizeOptions = {
   ...defaultSchema,
   tagNames: Array.from(
-    new Set([...(defaultSchema.tagNames ?? []), 'picture', 'source']),
+    new Set([...(defaultSchema.tagNames ?? []), 'picture', 'source', 'center']),
   ),
   attributes: {
     ...defaultSchema.attributes,
     p: [
       ...(defaultSchema.attributes?.p ?? []),
+      ['align', /^(left|right|center|justify)$/],
+    ],
+    div: [
+      ...(defaultSchema.attributes?.div ?? []),
+      ['align', /^(left|right|center|justify)$/],
+      ['className', 'string'],
+    ],
+    h1: [
+      ...(defaultSchema.attributes?.h1 ?? []),
+      ['align', /^(left|right|center|justify)$/],
+    ],
+    h2: [
+      ...(defaultSchema.attributes?.h2 ?? []),
+      ['align', /^(left|right|center|justify)$/],
+    ],
+    h3: [
+      ...(defaultSchema.attributes?.h3 ?? []),
+      ['align', /^(left|right|center|justify)$/],
+    ],
+    h4: [
+      ...(defaultSchema.attributes?.h4 ?? []),
+      ['align', /^(left|right|center|justify)$/],
+    ],
+    h5: [
+      ...(defaultSchema.attributes?.h5 ?? []),
+      ['align', /^(left|right|center|justify)$/],
+    ],
+    h6: [
+      ...(defaultSchema.attributes?.h6 ?? []),
       ['align', /^(left|right|center|justify)$/],
     ],
     a: [
@@ -101,9 +130,33 @@ const markdownSanitizeSchema: RehypeSanitizeOptions = {
     ],
     img: [
       ...(defaultSchema.attributes?.img ?? []),
+      ['alt', 'string'],
+      ['title', 'string'],
+      ['width', /^\d{1,5}%?$/],
+      ['height', /^\d{1,5}%?$/],
+      ['align', /^(left|right|center)$/],
+      ['srcSet', 'string'],
+      ['srcset', 'string'],
+      ['sizes', 'string'],
       ['loading', /^(lazy|eager|auto)$/],
       ['decoding', /^(sync|async|auto)$/],
       ['referrerpolicy', 'string'],
+    ],
+    details: [
+      ...(defaultSchema.attributes?.details ?? []),
+      ['open', true],
+    ],
+    td: [
+      ...(defaultSchema.attributes?.td ?? []),
+      ['colspan', /^\d{1,3}$/],
+      ['rowspan', /^\d{1,3}$/],
+      ['align', /^(left|right|center)$/],
+    ],
+    th: [
+      ...(defaultSchema.attributes?.th ?? []),
+      ['colspan', /^\d{1,3}$/],
+      ['rowspan', /^\d{1,3}$/],
+      ['align', /^(left|right|center)$/],
     ],
     picture: [
       ...(defaultSchema.attributes?.picture ?? []),
@@ -127,10 +180,6 @@ const markdownSanitizeSchema: RehypeSanitizeOptions = {
     ],
     span: [
       ...(defaultSchema.attributes?.span ?? []),
-      ['className', 'string'],
-    ],
-    div: [
-      ...(defaultSchema.attributes?.div ?? []),
       ['className', 'string'],
     ],
   },
