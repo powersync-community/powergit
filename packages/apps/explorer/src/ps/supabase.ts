@@ -54,6 +54,18 @@ function readEnv(name: string): string | null {
   return null
 }
 
+function resolveAppRedirectUrl(pathname: string): string | null {
+  if (typeof window === 'undefined') return null
+  const base = typeof import.meta.env.BASE_URL === 'string' ? import.meta.env.BASE_URL : '/'
+  const normalizedBase = base.replace(/\/$/, '')
+  const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`
+  try {
+    return new URL(`${normalizedBase}${normalizedPath}`, window.location.origin).toString()
+  } catch {
+    return null
+  }
+}
+
 function getInjectedSupabase(): SupabaseClient | null {
   const globalObj = globalThis as typeof globalThis & { __supabaseMock?: SupabaseClient }
   if (globalObj.__supabaseMock) {
@@ -116,14 +128,21 @@ export async function signInWithPassword(email: string, password: string): Promi
 export async function signUpWithPassword(email: string, password: string): Promise<void> {
   const client = getSupabase()
   if (!client) throw new Error('Supabase is not configured for this environment.')
-  const { error } = await client.auth.signUp({ email, password })
+  const emailRedirectTo =
+    readEnv('VITE_SUPABASE_EMAIL_REDIRECT_URL') ?? resolveAppRedirectUrl('/auth') ?? undefined
+  const { error } = await client.auth.signUp({
+    email,
+    password,
+    options: emailRedirectTo ? { emailRedirectTo } : undefined,
+  })
   if (error) throw error
 }
 
 export async function sendPasswordResetEmail(email: string): Promise<void> {
   const client = getSupabase()
   if (!client) throw new Error('Supabase is not configured for this environment.')
-  const redirectTo = readEnv('VITE_SUPABASE_RESET_REDIRECT_URL') ?? undefined
+  const redirectTo =
+    readEnv('VITE_SUPABASE_RESET_REDIRECT_URL') ?? resolveAppRedirectUrl('/reset-password') ?? undefined
   const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo })
   if (error) throw error
 }
