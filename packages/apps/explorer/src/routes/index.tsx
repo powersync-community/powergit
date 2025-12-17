@@ -279,6 +279,15 @@ export function Home() {
           <ul className="space-y-3">
             {sortedSummaries.map((repo) => {
               const branchCount = Array.from(repo.branches).filter((name) => name && name !== 'HEAD').length
+              const importStatus = repo.status?.trim().toLowerCase() ?? null
+              const branchSummary = (() => {
+                if (branchCount > 0) return `${branchCount} branch${branchCount === 1 ? '' : 'es'}`
+                if (importStatus === 'queued') return 'Import queued'
+                if (importStatus === 'running') return 'Importing…'
+                if (importStatus === 'error') return 'Import failed'
+                if (status.connected && !status.hasSynced) return 'Syncing…'
+                return 'Not synced yet'
+              })()
               const repoKey = `${repo.orgId}/${repo.repoId}`
               return (
                 <li key={repoKey} className={repoCardBase}>
@@ -289,8 +298,7 @@ export function Home() {
                       {repo.repoId}
                     </div>
                     <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {branchCount} branch{branchCount === 1 ? '' : 'es'} · Updated {formatTimestamp(repo.updatedAt)}
-                      {repo.status && repo.status !== 'ready' ? ` · ${repo.status}` : ''}
+                      {branchSummary} · Updated {formatTimestamp(repo.updatedAt)}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
