@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
 import path from 'node:path'
+import fs from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { loadProfileEnvironment } from '../../cli/src/profile-env.js'
 import { PROFILE_DEFAULTS } from '../../cli/src/profile-defaults-data.js'
@@ -185,9 +186,27 @@ const devServerPort = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 5783
 })()
 
+const ghPagesSpaFallback = () => {
+  let outDir = 'dist'
+  return {
+    name: 'powergit-gh-pages-spa-fallback',
+    apply: 'build' as const,
+    configResolved(config: { build: { outDir: string } }) {
+      outDir = config.build.outDir
+    },
+    async closeBundle() {
+      if (process.env.GITHUB_PAGES?.toLowerCase() !== 'true') return
+      const indexPath = path.resolve(outDir, 'index.html')
+      const notFoundPath = path.resolve(outDir, '404.html')
+      const html = await fs.readFile(indexPath)
+      await fs.writeFile(notFoundPath, html)
+    },
+  }
+}
+
 export default defineConfig({
   base: repoBase,
-  plugins: [wasm(), topLevelAwait(), react()],
+  plugins: [wasm(), topLevelAwait(), react(), ghPagesSpaFallback()],
   define: { 'process.env': {} },
   envPrefix: ['VITE_', 'POWERSYNC_', 'PSGIT_'],
   resolve: {
