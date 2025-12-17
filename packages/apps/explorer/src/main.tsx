@@ -11,7 +11,8 @@ import { NoticeProvider } from './ui/notices'
 import { StatusProvider } from './ui/status-provider'
 import './ps/git-store-config'
 
-const router = createRouter({ routeTree })
+const basepath = import.meta.env.BASE_URL !== '/' ? import.meta.env.BASE_URL.replace(/\/$/, '') : '/'
+const router = createRouter({ routeTree, basepath })
 declare module '@tanstack/react-router' { interface Register { router: typeof router } }
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
