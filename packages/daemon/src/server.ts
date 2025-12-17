@@ -125,6 +125,7 @@ export interface DaemonPushRequest {
   summary?: GitPushSummary | null;
   dryRun?: boolean;
   createdAt?: string | null;
+  repoUrl?: string | null;
 }
 
 export type DaemonPushResponse = PersistPushResult & { message?: string };
@@ -775,6 +776,8 @@ function normalizePushPayload(raw: unknown, packFromStream?: string): DaemonPush
   const summaryCandidate = (raw as any)?.summary ?? rawOptions?.summary;
   const summary = summaryCandidate && typeof summaryCandidate === 'object' ? (summaryCandidate as GitPushSummary) : null;
   const dryRunFlag = (raw as any)?.dryRun === true || (rawOptions?.dryRun === true);
+  const repoUrlOption = typeof (raw as any)?.repoUrl === 'string' ? ((raw as any).repoUrl as string) : undefined;
+  const repoUrl = typeof rawOptions?.repoUrl === 'string' ? (rawOptions.repoUrl as string) : repoUrlOption;
 
   return {
     updates,
@@ -783,6 +786,7 @@ function normalizePushPayload(raw: unknown, packFromStream?: string): DaemonPush
     packOid,
     summary,
     dryRun: dryRunFlag ? true : undefined,
+    repoUrl: repoUrl ? repoUrl.trim() : undefined,
   };
 }
 

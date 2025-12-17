@@ -160,6 +160,13 @@ export async function persistPush(database: PowerSyncDatabase, options: PersistP
   }
 
   const summary = sanitizePushSummary(options.summary);
+  const repoKey = `${orgId}/${repoId}`;
+  const existingRepo = await database.getOptional<{ repo_url?: string | null }>(
+    'SELECT repo_url FROM repositories WHERE id = ?',
+    [repoKey],
+  );
+  const providedRepoUrl = typeof options.repoUrl === 'string' ? options.repoUrl.trim() : '';
+  const resolvedRepoUrl = providedRepoUrl || existingRepo?.repo_url?.trim() || '';
 
   await database.writeTransaction(async (tx: WriteContext) => {
     if (storageKey && resolvedPackOid) {
@@ -183,8 +190,6 @@ export async function persistPush(database: PowerSyncDatabase, options: PersistP
       await applyCommitUpdates(tx, orgId, repoId, summary.commits);
     }
 
-    const repoKey = `${orgId}/${repoId}`;
-    const repoUrl = typeof options.repoUrl === 'string' ? options.repoUrl.trim() : '';
     const status = options.importStatus ?? (summary ? 'ready' : 'pushed');
     await tx.execute('DELETE FROM repositories WHERE id = ?', [repoKey]);
     await tx.execute(
@@ -194,7 +199,7 @@ export async function persistPush(database: PowerSyncDatabase, options: PersistP
         repoKey,
         orgId,
         repoId,
-        repoUrl || null,
+        resolvedRepoUrl || null,
         createdAt,
         createdAt,
         status,

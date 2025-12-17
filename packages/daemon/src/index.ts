@@ -995,6 +995,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
           packSizeBytes: packSize,
           summary: payload.summary ?? undefined,
           createdAt: payload.createdAt ?? undefined,
+          repoUrl: payload.repoUrl ?? undefined,
           dryRun: payload.dryRun === true,
         });
         if (result.packSize !== undefined) {

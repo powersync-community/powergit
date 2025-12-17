@@ -161,6 +161,7 @@ jobs:
           POWERSYNC_EDGE_BASE_URL: ${{ github.event.inputs.edge_base_url || secrets.POWERSYNC_EDGE_BASE_URL }}
           POWERSYNC_ORG: ${{ github.event.inputs.org }}
           POWERSYNC_REPO: ${{ github.event.inputs.repo }}
+          POWERSYNC_REPO_URL: ${{ github.event.inputs.git_url }}
           POWERSYNC_DAEMON_URL: http://127.0.0.1:5030
           POWERSYNC_DAEMON_AUTOSTART: "false"
         run: |

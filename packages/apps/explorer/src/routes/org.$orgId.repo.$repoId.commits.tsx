@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { createFileRoute } from '@tanstack/react-router'
+import { IoRefreshOutline } from 'react-icons/io5'
 import { eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/react-db'
 import { diffLines } from 'diff'
@@ -7,7 +8,8 @@ import { useRepoStreams } from '@ps/streams'
 import { useRepoFixture } from '@ps/test-fixture-bridge'
 import { useCollections } from '@tsdb/collections'
 import type { Database } from '@ps/schema'
-import { gitStore } from '@ps/git-store'
+import { gitStore, type PackRow } from '@ps/git-store'
+import { requestGithubImport } from '@ps/daemon-client'
 import { useTheme } from '../ui/theme-context'
 
 export const Route = createFileRoute('/org/$orgId/repo/$repoId/commits' as any)({
@@ -56,7 +58,13 @@ function Commits() {
   useRepoStreams(orgId, repoId)
   const fixture = useRepoFixture(orgId, repoId)
 
-  const { commits: commitsCollection, refs, file_changes: fileChangesCollection } = useCollections()
+  const {
+    commits: commitsCollection,
+    refs,
+    file_changes: fileChangesCollection,
+    objects: objectsCollection,
+    repositories,
+  } = useCollections()
 
   const { data: liveCommits = [] } = useLiveQuery(
     (q) =>
@@ -85,6 +93,53 @@ function Commits() {
         .where(({ f }) => eq(f.repo_id, repoId)),
     [fileChangesCollection, orgId, repoId],
   ) as { data: Array<FileChangeRow> }
+
+  const { data: repositoryRows = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ r: repositories })
+        .where(({ r }) => eq(r.org_id, orgId))
+        .where(({ r }) => eq(r.repo_id, repoId))
+        .orderBy(({ r }) => r.updated_at ?? '')
+        .limit(1)
+        .select(({ r }) => ({
+          repo_url: r.repo_url,
+          default_branch: r.default_branch,
+        })),
+    [repositories, orgId, repoId],
+  ) as { data: Array<{ repo_url: string | null; default_branch: string | null }> }
+  const repoUrl = repositoryRows[0]?.repo_url ?? null
+  const repoDefaultBranch = repositoryRows[0]?.default_branch ?? null
+
+  const packRows = useLiveQuery(
+    (q) =>
+      q
+        .from({ o: objectsCollection })
+        .where(({ o }) => eq(o.org_id, orgId))
+        .where(({ o }) => eq(o.repo_id, repoId))
+        .select(({ o }) => ({
+          id: o.id,
+          org_id: o.org_id,
+          repo_id: o.repo_id,
+          pack_oid: o.pack_oid,
+          storage_key: o.storage_key,
+          size_bytes: o.size_bytes,
+          pack_bytes: '', // populated by gitStore when downloading packs
+          created_at: o.created_at,
+        })),
+    [objectsCollection, orgId, repoId],
+  ) as { data: PackRow[] }
+  const packKey = React.useMemo(
+    () => packRows.data.map((row) => `${row.pack_oid}:${row.storage_key ?? ''}`).join('|'),
+    [packRows.data],
+  )
+
+  React.useEffect(() => {
+    if (!packRows.data.length) return
+    void gitStore.indexPacks(packRows.data).catch((error) => {
+      console.error('[gitStore] failed to index packs (commits view)', error)
+    })
+  }, [packKey, packRows.data])
 
   const commits = fixture?.commits?.length ? fixture.commits : liveCommits
   const branchOptions = React.useMemo(() => {
@@ -122,6 +177,8 @@ function Commits() {
   const [expandedCommit, setExpandedCommit] = React.useState<string | null>(null)
   const [diffStates, setDiffStates] = React.useState<Record<string, CommitDiffState>>({})
   const [filterResetKey, setFilterResetKey] = React.useState(0)
+  const [refreshStatus, setRefreshStatus] = React.useState<'idle' | 'loading' | 'queued' | 'error'>('idle')
+  const [refreshMessage, setRefreshMessage] = React.useState<string | null>(null)
 
   const dateBounds = React.useMemo(() => {
     let min: string | null = null
@@ -312,21 +369,31 @@ function Commits() {
 
   React.useEffect(() => {
     if (!expandedCommit) return
-    if (diffStates[expandedCommit]?.status === 'ready' || diffStates[expandedCommit]?.status === 'loading') return
+    const existingState = diffStates[expandedCommit]
+    if (existingState && existingState.status !== 'idle') {
+      return
+    }
 
     let cancelled = false
     setDiffStates((prev) => ({ ...prev, [expandedCommit]: { status: 'loading' } }))
 
-    loadCommitDiff(expandedCommit)
-      .then((files) => {
-        if (cancelled) return
-        setDiffStates((prev) => ({ ...prev, [expandedCommit]: { status: 'ready', files } }))
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error)
-        if (cancelled) return
-        setDiffStates((prev) => ({ ...prev, [expandedCommit]: { status: 'error', message } }))
-      })
+    const startDiff = async () => {
+      // Yield to the browser so the loading UI can paint before heavy diff work.
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+
+      loadCommitDiff(expandedCommit)
+        .then((files) => {
+          if (cancelled) return
+          setDiffStates((prev) => ({ ...prev, [expandedCommit]: { status: 'ready', files } }))
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          if (cancelled) return
+          setDiffStates((prev) => ({ ...prev, [expandedCommit]: { status: 'error', message } }))
+        })
+    }
+
+    void startDiff()
 
     return () => {
       cancelled = true
@@ -334,6 +401,7 @@ function Commits() {
   }, [expandedCommit, diffStates, loadCommitDiff])
 
   const headingClass = isDark ? 'text-lg font-semibold text-slate-100' : 'text-lg font-semibold text-slate-900'
+  const countClass = isDark ? 'text-xs text-slate-400' : 'text-xs text-slate-500'
   const itemClass = isDark
     ? 'space-y-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-sm text-slate-200 shadow-sm shadow-slate-900/40'
     : 'space-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm'
@@ -352,8 +420,8 @@ function Commits() {
     ? 'rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
     : 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
   const resetButtonClass = isDark
-    ? 'inline-flex items-center rounded-full border border-slate-600 px-3 py-1 text-xs font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
-    : 'inline-flex items-center rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
+    ? 'inline-flex cursor-pointer items-center rounded-full border border-slate-600 px-3 py-1 text-xs font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
+    : 'inline-flex cursor-pointer items-center rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
 
   const diffContainerClass = isDark
     ? 'space-y-3 rounded-2xl border border-slate-700 bg-slate-900/60 p-4 text-sm'
@@ -430,12 +498,61 @@ function Commits() {
   return (
     <div className="mx-auto max-w-6xl space-y-4" data-testid="commit-view">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className={headingClass} data-testid="commit-heading">
-          {repoId} - Commits
-        </h3>
-        <span className={isDark ? 'text-xs text-slate-400' : 'text-xs text-slate-500'}>
-          Showing {filteredCommits.length} commit{filteredCommits.length === 1 ? '' : 's'}
-        </span>
+        <div className="flex flex-col gap-1">
+          <h3 className={headingClass} data-testid="commit-heading">
+            {repoId} - Commits
+          </h3>
+          <span className={countClass}>
+            Showing {filteredCommits.length} commit{filteredCommits.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className={
+              isDark
+                ? 'inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-xs font-medium text-slate-100 transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60'
+                : 'inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
+            }
+            onClick={async () => {
+              if (refreshStatus === 'loading') return
+              if (!repoUrl) {
+                setRefreshStatus('error')
+                setRefreshMessage('Repository URL is unavailable.')
+                return
+              }
+              setRefreshStatus('loading')
+              setRefreshMessage('Dispatching refresh…')
+              try {
+                const job = await requestGithubImport({
+                  repoUrl,
+                  orgId,
+                  repoId,
+                  branch: branchFilter !== 'all' ? branchFilter : repoDefaultBranch,
+                })
+                setRefreshStatus(job.status === 'error' ? 'error' : 'queued')
+                setRefreshMessage(
+                  job.status === 'error'
+                    ? job.error ?? 'Refresh failed.'
+                    : 'Refresh queued. New data will appear once the import finishes.',
+                )
+              } catch (error) {
+                const message = error instanceof Error ? error.message : 'Failed to refresh repository.'
+                setRefreshStatus('error')
+                setRefreshMessage(message)
+              }
+            }}
+            title="Re-run import for this repository"
+            data-testid="commit-refresh"
+            disabled={refreshStatus === 'loading'}
+          >
+            <IoRefreshOutline aria-hidden />
+            {refreshStatus === 'loading' ? 'Refreshing…' : 'Refresh'}
+          </button>
+          {refreshMessage ? (
+            <span className={isDark ? 'text-xs text-slate-300' : 'text-xs text-slate-600'}>{refreshMessage}</span>
+          ) : null}
+        </div>
       </div>
 
       <div className={toolbarClass}>
@@ -532,7 +649,7 @@ function Commits() {
                   <button
                     type="button"
                     onClick={() => setExpandedCommit((prev) => (prev === sha ? null : sha))}
-                    className="inline-flex items-center rounded-full border border-slate-400/40 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                    className="inline-flex cursor-pointer items-center rounded-full border border-slate-400/40 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
                     data-testid="commit-diff-toggle"
                   >
                     {isExpanded ? 'Hide changes' : 'View changes'}

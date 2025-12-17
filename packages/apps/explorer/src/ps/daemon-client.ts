@@ -31,7 +31,20 @@ export function isGithubActionsImportEnabled(): boolean {
 
 export type ImportMode = 'daemon' | 'actions'
 
+declare global {
+  interface Window {
+    __powersyncImportModeOverride?: ImportMode
+  }
+}
+
 export function getImportMode(): ImportMode {
+  const override =
+    typeof window !== 'undefined'
+      ? (window as typeof window & { __powersyncImportModeOverride?: ImportMode }).__powersyncImportModeOverride
+      : undefined
+  if (override === 'daemon' || override === 'actions') {
+    return override
+  }
   if (daemonEnabled) return 'daemon'
   return actionsImportEnabled ? 'actions' : 'daemon'
 }

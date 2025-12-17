@@ -18,7 +18,6 @@ const AUTH_STATUS_POLL_INTERVAL_MS = Number.parseInt(process.env.POWERSYNC_DAEMO
 const DAEMON_START_HINT =
   'PowerSync daemon unreachable — start it with "pnpm --filter @svc/daemon start" or point POWERSYNC_DAEMON_URL at a running instance.'
 
-
 interface FetchRequest { sha: string; name: string }
 interface PushRequest { src: string; dst: string; force?: boolean }
 
@@ -27,6 +26,7 @@ let daemonClient: PowerSyncRemoteClient | null = null
 let daemonBaseUrl = normalizeBaseUrl(DEFAULT_DAEMON_URL)
 let fetchBatch: FetchRequest[] = []
 let pushBatch: PushRequest[] = []
+let cachedSourceRepoUrl: string | null | undefined
 
 const debugLogFile = process.env.POWERSYNC_HELPER_DEBUG_LOG
 
@@ -545,6 +545,7 @@ async function pushViaDaemon(
   extras: { summary?: GitPushSummary; packOid?: string } = {},
 ): Promise<PushPackResult> {
   await ensureDaemonReady()
+  const sourceRepoUrl = await resolveSourceRepoUrl()
 
   const targetUpdates = updates.map((update) => ({
     src: update.src && update.src.length > 0 ? update.src : ZERO_SHA,
@@ -555,6 +556,7 @@ async function pushViaDaemon(
   const options: Record<string, unknown> = {}
   if (extras.packOid) options.packOid = extras.packOid
   if (extras.summary) options.summary = extras.summary
+  if (sourceRepoUrl) options.repoUrl = sourceRepoUrl
 
   if (client) {
     return client.pushPack({
@@ -581,6 +583,10 @@ async function pushViaDaemon(
 
   if (extras.summary) {
     payload.summary = extras.summary
+  }
+
+  if (sourceRepoUrl) {
+    payload.repoUrl = sourceRepoUrl
   }
 
   if (Object.keys(options).length > 0) {
@@ -620,17 +626,51 @@ async function resolvePushUpdates(updates: PushRequest[]): Promise<PushRequest[]
 }
 
 async function resolveGitRef(ref: string): Promise<string> {
+  const output = await runGitCapture(['rev-parse', ref])
+  if (!output.trim()) {
+    throw new Error(`git rev-parse returned empty output for ${ref}`)
+  }
+  return output.trim()
+}
+
+async function resolveSourceRepoUrl(): Promise<string | null> {
+  if (cachedSourceRepoUrl !== undefined) return cachedSourceRepoUrl
+
+  const envUrl = [process.env.POWERSYNC_REPO_URL, process.env.POWERSYNC_SOURCE_REPO_URL]
+    .map((value) => (value ?? '').trim())
+    .find((value) => value.length > 0)
+  if (envUrl) {
+    cachedSourceRepoUrl = envUrl
+    return cachedSourceRepoUrl
+  }
+
+  const gitUrl = await readGitRemoteUrl()
+  cachedSourceRepoUrl = gitUrl
+  return cachedSourceRepoUrl
+}
+
+async function readGitRemoteUrl(): Promise<string | null> {
+  try {
+    const output = await runGitCapture(['config', '--get', 'remote.origin.url'])
+    const trimmed = output.trim()
+    return trimmed.length > 0 ? trimmed : null
+  } catch {
+    return null
+  }
+}
+
+async function runGitCapture(args: string[]): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const child = spawn('git', ['rev-parse', ref], { stdio: ['ignore', 'pipe', 'inherit'] })
+    const child = spawn('git', args, { stdio: ['ignore', 'pipe', 'inherit'] })
     let output = ''
     child.stdout.on('data', chunk => { output += chunk.toString('utf8') })
     child.stdout.on('error', reject)
     child.on('error', reject)
     child.on('close', code => {
       if (code === 0) {
-        resolve(output.trim())
+        resolve(output)
       } else {
-        reject(new Error(`git rev-parse failed for ${ref} (exit code ${code})`))
+        reject(new Error(`git ${args.join(' ')} failed (exit code ${code})`))
       }
     })
   })

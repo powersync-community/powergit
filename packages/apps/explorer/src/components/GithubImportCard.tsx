@@ -145,20 +145,20 @@ export function GithubImportCard(): React.JSX.Element | null {
   const statusMessage = (() => {
     switch (status) {
       case 'idle':
-        return 'Paste a GitHub URL to clone and explore it locally.'
+        return 'Paste a GitHub URL to import.'
       case 'submitting':
         return 'Queuing import…'
       case 'queued':
         return importMode === 'actions'
-          ? 'GitHub Actions workflow dispatched. Monitor the run in GitHub.'
-          : 'Import queued — waiting for the daemon to start cloning.'
+          ? 'GitHub Actions run queued.'
+          : 'Import queued — waiting for the daemon.'
       case 'running':
         return importMode === 'actions'
-          ? 'GitHub Actions run in progress. Data will sync when the workflow finishes.'
+          ? 'GitHub Actions run in progress.'
           : 'Cloning repository...'
       case 'success':
         return importMode === 'actions'
-          ? 'GitHub Actions dispatch accepted. Watch the workflow to see progress.'
+          ? 'Import finished.'
           : 'Repository imported successfully.'
       case 'error':
         return error ?? 'Import encountered an error.'
@@ -166,6 +166,19 @@ export function GithubImportCard(): React.JSX.Element | null {
         return null
     }
   })()
+  const actionsRunLink =
+    importMode === 'actions' && workflowUrl ? (
+      <a
+        href={workflowUrl}
+        target="_blank"
+        rel="noreferrer"
+        className={isDark ? 'text-emerald-200 underline' : 'text-emerald-700 underline'}
+      >
+        View GitHub Actions run →
+      </a>
+    ) : null
+  const displayStatus = (liveJob?.status ?? job?.status ?? status ?? 'queued').toUpperCase()
+  const canOpenRepo = status === 'success' && resultOrgId && resultRepoId
 
   const cardClasses = isDark
     ? 'rounded-3xl border border-slate-700 bg-slate-900 px-6 py-6 text-slate-100 shadow-xl shadow-slate-900/40'
@@ -212,13 +225,11 @@ export function GithubImportCard(): React.JSX.Element | null {
       </form>
 
       {statusMessage ? (
-        <div className={`${statusTextClass} mt-4`}>
-          {statusMessage}{' '}
+        <div className={`${statusTextClass} mt-4 flex flex-wrap items-center gap-3`}>
+          <span>{statusMessage}</span>
           {status === 'error' && error ? <span className="text-red-400">({error})</span> : null}
-          {status === 'success' && importMode === 'daemon' && resultOrgId && resultRepoId ? (
-            <span
-              className={`inline-flex items-center gap-1 ${isDark ? 'text-emerald-200' : 'text-emerald-600'}`}
-            >
+          {canOpenRepo ? (
+            <span className={`inline-flex items-center gap-1 ${isDark ? 'text-emerald-200' : 'text-emerald-600'}`}>
               <Link
                 to="/org/$orgId/repo/$repoId/files"
                 params={{ orgId: resultOrgId as string, repoId: resultRepoId as string }}
@@ -231,34 +242,20 @@ export function GithubImportCard(): React.JSX.Element | null {
               →
             </span>
           ) : null}
-          {importMode === 'actions' && workflowUrl ? (
-            <span className="ml-2 inline-flex items-center gap-1">
-              <a
-                href={workflowUrl}
-                target="_blank"
-                rel="noreferrer"
-                className={isDark ? 'text-emerald-200 underline' : 'text-emerald-700 underline'}
-              >
-                View GitHub Actions run
-              </a>
-              →
-            </span>
-          ) : null}
+          {actionsRunLink}
         </div>
       ) : null}
 
       {showSummary && resultOrgId && resultRepoId ? (
-        <div className={`${summaryContainerClass} mt-3`}>
+        <div className={`${summaryContainerClass} mt-3 flex flex-wrap items-center gap-2`} data-testid="import-summary">
           <div className={isDark ? 'font-medium text-slate-100' : 'font-medium text-slate-800'}>
             Target: <code>{resultOrgId}/{resultRepoId}</code>
           </div>
           <div className={isDark ? 'text-slate-200' : 'text-slate-600'}>
-            Status: <span className="uppercase tracking-wide text-[11px]">{job?.status ?? 'queued'}</span>
+            Status: <span className="uppercase tracking-wide text-[11px]">{displayStatus}</span>
           </div>
-          {importMode === 'actions' && workflowUrl ? (
-            <div className={isDark ? 'text-slate-200' : 'text-slate-600'}>
-              Workflow: <a className="underline" href={workflowUrl} target="_blank" rel="noreferrer">{workflowUrl}</a>
-            </div>
+          {resultDefaultBranch ? (
+            <div className={isDark ? 'text-slate-200' : 'text-slate-600'}>Branch: {resultDefaultBranch}</div>
           ) : null}
         </div>
       ) : null}

@@ -96,3 +96,11 @@
 .markdown-prose .hljs-punctuation {
   color: #f8f8f2;
 }
+
+button,
+[type='button'],
+[type='submit'],
+[type='reset'],
+a[role='button'] {
+  cursor: pointer;
+}

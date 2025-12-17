@@ -7,6 +7,7 @@ import {
   IoChevronDownOutline,
   IoChevronBackOutline,
   IoDocumentTextOutline,
+  IoRefreshOutline,
 } from 'react-icons/io5'
 import { eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/react-db'
@@ -15,6 +16,7 @@ import { useRepoFixture } from '@ps/test-fixture-bridge'
 import { useCollections } from '@tsdb/collections'
 import { gitStore, type PackRow, type TreeEntry } from '@ps/git-store'
 import type { Database } from '@ps/schema'
+import { requestGithubImport } from '@ps/daemon-client'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
@@ -287,7 +289,7 @@ function Files() {
   useRepoStreams(orgId, repoId)
   const fixture = useRepoFixture(orgId, repoId)
 
-  const { objects, refs, file_changes: fileChanges } = useCollections()
+  const { objects, refs, file_changes: fileChanges, repositories } = useCollections()
 
   const { data: packRows = [] } = useLiveQuery(
     (q) =>
@@ -336,6 +338,23 @@ function Files() {
         })),
     [fileChanges, orgId, repoId],
   ) as { data: Array<FileChangeRow> }
+
+  const { data: repositoryRows = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ r: repositories })
+        .where(({ r }) => eq(r.org_id, orgId))
+        .where(({ r }) => eq(r.repo_id, repoId))
+        .orderBy(({ r }) => r.updated_at ?? '')
+        .limit(1)
+        .select(({ r }) => ({
+          repo_url: r.repo_url,
+          default_branch: r.default_branch,
+        })),
+    [repositories, orgId, repoId],
+  ) as { data: Array<{ repo_url: string | null; default_branch: string | null }> }
+  const repoUrl = repositoryRows[0]?.repo_url ?? null
+  const repoDefaultBranch = repositoryRows[0]?.default_branch ?? null
 
   const branchOptions = React.useMemo(() => {
     if (fixture?.branches?.length) {
@@ -483,6 +502,8 @@ function Files() {
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null)
   const [viewerState, setViewerState] = React.useState<ViewerState>({ status: 'idle' })
   const [readyCommits, setReadyCommits] = React.useState<Set<string>>(() => new Set())
+  const [refreshStatus, setRefreshStatus] = React.useState<'idle' | 'loading' | 'queued' | 'error'>('idle')
+  const [refreshMessage, setRefreshMessage] = React.useState<string | null>(null)
 
   const rootLoaded = treeCache.has('')
   const rootLoading = loadingDirs.has('')
@@ -1025,6 +1046,10 @@ function Files() {
   const repoHeadingClass = isDark ? 'text-xl font-semibold tracking-tight text-white' : 'text-xl font-semibold tracking-tight text-slate-900'
   const repoSlashClass = isDark ? 'text-slate-500' : 'text-slate-400'
   const branchLabelClass = isDark ? 'text-xs uppercase tracking-wide text-slate-400' : 'text-xs uppercase tracking-wide text-slate-500'
+  const refreshButtonClass = isDark
+    ? 'inline-flex items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-xs font-medium text-slate-100 transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60'
+    : 'inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
+  const refreshStatusClass = isDark ? 'text-xs text-slate-300' : 'text-xs text-slate-600'
   const treePanelClass = isDark
     ? 'rounded-2xl border border-slate-700 bg-slate-900/70 text-slate-200 shadow-lg shadow-slate-900/40'
     : 'rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm'
@@ -1082,10 +1107,53 @@ function Files() {
   return (
     <div className="space-y-6" data-testid="file-explorer-view">
       <div className="mx-auto max-w-6xl space-y-4">
-        <div className={repoHeadingClass}>
-          {orgId}
-          <span className={repoSlashClass}>/</span>
-          {repoId}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className={repoHeadingClass}>
+            {orgId}
+            <span className={repoSlashClass}>/</span>
+            {repoId}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={refreshButtonClass}
+              onClick={async () => {
+                if (refreshStatus === 'loading') return
+                if (!repoUrl) {
+                  setRefreshStatus('error')
+                  setRefreshMessage('Repository URL is unavailable.')
+                  return
+                }
+                setRefreshStatus('loading')
+                setRefreshMessage('Dispatching refresh…')
+                try {
+                  const job = await requestGithubImport({
+                    repoUrl,
+                    orgId,
+                    repoId,
+                    branch: selectedBranch?.name ?? repoDefaultBranch ?? null,
+                  })
+                  setRefreshStatus(job.status === 'error' ? 'error' : 'queued')
+                  setRefreshMessage(
+                    job.status === 'error'
+                      ? job.error ?? 'Refresh failed.'
+                      : 'Refresh queued. New data will appear once the import finishes.',
+                  )
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : 'Failed to refresh repository.'
+                  setRefreshStatus('error')
+                  setRefreshMessage(message)
+                }
+              }}
+              title="Re-run import for this repository"
+              data-testid="repo-refresh"
+              disabled={refreshStatus === 'loading'}
+            >
+              <IoRefreshOutline aria-hidden />
+              {refreshStatus === 'loading' ? 'Refreshing…' : 'Refresh'}
+            </button>
+            {refreshMessage ? <span className={refreshStatusClass}>{refreshMessage}</span> : null}
+          </div>
         </div>
         <div className={toolbarClass} data-testid="repo-toolbar">
           <div className="flex flex-wrap items-center gap-3">
