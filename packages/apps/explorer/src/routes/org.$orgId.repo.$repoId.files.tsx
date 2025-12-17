@@ -24,6 +24,7 @@ import rehypeSanitize, { defaultSchema, type Options as RehypeSanitizeOptions } 
 import { useTheme } from '../ui/theme-context'
 import { InlineSpinner } from '../components/InlineSpinner'
 import { BreadcrumbChips } from '../components/BreadcrumbChips'
+import { RelativeTime } from '../components/RelativeTime'
 
 const MonacoEditor = React.lazy(() => import('@monaco-editor/react'))
 const decoder = 'TextDecoder' in globalThis ? new TextDecoder('utf-8') : null
@@ -475,15 +476,6 @@ function Files() {
     }
     return latest
   }, [branchOptions])
-
-  const formatTimestamp = React.useCallback((iso: string | null | undefined) => {
-    if (!iso) return null
-    try {
-      return new Date(iso).toLocaleString()
-    } catch {
-      return iso
-    }
-  }, [])
 
   const defaultBranch = React.useMemo(() => {
     if (branchOptions.length === 0) return null
@@ -1154,13 +1146,12 @@ function Files() {
   const commitButtonClass = isDark
     ? 'inline-flex items-center gap-2 rounded-full border border-emerald-400/60 px-4 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60'
     : 'inline-flex items-center gap-2 rounded-full border border-emerald-500/30 px-4 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
-  const repoUpdatedAtLabel = formatTimestamp(latestRepoUpdatedAt)
 
   const refreshButtonClass = isDark
     ? 'inline-flex items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-xs font-medium text-slate-100 transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60'
     : 'inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
   const refreshStatusClass = isDark ? 'text-xs text-slate-300' : 'text-xs text-slate-600'
-  const repoUpdatedAtClass = isDark ? 'text-xs text-slate-400' : 'text-xs text-slate-500'
+  const repoUpdatedAtClass = isDark ? 'text-[11px] text-slate-400' : 'text-[11px] text-slate-500'
   const refreshBusy = refreshStatus === 'loading' || refreshStatus === 'queued' || refreshStatus === 'running'
   const refreshSpinnerColor = isDark ? '#34d399' : '#0f766e'
   const treePanelClass = isDark
@@ -1220,7 +1211,7 @@ function Files() {
   return (
     <div className="space-y-6" data-testid="file-explorer-view">
       <div className="mx-auto max-w-6xl space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
           <BreadcrumbChips
             isDark={isDark}
             items={[
@@ -1245,79 +1236,82 @@ function Files() {
               },
             ]}
           />
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-2">
-              {headCommitLabel ? (
-                <Link
-                  to="/org/$orgId/repo/$repoId/commits"
-                  params={{ orgId, repoId }}
-                  search={{ branch: selectedBranch?.name ?? undefined }}
-                  className={commitButtonClass}
-                  data-testid="view-commits-button"
-                >
-                  View commits · {headCommitLabel}
-                </Link>
-              ) : null}
-              <button
-                type="button"
-                className={refreshButtonClass}
-                onClick={async () => {
-                  if (refreshBusy) return
-                  if (!repoUrl) {
-                    setRefreshStatus('error')
-                    setRefreshMessage('Repository URL is unavailable.')
-                    return
-                  }
-                  setRefreshStatus('loading')
-                  setRefreshJobId(null)
-                  setRefreshMessage(null)
-                  try {
-                    const job = await requestGithubImport({
-                      repoUrl,
-                      orgId,
-                      repoId,
-                      branch: selectedBranch?.name ?? repoDefaultBranch ?? null,
-                    })
-                    setRefreshJobId(job.id ?? null)
-                    const initialStatus = (job.status ?? '').toLowerCase()
-                    if (initialStatus === 'error') {
-                      setRefreshStatus('error')
-                      setRefreshMessage(job.error ?? 'Refresh failed.')
-                    } else if (initialStatus === 'success') {
-                      setRefreshStatus('done')
-                    } else if (initialStatus === 'running') {
-                      setRefreshStatus('running')
-                    } else {
-                      setRefreshStatus('queued')
-                    }
-                  } catch (error) {
-                    const message = error instanceof Error ? error.message : 'Failed to refresh repository.'
-                    setRefreshStatus('error')
-                    setRefreshMessage(message)
-                  }
-                }}
-                title="Re-run import for this repository"
-                data-testid="repo-refresh"
-                disabled={refreshBusy}
+          <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+            {headCommitLabel ? (
+              <Link
+                to="/org/$orgId/repo/$repoId/commits"
+                params={{ orgId, repoId }}
+                search={{ branch: selectedBranch?.name ?? undefined }}
+                className={commitButtonClass}
+                data-testid="view-commits-button"
               >
-                {refreshBusy ? (
-                  <>
-                    <InlineSpinner size={12} color={refreshSpinnerColor} aria-label="Refreshing repository" />
-                    <span>Refreshing…</span>
-                  </>
-                ) : (
-                  <>
-                    <IoRefreshOutline aria-hidden />
-                    <span>Refresh</span>
-                  </>
-                )}
-              </button>
-            </div>
-            {repoUpdatedAtLabel || (refreshStatus === 'error' && refreshMessage) ? (
-              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
-                {repoUpdatedAtLabel ? <span className={repoUpdatedAtClass}>Updated {repoUpdatedAtLabel}</span> : null}
-                {refreshStatus === 'error' && refreshMessage ? <span className={refreshStatusClass}>{refreshMessage}</span> : null}
-              </div>
+                View commits · {headCommitLabel}
+              </Link>
+            ) : null}
+            <button
+              type="button"
+              className={refreshButtonClass}
+              onClick={async () => {
+                if (refreshBusy) return
+                if (!repoUrl) {
+                  setRefreshStatus('error')
+                  setRefreshMessage('Repository URL is unavailable.')
+                  return
+                }
+                setRefreshStatus('loading')
+                setRefreshJobId(null)
+                setRefreshMessage(null)
+                try {
+                  const job = await requestGithubImport({
+                    repoUrl,
+                    orgId,
+                    repoId,
+                    branch: selectedBranch?.name ?? repoDefaultBranch ?? null,
+                  })
+                  setRefreshJobId(job.id ?? null)
+                  const initialStatus = (job.status ?? '').toLowerCase()
+                  if (initialStatus === 'error') {
+                    setRefreshStatus('error')
+                    setRefreshMessage(job.error ?? 'Refresh failed.')
+                  } else if (initialStatus === 'success') {
+                    setRefreshStatus('done')
+                  } else if (initialStatus === 'running') {
+                    setRefreshStatus('running')
+                  } else {
+                    setRefreshStatus('queued')
+                  }
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : 'Failed to refresh repository.'
+                  setRefreshStatus('error')
+                  setRefreshMessage(message)
+                }
+              }}
+              title="Re-run import for this repository"
+              data-testid="repo-refresh"
+              disabled={refreshBusy}
+            >
+              {refreshBusy ? (
+                <>
+                  <InlineSpinner size={12} color={refreshSpinnerColor} aria-label="Refreshing repository" />
+                  <span>Refreshing…</span>
+                </>
+              ) : (
+                <>
+                  <IoRefreshOutline aria-hidden />
+                  <span>Refresh</span>
+                </>
+              )}
+            </button>
+            {latestRepoUpdatedAt ? (
+              <RelativeTime
+                iso={latestRepoUpdatedAt}
+                titlePrefix="Updated"
+                prefix={<span className="hidden sm:inline">Updated </span>}
+                className={`${repoUpdatedAtClass} basis-full text-right sm:basis-auto sm:text-left`}
+              />
+            ) : null}
+            {refreshStatus === 'error' && refreshMessage ? (
+              <span className={`${refreshStatusClass} basis-full text-right`}>{refreshMessage}</span>
             ) : null}
           </div>
         </div>

@@ -97,7 +97,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         <section className="w-full max-w-md">
           <div className="rounded-3xl bg-white/90 px-8 py-10 shadow-2xl shadow-slate-900/10 ring-1 ring-slate-200/70 backdrop-blur">
             <header className="space-y-2 text-center">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Git Explorer</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Powergit</p>
               <h2 className="text-2xl font-semibold text-slate-900" data-testid="auth-heading">
                 Sign in
               </h2>

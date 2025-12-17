@@ -35,6 +35,41 @@ type StreamTarget = {
   params?: Record<string, unknown> | null
 }
 
+const activeStreamSubscriptions = new Set<SyncStreamSubscription>()
+let unloadCleanupInstalled = false
+
+function installUnloadCleanup() {
+  if (unloadCleanupInstalled) return
+  unloadCleanupInstalled = true
+  if (typeof window === 'undefined') return
+
+  const cleanup = () => {
+    if (activeStreamSubscriptions.size === 0) return
+    activeStreamSubscriptions.forEach((subscription) => {
+      try {
+        subscription.unsubscribe()
+      } catch {
+        // ignore unsubscribe errors during unload
+      }
+    })
+    activeStreamSubscriptions.clear()
+  }
+
+  window.addEventListener('beforeunload', cleanup)
+  window.addEventListener('pagehide', cleanup)
+}
+
+function unsubscribeAll(subscriptions: SyncStreamSubscription[]) {
+  subscriptions.forEach((subscription) => {
+    try {
+      subscription.unsubscribe()
+    } catch {
+      // ignore
+    }
+    activeStreamSubscriptions.delete(subscription)
+  })
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
@@ -69,10 +104,12 @@ async function subscribeToStreams(ps: PowerSyncDatabase, targets: readonly Strea
     await ps.waitForReady().catch(() => undefined)
     let subscriptions: SyncStreamSubscription[] = []
     try {
+      installUnloadCleanup()
       const results = await Promise.allSettled(
         targets.map(async (target) => {
           const stream = ps.syncStream(target.id, target.params ?? undefined)
           const subscription = await stream.subscribe()
+          activeStreamSubscriptions.add(subscription)
           if (import.meta.env.DEV) {
             console.debug('[PowerSync][streams] subscribed', target.id, target.params ?? null)
           }
@@ -90,14 +127,14 @@ async function subscribeToStreams(ps: PowerSyncDatabase, targets: readonly Strea
 
       if (rejected) {
         const reason = rejected.reason
-        subscriptions.forEach((subscription) => subscription.unsubscribe())
+        unsubscribeAll(subscriptions)
         subscriptions = []
         throw reason
       }
 
       return subscriptions
     } catch (error) {
-      subscriptions.forEach((subscription) => subscription.unsubscribe())
+      unsubscribeAll(subscriptions)
 
       if (isDatabaseClosingError(error)) {
         if (import.meta.env.DEV) {
@@ -165,7 +202,7 @@ export function useCoreStreams() {
         ])
 
         if (disposed) {
-          subscriptions.forEach((subscription) => subscription.unsubscribe())
+          unsubscribeAll(subscriptions)
           return
         }
 
@@ -182,7 +219,7 @@ export function useCoreStreams() {
 
     return () => {
       disposed = true
-      active.forEach((subscription) => subscription.unsubscribe())
+      unsubscribeAll(active)
       active = []
     }
   }, [ps])
@@ -220,7 +257,7 @@ export function useRepoStreams(orgId: string, repoId: string) {
     return () => {
       disposed = true
       if (active.length > 0) {
-        active.forEach((subscription) => subscription.unsubscribe())
+        unsubscribeAll(active)
         active = []
       }
     }
@@ -251,7 +288,7 @@ export function useOrgStreams(orgId: string, repoIds: readonly string[]) {
 
     return () => {
       disposed = true
-      active.forEach((subscription) => subscription.unsubscribe())
+      unsubscribeAll(active)
     }
   }, [ps, orgId, key])
 }

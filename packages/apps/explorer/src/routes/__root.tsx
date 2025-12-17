@@ -119,7 +119,7 @@ const AppShell: React.FC = () => {
         <div className="mx-auto max-w-6xl space-y-6">
           <header className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold">Git Explorer</h1>
+              <h1 className="text-2xl font-bold">Powergit</h1>
               <div className={`text-sm ${headerSubText}`}>
                 {status.connected ? 'Connected' : status.connecting ? 'Connecting…' : 'Offline'}
                 {status.connected || status.connecting ? (!status.hasSynced ? ' · syncing…' : '') : ''}
