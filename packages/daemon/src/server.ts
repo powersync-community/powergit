@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import busboy from 'busboy';
-import type { GitPushSummary, PowerSyncImportJob, RefRow, RepoSummaryRow } from '@shared/core';
+import type { GitPushSummary, PowerSyncImportJob, RefRow, RepoSummaryRow } from '@powersync-community/powergit-core';
 import type { PersistPushResult, PushUpdateRow } from './queries.js';
 import { ImportValidationError } from './importer.js';
 

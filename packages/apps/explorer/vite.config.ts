@@ -16,11 +16,11 @@ const bufferPolyfillPath = resolveFromRoot(
 const repoRoot = resolveFromRoot('../../..')
 
 const STACK_ENV_FALLBACKS: Record<string, string[]> = {
-  VITE_SUPABASE_URL: ['PSGIT_TEST_SUPABASE_URL'],
-  VITE_SUPABASE_ANON_KEY: ['PSGIT_TEST_SUPABASE_ANON_KEY'],
+  VITE_SUPABASE_URL: ['POWERGIT_TEST_SUPABASE_URL'],
+  VITE_SUPABASE_ANON_KEY: ['POWERGIT_TEST_SUPABASE_ANON_KEY'],
   VITE_SUPABASE_SCHEMA: [],
-  VITE_POWERSYNC_ENDPOINT: ['POWERSYNC_URL', 'PSGIT_TEST_ENDPOINT'],
-  VITE_POWERSYNC_DAEMON_URL: ['POWERSYNC_DAEMON_URL', 'PSGIT_TEST_DAEMON_URL'],
+  VITE_POWERSYNC_ENDPOINT: ['POWERSYNC_URL', 'POWERGIT_TEST_ENDPOINT'],
+  VITE_POWERSYNC_DAEMON_URL: ['POWERSYNC_DAEMON_URL', 'POWERGIT_TEST_DAEMON_URL'],
   VITE_POWERSYNC_USE_DAEMON: ['POWERSYNC_USE_DAEMON'],
   POWERSYNC_DAEMON_DEVICE_URL: ['POWERSYNC_DAEMON_DEVICE_URL'],
 }
@@ -208,15 +208,15 @@ export default defineConfig({
   base: repoBase,
   plugins: [wasm(), topLevelAwait(), react(), ghPagesSpaFallback()],
   define: { 'process.env': {} },
-  envPrefix: ['VITE_', 'POWERSYNC_', 'PSGIT_'],
+  envPrefix: ['VITE_', 'POWERSYNC_', 'POWERGIT_'],
   resolve: {
     alias: {
       '@ps': resolveFromRoot('src/ps'),
       '@tsdb': resolveFromRoot('src/tsdb'),
-      '@shared/core/powersync/schema': resolveFromRoot('../../shared/src/powersync/schema.ts'),
-      '@shared/core/powersync/streams': resolveFromRoot('../../shared/src/powersync/streams.ts'),
-      '@shared/core/': `${resolveFromRoot('../../shared/src')}/`,
-      '@shared/core': resolveFromRoot('../../shared/src/index.ts'),
+      '@powersync-community/powergit-core/powersync/schema': resolveFromRoot('../../shared/src/powersync/schema.ts'),
+      '@powersync-community/powergit-core/powersync/streams': resolveFromRoot('../../shared/src/powersync/streams.ts'),
+      '@powersync-community/powergit-core/': `${resolveFromRoot('../../shared/src')}/`,
+      '@powersync-community/powergit-core': resolveFromRoot('../../shared/src/index.ts'),
       buffer: bufferPolyfillPath,
     },
   },

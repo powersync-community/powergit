@@ -1,6 +1,6 @@
 
 import { column, Schema, Table } from '@powersync/web'
-import { buildPowerSyncSchema, powerSyncSchemaSpec } from '@shared/core/powersync/schema'
+import { buildPowerSyncSchema, powerSyncSchemaSpec } from '@powersync-community/powergit-core/powersync/schema'
 
 const { schema: appSchema, tables } = buildPowerSyncSchema<Schema, Table, Pick<typeof column, 'text' | 'integer'>>({
   createSchema: (tableMap) => new Schema(tableMap as Record<string, Table>),

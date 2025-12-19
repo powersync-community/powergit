@@ -2,21 +2,29 @@
 import { spawn } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { parsePowerSyncUrl, type GitPushSummary, buildRepoStreamTargets } from '@shared/core'
-import { PowerSyncRemoteClient, type FetchPackResult, type PushPackResult } from '@shared/core/node'
+import { parsePowerSyncUrl, type GitPushSummary, buildRepoStreamTargets } from '@powersync-community/powergit-core'
+import {
+  PowerSyncRemoteClient,
+  type FetchPackResult,
+  type PushPackResult,
+  resolvePowergitRemoteUrl,
+} from '@powersync-community/powergit-core/node'
 
 const ZERO_SHA = '0000000000000000000000000000000000000000'
 const MAX_COMMITS_PER_UPDATE = Number.parseInt(process.env.POWERSYNC_MAX_PUSH_COMMITS ?? '256', 10)
 const DEFAULT_DAEMON_URL = process.env.POWERSYNC_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? 'http://127.0.0.1:5030'
-const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm --filter @svc/daemon start'
+const DEFAULT_DAEMON_START_COMMAND = process.env.PNPM_WORKSPACE_DIR
+  ? 'pnpm --filter @powersync-community/powergit-daemon start'
+  : 'powergit-daemon'
+const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? DEFAULT_DAEMON_START_COMMAND
 const DAEMON_AUTOSTART_DISABLED = (process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
 const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000', 10)
 const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000', 10)
 const DAEMON_AUTH_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_AUTH_TIMEOUT_MS ?? '15000', 10)
-const CLI_LOGIN_HINT = process.env.POWERSYNC_LOGIN_COMMAND ?? 'pnpm --filter @pkg/cli cli login'
+const CLI_LOGIN_HINT = process.env.POWERSYNC_LOGIN_COMMAND ?? 'powergit login'
 const AUTH_STATUS_POLL_INTERVAL_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_AUTH_POLL_MS ?? '500', 10)
 const DAEMON_START_HINT =
-  'PowerSync daemon unreachable — start it with "pnpm --filter @svc/daemon start" or point POWERSYNC_DAEMON_URL at a running instance.'
+  'PowerSync daemon unreachable — start it with "powergit-daemon" or point POWERSYNC_DAEMON_URL at a running instance.'
 
 interface FetchRequest { sha: string; name: string }
 interface PushRequest { src: string; dst: string; force?: boolean }
@@ -39,7 +47,9 @@ function debugLog(message: string) {
   }
 }
 
-function println(s: string = '') { process.stdout.write(s + '\n') }
+function println(s: string = '') {
+  process.stdout.write(s + '\n')
+}
 
 export async function runHelper() {
   initFromArgs()
@@ -47,8 +57,8 @@ export async function runHelper() {
   let buffer: Buffer = Buffer.alloc(0)
 
   while (true) {
-  const { line, done, nextBuffer } = await readNextLine(iterator, buffer)
-  buffer = nextBuffer as Buffer
+    const { line, nextBuffer } = await readNextLine(iterator, buffer)
+    buffer = nextBuffer as Buffer
     if (line === null) break
 
     const raw = line.replace(/\r$/, '')
@@ -446,10 +456,11 @@ function initFromArgs() {
 function tryParseRemote(candidate?: string): boolean {
   if (!candidate) return false
   try {
-    parsed = parsePowerSyncUrl(candidate)
+    const expanded = resolvePowergitRemoteUrl(candidate)
+    parsed = parsePowerSyncUrl(expanded)
     return true
   } catch (error) {
-    if (candidate.includes('://')) {
+    if (candidate.includes('::') || candidate.includes('://')) {
       console.error(`[powersync] failed to parse remote URL: ${(error as Error).message}`)
     }
     return false

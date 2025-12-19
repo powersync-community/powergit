@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/react-db'
 import { useCollections } from '@tsdb/collections'
-import type { PowerSyncImportJob } from '@shared/core'
+import type { PowerSyncImportJob } from '@powersync-community/powergit-core'
 import {
   getImportMode,
   isGithubActionsImportEnabled,

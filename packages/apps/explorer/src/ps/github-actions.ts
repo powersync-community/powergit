@@ -1,4 +1,4 @@
-import type { PowerSyncImportJob } from '@shared/core'
+import type { PowerSyncImportJob } from '@powersync-community/powergit-core'
 import { getAccessToken } from './supabase'
 
 const DEFAULT_SUPABASE_URL = 'http://127.0.0.1:55431'

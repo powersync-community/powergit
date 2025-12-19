@@ -18,7 +18,7 @@ function randomString(len = 12) {
 async function main() {
   const supabaseUrl = requireEnv('SUPABASE_URL')
   const serviceRoleKey = requireEnv('SUPABASE_SERVICE_ROLE_KEY')
-  const email = process.env.TEST_USER_EMAIL?.trim() || `psgit-${randomString(6)}@example.com`
+  const email = process.env.TEST_USER_EMAIL?.trim() || `powergit-${randomString(6)}@example.com`
   const password = process.env.TEST_USER_PASSWORD?.trim() || `pw-${randomString(12)}`
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {

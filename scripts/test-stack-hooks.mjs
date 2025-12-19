@@ -10,7 +10,7 @@ const repoRoot = resolve(__dirname, '..')
 const stackManagerScript = resolve(repoRoot, 'scripts', 'dev-local-stack.mjs')
 
 const DEFAULT_DAEMON_URL = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
-const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm --filter @svc/daemon start'
+const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm --filter @powersync-community/powergit-daemon start'
 const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000', 10)
 const DAEMON_SHUTDOWN_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_SHUTDOWN_TIMEOUT_MS ?? '3000', 10)
 

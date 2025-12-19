@@ -15,6 +15,9 @@ import {
 } from './profile-manager.js'
 import { loadStackEnv } from './stack-env.js'
 
+const CLI_NAME = 'powergit'
+const LOG_PREFIX = `[${CLI_NAME}]`
+
 interface LoginCommandArgs {
   endpoint?: string
   session?: string
@@ -42,8 +45,8 @@ interface DaemonStopCommandArgs {
   quiet?: boolean
 }
 
-const PSGIT_STACK_ENV = process.env.PSGIT_STACK_ENV
-const STACK_ENV_DISABLED = (process.env.PSGIT_NO_STACK_ENV ?? '').toLowerCase() === 'true'
+const POWERGIT_STACK_ENV = process.env.POWERGIT_STACK_ENV
+const STACK_ENV_DISABLED = (process.env.POWERGIT_NO_STACK_ENV ?? '').toLowerCase() === 'true'
 const appliedStackEnvPaths = new Set<string>()
 const stackProfileOverride = process.env.STACK_PROFILE
 const activeProfileContext: ResolvedProfile = resolveProfile({
@@ -53,16 +56,16 @@ const activeProfileContext: ResolvedProfile = resolveProfile({
 })
 
 process.env.STACK_PROFILE = activeProfileContext.name
-process.env.PSGIT_ACTIVE_PROFILE = activeProfileContext.name
+process.env.POWERGIT_ACTIVE_PROFILE = activeProfileContext.name
 for (const [key, value] of Object.entries(activeProfileContext.env)) {
   if (typeof value !== 'string') continue
   process.env[key] = value
 }
 
 if (stackProfileOverride) {
-  console.info(`[psgit] Using profile "${activeProfileContext.name}" (via STACK_PROFILE)`)
-} else if (activeProfileContext.name !== 'local-dev' || activeProfileContext.source === 'file') {
-  console.info(`[psgit] Using profile "${activeProfileContext.name}"`)
+  console.info(`${LOG_PREFIX} Using profile "${activeProfileContext.name}" (via STACK_PROFILE)`)
+} else if (activeProfileContext.name !== 'prod' || activeProfileContext.source === 'file') {
+  console.info(`${LOG_PREFIX} Using profile "${activeProfileContext.name}"`)
 }
 
 function applyStackEnv(path: string, { silent = false }: { silent?: boolean } = {}): boolean {
@@ -82,7 +85,7 @@ function applyStackEnv(path: string, { silent = false }: { silent?: boolean } = 
 
   appliedStackEnvPaths.add(resolvedPath)
   if (!silent) {
-    console.info(`[psgit] Loaded stack environment from ${resolvedPath}`)
+    console.info(`${LOG_PREFIX} Loaded stack environment from ${resolvedPath}`)
   }
   return true
 }
@@ -105,8 +108,8 @@ function maybeApplyStackEnv({
     const allowMissingExplicit =
       activeProfileContext.stackEnvPath !== undefined && explicitPath === activeProfileContext.stackEnvPath
     candidates.push({ path: explicitPath, silent: false, allowMissing: allowMissingExplicit })
-  } else if (PSGIT_STACK_ENV) {
-    candidates.push({ path: PSGIT_STACK_ENV, silent, allowMissing: false })
+  } else if (POWERGIT_STACK_ENV) {
+    candidates.push({ path: POWERGIT_STACK_ENV, silent, allowMissing: false })
   }
   for (const candidate of candidates) {
     const loaded = applyStackEnv(candidate.path, { silent: candidate.silent })
@@ -257,14 +260,18 @@ function delay(ms: number): Promise<void> {
   })
 }
 
+function resolveDefaultRemoteName(): string {
+  return process.env.REMOTE_NAME ?? 'powersync'
+}
+
 async function runRemoteAddCommand(args: { url: string; remote?: string | null }) {
-  const remoteName = args.remote ?? process.env.REMOTE_NAME ?? 'origin'
+  const remoteName = args.remote ?? resolveDefaultRemoteName()
   await addPowerSyncRemote(process.cwd(), remoteName, args.url)
   console.log(`Added PowerSync remote (${remoteName}): ${args.url}`)
 }
 
 async function runSyncCommand(args: { remote?: string | null }) {
-  const remoteName = args.remote ?? process.env.REMOTE_NAME ?? 'origin'
+  const remoteName = args.remote ?? resolveDefaultRemoteName()
   const result = await syncPowerSyncRepository(process.cwd(), {
     remoteName,
   })
@@ -306,7 +313,7 @@ async function runDemoSeedCommand(args: DemoSeedCommandArgs) {
 
 async function runLoginCommand(args: LoginCommandArgs) {
   if (args.session) {
-    console.warn('[psgit] Ignoring legacy --session option; Supabase session persistence is automatic.')
+    console.warn(`${LOG_PREFIX} Ignoring legacy --session option; Supabase session persistence is automatic.`)
   }
 
   let observedChallenge: {
@@ -423,7 +430,7 @@ async function runLoginCommand(args: LoginCommandArgs) {
     throw new Error(`Timed out waiting for daemon authentication${reason}.`)
   }
 
-  console.log('Daemon authentication still pending. Complete the browser/device flow and rerun `psgit login`.')
+  console.log(`Daemon authentication still pending. Complete the browser/device flow and rerun \`${CLI_NAME} login\`.`)
   if (finalStatus.reason) {
     console.log(`Reason: ${finalStatus.reason}`)
   }
@@ -451,14 +458,14 @@ async function runDaemonStopCommand(args: DaemonStopCommandArgs) {
   const responsive = await isDaemonResponsiveLocal(baseUrl)
   if (!responsive) {
     if (!args.quiet) {
-      console.log(`[psgit] PowerSync daemon not running at ${baseUrl}.`)
+      console.log(`${LOG_PREFIX} PowerSync daemon not running at ${baseUrl}.`)
     }
     return
   }
 
   const waitMs = Number.isFinite(args.waitMs) && args.waitMs !== undefined ? Math.max(0, Number(args.waitMs)) : 5000
   if (!args.quiet) {
-    console.log(`[psgit] Sending shutdown request to daemon at ${baseUrl}...`)
+    console.log(`${LOG_PREFIX} Sending shutdown request to daemon at ${baseUrl}...`)
   }
 
   try {
@@ -469,11 +476,11 @@ async function runDaemonStopCommand(args: DaemonStopCommandArgs) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`[psgit] Failed to request daemon shutdown: ${message}`)
+    throw new Error(`${LOG_PREFIX} Failed to request daemon shutdown: ${message}`)
   }
 
   if (!args.quiet) {
-    console.log('[psgit] Waiting for daemon to exit...')
+    console.log(`${LOG_PREFIX} Waiting for daemon to exit...`)
   }
 
   const deadline = Date.now() + waitMs
@@ -487,36 +494,38 @@ async function runDaemonStopCommand(args: DaemonStopCommandArgs) {
     }
   }
 
-  console.warn('[psgit] Daemon shutdown timed out; process may still be terminating.')
+  console.warn(`${LOG_PREFIX} Daemon shutdown timed out; process may still be terminating.`)
   if (process.exitCode == null || process.exitCode === 0) {
     process.exitCode = 1
   }
 }
 
 function printUsage() {
-  console.log('psgit commands:')
-  console.log('  psgit remote add powersync powersync::https://<endpoint>/orgs/<org>/repos/<repo>')
-  console.log('  psgit sync [--remote <name>]')
-  console.log('  psgit demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]')
-  console.log('  psgit login [--endpoint <url>] [--daemon-url <url>]')
-  console.log('  psgit daemon stop [--daemon-url <url>] [--wait <ms>]')
-  console.log('  psgit logout [--daemon-url <url>]')
-  console.log('  psgit profile list|show|set|use …')
+  console.log(`${CLI_NAME} commands:`)
+  console.log(`  ${CLI_NAME} remote add powersync powergit::/<org>/<repo>`)
+  console.log(`  ${CLI_NAME} sync [--remote <name>]`)
+  console.log(
+    `  ${CLI_NAME} demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]`,
+  )
+  console.log(`  ${CLI_NAME} login [--endpoint <url>] [--daemon-url <url>]`)
+  console.log(`  ${CLI_NAME} daemon stop [--daemon-url <url>] [--wait <ms>]`)
+  console.log(`  ${CLI_NAME} logout [--daemon-url <url>]`)
+  console.log(`  ${CLI_NAME} profile list|show|set|use …`)
 }
 
 function buildCli() {
-  const defaultRemote = process.env.REMOTE_NAME ?? 'origin'
+  const defaultRemote = resolveDefaultRemoteName()
 
   return yargs(hideBin(process.argv))
-    .scriptName('psgit')
+    .scriptName(CLI_NAME)
     .usage(
-      'psgit commands:\n' +
-        '  psgit remote add powersync powersync::https://<endpoint>/orgs/<org>/repos/<repo>\n' +
-        '  psgit sync [--remote <name>]\n' +
-        '  psgit demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]\n' +
-        '  psgit login [--endpoint <url>] [--daemon-url <url>]\n' +
-        '  psgit daemon stop [--daemon-url <url>] [--wait <ms>]\n' +
-        '  psgit logout [--daemon-url <url>]',
+      `${CLI_NAME} commands:\n` +
+        `  ${CLI_NAME} remote add powersync powergit::/<org>/<repo>\n` +
+        `  ${CLI_NAME} sync [--remote <name>]\n` +
+        `  ${CLI_NAME} demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]\n` +
+        `  ${CLI_NAME} login [--endpoint <url>] [--daemon-url <url>]\n` +
+        `  ${CLI_NAME} daemon stop [--daemon-url <url>] [--wait <ms>]\n` +
+        `  ${CLI_NAME} logout [--daemon-url <url>]\n`,
     )
     .option('stack-env', {
       type: 'string',
@@ -546,7 +555,7 @@ function buildCli() {
     }, true)
     .command(
       'profile <action>',
-      'Manage psgit environment profiles',
+      'Manage Powergit environment profiles',
       (profileYargs) =>
         profileYargs
           .command(
@@ -765,7 +774,7 @@ function buildCli() {
         y
           .positional('url', {
             type: 'string',
-            describe: 'PowerSync remote URL (powersync::https://…)',
+            describe: 'Powergit remote URL (powergit::/org/repo or powergit::https://…)',
           })
           .option('remote', {
             alias: 'r',

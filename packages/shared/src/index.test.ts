@@ -4,17 +4,17 @@ import { PowerSyncRemoteClient } from './node.js'
 
 describe('parsePowerSyncUrl', () => {
   it('parses org/repo slugs from a remote URL', () => {
-    const parsed = parsePowerSyncUrl('powersync::https://api.example.com/orgs/acme/repos/infra')
+    const parsed = parsePowerSyncUrl('powergit::https://api.example.com/orgs/acme/repos/infra')
     expect(parsed).toEqual({ endpoint: 'https://api.example.com', basePath: '', org: 'acme', repo: 'infra' })
   })
 
   it('captures path prefix before org/repo', () => {
-    const parsed = parsePowerSyncUrl('powersync::https://api.example.com/functions/v1/powersync-remote/orgs/acme/repos/infra')
+    const parsed = parsePowerSyncUrl('powergit::https://api.example.com/functions/v1/powersync-remote/orgs/acme/repos/infra')
     expect(parsed).toEqual({ endpoint: 'https://api.example.com', basePath: '/functions/v1/powersync-remote', org: 'acme', repo: 'infra' })
   })
 
   it('throws on malformed URL', () => {
-    expect(() => parsePowerSyncUrl('https://api.example.com/repos-only/foo')).toThrow(/Invalid powersync URL/)
+    expect(() => parsePowerSyncUrl('https://api.example.com/repos-only/foo')).toThrow(/Invalid powergit URL/)
   })
 })
 

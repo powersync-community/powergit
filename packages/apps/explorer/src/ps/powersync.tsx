@@ -255,7 +255,7 @@ export const PowerSyncProvider: React.FC<React.PropsWithChildren> = ({ children 
         <div className="space-y-1">
           <p>The explorer could not reach the local PowerSync daemon. Start it to enable Git sync features.</p>
           <p className="text-xs text-slate-600">
-            Try running <code>pnpm --filter @app/explorer dev</code> or <code>pnpm --filter @svc/daemon start</code>.
+            Try running <code>pnpm --filter @app/explorer dev</code> or <code>pnpm --filter @powersync-community/powergit-daemon start</code>.
           </p>
         </div>
       )
@@ -321,7 +321,7 @@ export const PowerSyncProvider: React.FC<React.PropsWithChildren> = ({ children 
     if (status.status === 'auth_required') {
       const message = (
         <div className="space-y-1">
-          <div>{status.reason ?? 'Run `psgit login --guest` or complete the daemon sign-in flow to proceed.'}</div>
+          <div>{status.reason ?? 'Run `powergit login --guest` to proceed.'}</div>
         </div>
       )
       showNotice({

@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile, spawn, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
-import { parsePowerSyncUrl, PowerSyncRemoteClient, buildRepoStreamTargets, formatStreamKey } from '@shared/core'
+import { parsePowerSyncUrl, PowerSyncRemoteClient, buildRepoStreamTargets, formatStreamKey } from '@powersync-community/powergit-core'
 import { startStack, stopStack } from '../../../scripts/test-stack-hooks.mjs'
 import { seedDemoRepository } from './index.js'
 import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials } from './auth/session.js'
@@ -29,10 +29,10 @@ function buildCliArgs(args: string[]): string[] {
 }
 
 const requiredEnvVars = [
-  'PSGIT_TEST_REMOTE_URL',
-  'PSGIT_TEST_SUPABASE_URL',
-  'PSGIT_TEST_SUPABASE_EMAIL',
-  'PSGIT_TEST_SUPABASE_PASSWORD',
+  'POWERGIT_TEST_REMOTE_URL',
+  'POWERGIT_TEST_SUPABASE_URL',
+  'POWERGIT_TEST_SUPABASE_EMAIL',
+  'POWERGIT_TEST_SUPABASE_PASSWORD',
 ]
 const initialMissingEnv = requiredEnvVars.filter((name) => !process.env[name])
 
@@ -87,7 +87,7 @@ if (initialMissingEnv.length > 0 && !canRunLiveTests) {
   console.warn(
     '[cli] skipping live PowerSync e2e tests — missing env vars and local Supabase stack is unavailable.\n' +
       `Missing: ${initialMissingEnv.join(', ')}\n` +
-      'Install Supabase CLI + Docker or export PSGIT_TEST_* variables to enable these tests.',
+      'Install Supabase CLI + Docker or export POWERGIT_TEST_* variables to enable these tests.',
   )
 }
 
@@ -140,11 +140,11 @@ async function runGit(args: string[], cwd: string) {
   return execFileAsync('git', args, { cwd })
 }
 
-describe('psgit CLI e2e', () => {
+describe('powergit CLI e2e', () => {
   let repoDir: string
 
   beforeEach(async () => {
-    repoDir = await mkdtemp(join(tmpdir(), 'psgit-e2e-'))
+    repoDir = await mkdtemp(join(tmpdir(), 'powergit-e2e-'))
     await runGit(['init'], repoDir)
   })
 
@@ -174,28 +174,28 @@ describe('psgit CLI e2e', () => {
     return result
   }
 
-  async function getRemoteUrl(name = 'origin') {
+  async function getRemoteUrl(name = 'powersync') {
     const { stdout } = await runGit(['remote', 'get-url', name], repoDir)
     return stdout.trim()
   }
 
   it('adds and updates the default powersync remote', async () => {
-    const firstUrl = 'powersync::https://example.dev/orgs/acme/repos/infra'
+    const firstUrl = 'powergit::https://example.dev/orgs/acme/repos/infra'
     const { stdout: addStdout } = await runCli(['remote', 'add', 'powersync', firstUrl])
-    expect(addStdout).toContain(`Added PowerSync remote (origin): ${firstUrl}`)
+    expect(addStdout).toContain(`Added PowerSync remote (powersync): ${firstUrl}`)
 
     expect(await getRemoteUrl()).toBe(firstUrl)
 
-    const secondUrl = 'powersync::https://example.dev/orgs/acme/repos/runtime'
+    const secondUrl = 'powergit::https://example.dev/orgs/acme/repos/runtime'
     const { stdout: updateStdout } = await runCli(['remote', 'add', 'powersync', secondUrl])
-    expect(updateStdout).toContain(`Added PowerSync remote (origin): ${secondUrl}`)
+    expect(updateStdout).toContain(`Added PowerSync remote (powersync): ${secondUrl}`)
 
     expect(await getRemoteUrl()).toBe(secondUrl)
   })
 
   it('respects REMOTE_NAME overrides', async () => {
     const customRemote = 'powersync-upstream'
-    const remoteUrl = 'powersync::https://example.dev/orgs/acme/repos/mobile'
+    const remoteUrl = 'powergit::https://example.dev/orgs/acme/repos/mobile'
 
     const { stdout } = await runCli(
       ['remote', 'add', 'powersync', remoteUrl],
@@ -208,8 +208,8 @@ describe('psgit CLI e2e', () => {
 
   it('prints usage help for unknown commands', async () => {
     const { stdout } = await runCli([])
-    expect(stdout).toContain('psgit commands:')
-    expect(stdout).toContain('psgit remote add powersync')
+    expect(stdout).toContain('powergit commands:')
+    expect(stdout).toContain('powergit remote add powersync')
 
     let execError: (NodeJS.ErrnoException & { stderr?: string }) | null = null
     try {
@@ -234,7 +234,7 @@ describe('psgit CLI e2e', () => {
   })
 })
 
-describeLive('psgit sync against live PowerSync stack', () => {
+describeLive('powergit sync against live PowerSync stack', () => {
   let repoDir: string
 
   beforeAll(async () => {
@@ -252,17 +252,17 @@ describeLive('psgit sync against live PowerSync stack', () => {
       throw new Error(
         `Missing required environment variables for PowerSync live-stack tests: ${missingAfterStart.join(
           ', ',
-        )}. Start the local stack or export PSGIT_TEST_* variables.`,
+        )}. Start the local stack or export POWERGIT_TEST_* variables.`,
       )
     }
 
     liveStackConfig = {
-      remoteUrl: process.env.PSGIT_TEST_REMOTE_URL!,
-      remoteName: process.env.PSGIT_TEST_REMOTE_NAME ?? 'powersync',
-      supabaseUrl: process.env.PSGIT_TEST_SUPABASE_URL!,
-      endpoint: process.env.PSGIT_TEST_ENDPOINT,
-      supabaseEmail: process.env.PSGIT_TEST_SUPABASE_EMAIL!,
-      supabasePassword: process.env.PSGIT_TEST_SUPABASE_PASSWORD!,
+      remoteUrl: process.env.POWERGIT_TEST_REMOTE_URL!,
+      remoteName: process.env.POWERGIT_TEST_REMOTE_NAME ?? 'powersync',
+      supabaseUrl: process.env.POWERGIT_TEST_SUPABASE_URL!,
+      endpoint: process.env.POWERGIT_TEST_ENDPOINT,
+      supabaseEmail: process.env.POWERGIT_TEST_SUPABASE_EMAIL!,
+      supabasePassword: process.env.POWERGIT_TEST_SUPABASE_PASSWORD!,
     }
 
     try {
@@ -286,12 +286,12 @@ describeLive('psgit sync against live PowerSync stack', () => {
 
       const supabaseAnonKey =
         process.env.SUPABASE_ANON_KEY ??
-        process.env.PSGIT_TEST_SUPABASE_ANON_KEY
-      const supabaseUrl = process.env.SUPABASE_URL ?? process.env.PSGIT_TEST_SUPABASE_URL
-      const supabaseEmail = process.env.SUPABASE_EMAIL ?? process.env.PSGIT_TEST_SUPABASE_EMAIL
+        process.env.POWERGIT_TEST_SUPABASE_ANON_KEY
+      const supabaseUrl = process.env.SUPABASE_URL ?? process.env.POWERGIT_TEST_SUPABASE_URL
+      const supabaseEmail = process.env.SUPABASE_EMAIL ?? process.env.POWERGIT_TEST_SUPABASE_EMAIL
       const supabasePassword =
-        process.env.SUPABASE_PASSWORD ?? process.env.PSGIT_TEST_SUPABASE_PASSWORD
-      const endpoint = process.env.PSGIT_TEST_ENDPOINT ?? process.env.POWERSYNC_URL
+        process.env.SUPABASE_PASSWORD ?? process.env.POWERGIT_TEST_SUPABASE_PASSWORD
+      const endpoint = process.env.POWERGIT_TEST_ENDPOINT ?? process.env.POWERSYNC_URL
 
       if (!supabaseAnonKey || !supabaseUrl || !supabaseEmail || !supabasePassword || !endpoint) {
         throw new Error('Missing Supabase credentials or PowerSync endpoint for live stack login.')
@@ -378,7 +378,7 @@ describeLive('psgit sync against live PowerSync stack', () => {
   }, 240_000)
 
   beforeEach(async () => {
-    repoDir = await mkdtemp(join(tmpdir(), 'psgit-stack-e2e-'))
+    repoDir = await mkdtemp(join(tmpdir(), 'powergit-stack-e2e-'))
     await runGit(['init'], repoDir)
   })
 
@@ -498,8 +498,8 @@ describeLive('psgit sync against live PowerSync stack', () => {
       return
     }
 
-    const repoDirA = await mkdtemp(join(tmpdir(), 'psgit-stream-a-'))
-    const repoDirB = await mkdtemp(join(tmpdir(), 'psgit-stream-b-'))
+    const repoDirA = await mkdtemp(join(tmpdir(), 'powergit-stream-a-'))
+    const repoDirB = await mkdtemp(join(tmpdir(), 'powergit-stream-b-'))
 
     const remoteUrl = liveStackConfig.remoteUrl
     const remoteName = liveStackConfig.remoteName

@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { PowerSyncDatabase, SyncStreamSubscription } from '@powersync/node';
 import { DaemonPowerSyncConnector } from '../connector.js';
 import { connectWithSchemaRecovery, createPowerSyncDatabase } from '../database.js';
-import { buildRepoStreamTargets } from '@shared/core';
+import { buildRepoStreamTargets } from '@powersync-community/powergit-core';
 import { startStack, stopStack } from '../../../../scripts/test-stack-hooks.mjs';
 import type { DaemonAuthResponse } from '../server.js';
 
@@ -116,13 +116,13 @@ async function waitFor<T>(
 }
 
 function runCliCommand(args: string[], label: string): void {
-  const result = spawnSync('pnpm', ['--filter', '@pkg/cli', 'exec', 'tsx', 'src/bin.ts', ...args], {
+  const result = spawnSync('pnpm', ['--filter', '@powersync-community/powergit', 'exec', 'tsx', 'src/bin.ts', ...args], {
     cwd: repoRoot,
     env: { ...process.env },
     stdio: 'inherit',
   });
   if (result.status !== 0) {
-    throw new Error(`CLI command failed (${label}): pnpm --filter @pkg/cli exec tsx src/bin.ts ${args.join(' ')}`);
+    throw new Error(`CLI command failed (${label}): pnpm --filter @powersync-community/powergit exec tsx src/bin.ts ${args.join(' ')}`);
   }
 }
 
@@ -202,7 +202,7 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
         throw new Error('PowerSync daemon returned no token; ensure login succeeded before running the stream e2e.');
       }
 
-      const remoteUrl = `powersync::${endpoint.replace(/\/+$/, '')}/orgs/${orgId}/repos/${repoId}`;
+      const remoteUrl = `powergit::${endpoint.replace(/\/+$/, '')}/orgs/${orgId}/repos/${repoId}`;
 
       runCliCommand(
         ['demo-seed', '--remote-url', remoteUrl, '--branch', branchName, '--skip-sync'],

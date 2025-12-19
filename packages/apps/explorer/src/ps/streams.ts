@@ -2,7 +2,7 @@
 import * as React from 'react'
 import { usePowerSync } from '@powersync/react'
 import type { PowerSyncDatabase, SyncStreamSubscription } from '@powersync/web'
-import { buildRepoStreamTargets } from '@shared/core/powersync/streams'
+import { buildRepoStreamTargets } from '@powersync-community/powergit-core/powersync/streams'
 
 declare global {
   // eslint-disable-next-line no-var

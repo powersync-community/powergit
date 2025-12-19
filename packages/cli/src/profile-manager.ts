@@ -56,17 +56,17 @@ export interface ResolvedProfile {
   source: 'default' | 'file'
 }
 
-function resolvePsgitHome(): string {
-  const override = process.env.PSGIT_HOME
+function resolvePowergitHome(): string {
+  const override = process.env.POWERGIT_HOME
   if (override && override.trim().length > 0) {
     return resolve(override)
   }
-  return resolve(os.homedir(), '.psgit')
+  return resolve(os.homedir(), '.powergit')
 }
 
-export const PSGIT_DIR = resolvePsgitHome()
-export const PROFILES_PATH = resolve(PSGIT_DIR, 'profiles.json')
-export const STATE_PATH = resolve(PSGIT_DIR, 'profile.json')
+export const POWERGIT_DIR = resolvePowergitHome()
+export const PROFILES_PATH = resolve(POWERGIT_DIR, 'profiles.json')
+export const STATE_PATH = resolve(POWERGIT_DIR, 'profile.json')
 
 function ensureDir(path: string) {
   mkdirSync(path, { recursive: true })
@@ -105,7 +105,7 @@ function loadProfileState(): { current: string; exists: boolean } {
   if (state && typeof state.current === 'string' && state.current.trim().length > 0) {
     return { current: state.current.trim(), exists: true }
   }
-  return { current: 'local-dev', exists: false }
+  return { current: 'prod', exists: false }
 }
 
 function saveProfileState(name: string) {
@@ -121,7 +121,7 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
     const endpoint = powersyncEndpoint
     result.POWERSYNC_URL = endpoint
     result.POWERSYNC_DAEMON_ENDPOINT = endpoint
-    result.PSGIT_TEST_ENDPOINT = endpoint
+    result.POWERGIT_TEST_ENDPOINT = endpoint
   }
 
   const daemonEndpoint =
@@ -144,31 +144,31 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
   if (profile.supabase?.url) {
     const url = profile.supabase.url
     result.SUPABASE_URL = url
-    result.PSGIT_TEST_SUPABASE_URL = url
+    result.POWERGIT_TEST_SUPABASE_URL = url
   }
 
   if (profile.supabase?.anonKey) {
     const anonKey = profile.supabase.anonKey
     result.SUPABASE_ANON_KEY = anonKey
-    result.PSGIT_TEST_SUPABASE_ANON_KEY = anonKey
+    result.POWERGIT_TEST_SUPABASE_ANON_KEY = anonKey
   }
 
   if (profile.supabase?.serviceRoleKey) {
     const serviceRoleKey = profile.supabase.serviceRoleKey
     result.SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
-    result.PSGIT_TEST_SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
+    result.POWERGIT_TEST_SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey
   }
 
   if (profile.supabase?.email) {
     const email = profile.supabase.email
     result.SUPABASE_EMAIL = email
-    result.PSGIT_TEST_SUPABASE_EMAIL = email
+    result.POWERGIT_TEST_SUPABASE_EMAIL = email
   }
 
   if (profile.supabase?.password) {
     const password = profile.supabase.password
     result.SUPABASE_PASSWORD = password
-    result.PSGIT_TEST_SUPABASE_PASSWORD = password
+    result.POWERGIT_TEST_SUPABASE_PASSWORD = password
   }
 
   if (profile.supabase?.schema) {
@@ -206,14 +206,14 @@ export function resolveProfile(options: ResolveProfileOptions = {}): ResolvedPro
   if (state.current && mergedProfiles[state.current]) {
     candidates.push(state.current)
   }
-  if (!candidates.includes('local-dev')) {
-    candidates.push('local-dev')
+  if (!candidates.includes('prod')) {
+    candidates.push('prod')
   }
 
-  const profileName = candidates.find((candidate) => Boolean(candidate && mergedProfiles[candidate])) ?? 'local-dev'
+  const profileName = candidates.find((candidate) => Boolean(candidate && mergedProfiles[candidate])) ?? 'prod'
 
   if (strict && requestedName && profileName !== requestedName) {
-    throw new Error(`Unknown profile "${requestedName}". Use "psgit profile list" to inspect available profiles.`)
+    throw new Error(`Unknown profile "${requestedName}". Use "powergit profile list" to inspect available profiles.`)
   }
 
   if (updateState) {
@@ -222,7 +222,7 @@ export function resolveProfile(options: ResolveProfileOptions = {}): ResolvedPro
     }
   }
 
-  const config = mergedProfiles[profileName] ?? defaults['local-dev']
+  const config = mergedProfiles[profileName] ?? defaults['prod']
   const { env, stackEnvPath } = buildEnvFromProfile(config)
   return {
     name: profileName,
@@ -250,7 +250,7 @@ export function getProfile(name: string): ProfileConfig | undefined {
 export function setActiveProfile(name: string): void {
   const { profiles } = loadProfiles()
   if (!profiles[name]) {
-    throw new Error(`Unknown profile "${name}". Use "psgit profile list" to inspect available profiles.`)
+    throw new Error(`Unknown profile "${name}". Use "powergit profile list" to inspect available profiles.`)
   }
   saveProfileState(name)
 }

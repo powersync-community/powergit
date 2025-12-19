@@ -39,7 +39,7 @@ importers:
         specifier: ^2.6.0
         version: 2.8.1
     devDependencies:
-      '@pkg/remote-helper':
+      '@powersync-community/powergit-remote-helper':
         specifier: workspace:*
         version: link:packages/remote-helper
       supabase:
@@ -178,15 +178,21 @@ importers:
 
   packages/cli:
     dependencies:
+      '@powersync-community/powergit-core':
+        specifier: workspace:*
+        version: link:../shared
+      '@powersync-community/powergit-daemon':
+        specifier: workspace:*
+        version: link:../daemon
+      '@powersync-community/powergit-remote-helper':
+        specifier: workspace:*
+        version: link:../remote-helper
       '@powersync/common':
         specifier: 1.44.0
         version: 1.44.0
       '@powersync/node':
         specifier: 0.15.0
         version: 0.15.0(@powersync/common@1.44.0)(better-sqlite3@12.4.1)
-      '@shared/core':
-        specifier: workspace:*
-        version: link:../shared
       simple-git:
         specifier: ^3.30.0
         version: 3.30.0
@@ -221,15 +227,15 @@ importers:
 
   packages/daemon:
     dependencies:
+      '@powersync-community/powergit-core':
+        specifier: workspace:*
+        version: link:../shared
       '@powersync/common':
         specifier: 1.44.0
         version: 1.44.0
       '@powersync/node':
         specifier: 0.15.0
         version: 0.15.0(@powersync/common@1.44.0)(better-sqlite3@12.4.1)
-      '@shared/core':
-        specifier: workspace:*
-        version: link:../shared
       '@supabase/supabase-js':
         specifier: ^2.48.1
         version: 2.80.0
@@ -261,7 +267,7 @@ importers:
 
   packages/remote-helper:
     dependencies:
-      '@shared/core':
+      '@powersync-community/powergit-core':
         specifier: workspace:*
         version: link:../shared
       '@supabase/supabase-js':

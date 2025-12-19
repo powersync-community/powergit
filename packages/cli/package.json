@@ -1,14 +1,29 @@
 {
-  "name": "@pkg/cli",
+  "name": "@powersync-community/powergit",
   "version": "0.0.4",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "bin": {
-    "psgit": "dist/cli/src/bin.js"
+    "powergit": "dist/cli/src/bin.js",
+    "git-remote-powergit": "dist/cli/src/git-remote-powergit.js",
+    "powergit-daemon": "dist/cli/src/powergit-daemon.js"
+  },
+  "files": [
+    "dist/cli/**",
+    "scripts/**",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp src/profile-defaults-data.js dist/cli/src/profile-defaults-data.js && cp src/profile-env.js dist/cli/src/profile-env.js && chmod +x dist/cli/src/bin.js",
+    "build": "tsc -p tsconfig.json && cp src/profile-defaults-data.js dist/cli/src/profile-defaults-data.js && cp src/profile-env.js dist/cli/src/profile-env.js && chmod +x dist/cli/src/bin.js dist/cli/src/git-remote-powergit.js dist/cli/src/powergit-daemon.js",
     "cli": "tsx src/bin.ts",
     "login": "tsx src/bin.ts login",
+    "prepack": "npm run build",
+    "postinstall": "node scripts/postinstall.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'stub'",
     "test": "vitest run"
@@ -16,7 +31,9 @@
   "dependencies": {
     "@powersync/common": "1.44.0",
     "@powersync/node": "0.15.0",
-    "@shared/core": "workspace:*",
+    "@powersync-community/powergit-core": "workspace:*",
+    "@powersync-community/powergit-daemon": "workspace:*",
+    "@powersync-community/powergit-remote-helper": "workspace:*",
     "simple-git": "^3.30.0",
     "yargs": "^17.7.2"
   },

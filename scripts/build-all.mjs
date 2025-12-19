@@ -38,22 +38,22 @@ const buildSteps = [
   {
     label: 'Build shared core package',
     command: 'pnpm',
-    args: ['--filter', '@shared/core', 'build'],
+    args: ['--filter', '@powersync-community/powergit-core', 'build'],
   },
   {
     label: 'Build daemon service',
     command: 'pnpm',
-    args: ['--filter', '@svc/daemon', 'build'],
+    args: ['--filter', '@powersync-community/powergit-daemon', 'build'],
   },
   {
-    label: 'Build CLI (psgit)',
+    label: 'Build CLI (powergit)',
     command: 'pnpm',
-    args: ['--filter', '@pkg/cli', 'build'],
+    args: ['--filter', '@powersync-community/powergit', 'build'],
   },
   {
     label: 'Build remote helper',
     command: 'pnpm',
-    args: ['--filter', '@pkg/remote-helper', 'build'],
+    args: ['--filter', '@powersync-community/powergit-remote-helper', 'build'],
   },
   {
     label: 'Build explorer web app',

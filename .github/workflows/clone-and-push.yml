@@ -45,10 +45,10 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Build shared core
-        run: pnpm --filter @shared/core build
+        run: pnpm --filter @powersync-community/powergit-core build
 
       - name: Build remote-helper
-        run: pnpm --filter @pkg/remote-helper build
+        run: pnpm --filter @powersync-community/powergit-remote-helper build
 
       - name: Add remote-helper to PATH
         run: |
@@ -85,7 +85,7 @@ jobs:
           if [ -z "$SUPABASE_ANON_KEY" ]; then echo "Missing SUPABASE_ANON_KEY secret" && exit 1; fi
           if [ -z "$POWERGIT_EMAIL" ]; then echo "Missing POWERGIT_EMAIL secret" && exit 1; fi
           if [ -z "$POWERGIT_PASSWORD" ]; then echo "Missing POWERGIT_PASSWORD secret" && exit 1; fi
-          nohup pnpm --filter @svc/daemon start -- --port ${POWERSYNC_DAEMON_PORT:-5030} > daemon.log 2>&1 &
+          nohup pnpm --filter @powersync-community/powergit-daemon start -- --port ${POWERSYNC_DAEMON_PORT:-5030} > daemon.log 2>&1 &
           echo $! > daemon.pid
           for i in $(seq 1 30); do
             if curl -sf "http://127.0.0.1:${POWERSYNC_DAEMON_PORT:-5030}/health" >/dev/null; then

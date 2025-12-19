@@ -1,8 +1,7 @@
 
 import { mkdtemp, rm, writeFile, mkdir, cp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve, dirname, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import simpleGit from 'simple-git'
 import {
@@ -13,7 +12,8 @@ import {
   type RepoStreamSuffix,
   buildRepoStreamTargets,
   type RepoStreamTarget,
-} from '@shared/core'
+} from '@powersync-community/powergit-core'
+import { resolvePowergitRemoteUrl } from '@powersync-community/powergit-core/node'
 export { loadProfileEnvironment, resolveProfileDirectory, resolveProfilesPath } from './profile-env.js'
 
 type StreamSuffix = RepoStreamSuffix
@@ -28,7 +28,7 @@ function buildStreamTargets(org: string, repo: string): StreamSubscriptionReques
 
 async function subscribeRepoStreams(baseUrl: string, streams: StreamSubscriptionRequest[]): Promise<void> {
   if (typeof globalThis.fetch !== 'function') {
-    console.warn('[psgit] fetch API unavailable; cannot request daemon stream subscription')
+    console.warn('[powergit] fetch API unavailable; cannot request daemon stream subscription')
     return
   }
   if (streams.length === 0) return
@@ -40,10 +40,10 @@ async function subscribeRepoStreams(baseUrl: string, streams: StreamSubscription
       body: JSON.stringify({ streams }),
     })
     if (!res.ok && res.status !== 503) {
-      console.warn(`[psgit] daemon stream subscription returned ${res.status} ${res.statusText}`)
+      console.warn(`[powergit] daemon stream subscription returned ${res.status} ${res.statusText}`)
     }
   } catch (error) {
-    console.warn('[psgit] failed to subscribe daemon streams', error instanceof Error ? error.message : error)
+    console.warn('[powergit] failed to subscribe daemon streams', error instanceof Error ? error.message : error)
   }
 }
 
@@ -51,15 +51,14 @@ export const DEFAULT_DAEMON_URL =
   process.env.POWERSYNC_DAEMON_URL ??
   process.env.POWERSYNC_DAEMON_ENDPOINT ??
   'http://127.0.0.1:5030'
-const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm dev:daemon'
+const DEFAULT_DAEMON_START_COMMAND = process.env.PNPM_WORKSPACE_DIR ? 'pnpm dev:daemon' : 'powergit-daemon'
+const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? DEFAULT_DAEMON_START_COMMAND
 const DAEMON_AUTOSTART_DISABLED = (process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
 const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000', 10)
 const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000', 10)
 const DAEMON_START_HINT =
-  'PowerSync daemon unreachable — start it with "pnpm dev:daemon" or point POWERSYNC_DAEMON_URL at a running instance.'
-const DAEMON_WORKSPACE_DIR =
-  process.env.PNPM_WORKSPACE_DIR ??
-  resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
+  'PowerSync daemon unreachable — start it with "powergit-daemon" or point POWERSYNC_DAEMON_URL at a running instance.'
+const DAEMON_WORKSPACE_DIR = process.env.PNPM_WORKSPACE_DIR ?? process.cwd()
 
 export interface SeedDemoOptions {
   remoteUrl?: string
@@ -83,22 +82,22 @@ export async function seedDemoRepository(options: SeedDemoOptions = {}): Promise
   const remoteUrl =
     options.remoteUrl ??
     process.env.POWERSYNC_SEED_REMOTE_URL ??
-    process.env.PSGIT_TEST_REMOTE_URL ??
+    process.env.POWERGIT_TEST_REMOTE_URL ??
     process.env.POWERSYNC_TEST_REMOTE_URL
 
   if (!remoteUrl) {
-    throw new Error('Missing PowerSync remote URL. Set POWERSYNC_SEED_REMOTE_URL or PSGIT_TEST_REMOTE_URL.')
+    throw new Error('Missing PowerSync remote URL. Set POWERSYNC_SEED_REMOTE_URL or POWERGIT_TEST_REMOTE_URL.')
   }
 
   const remoteName =
     options.remoteName ??
     process.env.POWERSYNC_SEED_REMOTE_NAME ??
-    process.env.PSGIT_TEST_REMOTE_NAME ??
+    process.env.POWERGIT_TEST_REMOTE_NAME ??
     'powersync'
 
   const branch = options.branch ?? process.env.POWERSYNC_SEED_BRANCH ?? DEFAULT_SEED_BRANCH
 
-  const repoDir = options.workingDir ?? (await mkdtemp(join(tmpdir(), 'psgit-seed-')))
+  const repoDir = options.workingDir ?? (await mkdtemp(join(tmpdir(), 'powergit-seed-')))
   const createdTempRepo = !options.workingDir
 
   await mkdir(repoDir, { recursive: true })
@@ -115,7 +114,7 @@ export async function seedDemoRepository(options: SeedDemoOptions = {}): Promise
   await git.addConfig('user.name', DEFAULT_SEED_AUTHOR.name)
 
   if (templateRepoUrl) {
-    const tempBase = await mkdtemp(join(tmpdir(), 'psgit-template-'))
+    const tempBase = await mkdtemp(join(tmpdir(), 'powergit-template-'))
     const templateDir = join(tempBase, 'template')
     try {
       await simpleGit().clone(templateRepoUrl, templateDir, ['--depth', '1'])
@@ -134,7 +133,7 @@ export async function seedDemoRepository(options: SeedDemoOptions = {}): Promise
     await git.commit(`Import demo template content from ${templateRepoUrl}`)
     usedTemplateRepo = templateRepoUrl
   } else {
-    await writeFile(join(repoDir, 'README.md'), '# PowerSync Seed Repo\n\nThis data was seeded via psgit.\n')
+    await writeFile(join(repoDir, 'README.md'), '# PowerSync Seed Repo\n\nThis data was seeded via powergit.\n')
     await git.add(['README.md'])
     await git.commit('Initial commit')
 
@@ -167,7 +166,7 @@ export async function seedDemoRepository(options: SeedDemoOptions = {}): Promise
     const result = await syncPowerSyncRepository(repoDir, {
       remoteName,
     }).catch((error: unknown) => {
-      console.warn('[psgit] seed sync failed', error)
+      console.warn('[powergit] seed sync failed', error)
       return null
     })
     if (result?.databasePath) {
@@ -219,12 +218,14 @@ type DaemonAuthStatusCheck =
   | null
 
 export async function syncPowerSyncRepository(dir: string, options: SyncCommandOptions = {}): Promise<SyncCommandResult> {
-  const remoteName = options.remoteName ?? process.env.REMOTE_NAME ?? 'origin'
+  const remoteName = options.remoteName ?? process.env.REMOTE_NAME ?? 'powersync'
   const git = simpleGit({ baseDir: dir })
   const remotes = await git.getRemotes(true)
   const remote = remotes.find(r => r.name === remoteName)
   if (!remote) {
-    throw new Error(`Missing Git remote "${remoteName}". Use "psgit remote add powersync" first or specify --remote.`)
+    throw new Error(
+      `Missing Git remote "${remoteName}". Use "powergit remote add powersync" first or specify --remote.`,
+    )
   }
 
   const candidateUrl = remote.refs.fetch || remote.refs.push
@@ -232,7 +233,8 @@ export async function syncPowerSyncRepository(dir: string, options: SyncCommandO
     throw new Error(`Git remote "${remoteName}" does not have a fetch URL configured.`)
   }
 
-  const { endpoint, org, repo } = parsePowerSyncUrl(candidateUrl)
+  const expandedUrl = resolvePowergitRemoteUrl(candidateUrl)
+  const { endpoint, org, repo } = parsePowerSyncUrl(expandedUrl)
 
   const daemonBaseUrl = normalizeBaseUrl(options.daemonUrl ?? process.env.POWERSYNC_DAEMON_URL ?? DEFAULT_DAEMON_URL)
   await ensureDaemonReady(daemonBaseUrl)
@@ -240,7 +242,7 @@ export async function syncPowerSyncRepository(dir: string, options: SyncCommandO
   if (!authStatus || authStatus.status !== 'ready') {
     const reason = authStatus?.reason ? ` (${authStatus.reason})` : ''
     throw new Error(
-      `[psgit] PowerSync daemon is not authenticated${reason}. Run \`psgit login\` to authorise the daemon.`,
+      `[powergit] PowerSync daemon is not authenticated${reason}. Run \`powergit login\` to authorise the daemon.`,
     )
   }
 
@@ -318,7 +320,7 @@ function launchDaemon(): void {
     cwd: DAEMON_WORKSPACE_DIR,
   })
   child.on('error', (error) => {
-    console.warn('[psgit] failed to launch PowerSync daemon', error)
+    console.warn('[powergit] failed to launch PowerSync daemon', error)
   })
   child.unref()
 }

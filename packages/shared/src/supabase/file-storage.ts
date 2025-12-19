@@ -84,7 +84,9 @@ export async function clearSupabaseFileStorage(filePath: string): Promise<void> 
 }
 
 export function resolveSupabaseSessionPath(basePath?: string): string {
-  const defaultDir = resolve(homedir(), '.psgit')
+  const override = process.env.POWERGIT_HOME
+  const defaultDir =
+    override && override.trim().length > 0 ? resolve(override.trim()) : resolve(homedir(), '.powergit')
   if (!basePath || basePath.trim().length === 0) {
     return resolve(defaultDir, 'supabase-auth.json')
   }

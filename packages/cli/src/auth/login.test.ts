@@ -16,7 +16,7 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: createClientMock,
 }))
 
-vi.mock('@shared/core', () => sharedCoreMock)
+vi.mock('@powersync-community/powergit-core', () => sharedCoreMock)
 
 const tempRoots: string[] = []
 
@@ -31,7 +31,7 @@ describe('cli auth login', () => {
   })
 
   async function createSessionPath() {
-    const dir = await mkdtemp(join(tmpdir(), 'psgit-auth-test-'))
+    const dir = await mkdtemp(join(tmpdir(), 'powergit-auth-test-'))
     tempRoots.push(dir)
     return join(dir, 'session.json')
   }

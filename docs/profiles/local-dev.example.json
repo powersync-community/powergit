@@ -11,8 +11,8 @@
       "url": "http://127.0.0.1:55431",
       "anonKey": "anon-placeholder",
       "serviceRoleKey": "service-role-placeholder",
-      "email": "psgit-service@example.com",
-      "password": "psgit-service-password"
+      "email": "powergit-service@example.com",
+      "password": "powergit-service-password"
     },
     "env": {
       "VITE_SUPABASE_URL": "http://127.0.0.1:55431",

@@ -13,7 +13,7 @@ export interface LoadProfileEnvironmentOptions {
 export interface ProfileEnvironmentResult {
   profile: ResolvedProfile
   profilesPath: string
-  psgitDir: string
+  powergitDir: string
   profileEnv: Record<string, string>
   stackEnvPath: string | null
   stackEnvValues: Record<string, string>

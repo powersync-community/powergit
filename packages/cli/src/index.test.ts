@@ -22,10 +22,10 @@ describe('addPowerSyncRemote', () => {
 
     simpleGitMock.mockReturnValue(gitApi)
 
-    await addPowerSyncRemote('/tmp/repo', 'origin', 'powersync::url')
+    await addPowerSyncRemote('/tmp/repo', 'origin', 'powergit::url')
 
     expect(getRemotes).toHaveBeenCalledOnce()
-    expect(addRemote).toHaveBeenCalledWith('origin', 'powersync::url')
+    expect(addRemote).toHaveBeenCalledWith('origin', 'powergit::url')
     expect(remote).not.toHaveBeenCalled()
   })
 
@@ -39,9 +39,9 @@ describe('addPowerSyncRemote', () => {
 
     simpleGitMock.mockReturnValue(gitApi)
 
-    await addPowerSyncRemote('/tmp/repo', 'origin', 'powersync::new-url')
+    await addPowerSyncRemote('/tmp/repo', 'origin', 'powergit::new-url')
 
     expect(addRemote).not.toHaveBeenCalled()
-    expect(remote).toHaveBeenCalledWith(['set-url', 'origin', 'powersync::new-url'])
+    expect(remote).toHaveBeenCalledWith(['set-url', 'origin', 'powergit::new-url'])
   })
 })

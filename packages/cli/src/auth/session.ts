@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { resolveSupabaseSessionPath as resolveSupabaseSessionPathShared } from '@shared/core'
+import { resolveSupabaseSessionPath as resolveSupabaseSessionPathShared } from '@powersync-community/powergit-core'
 
 export interface StoredCredentials {
   endpoint: string
@@ -10,17 +10,17 @@ export interface StoredCredentials {
   obtainedAt?: string
 }
 
-function resolvePsgitHome(): string {
-  const override = process.env.PSGIT_HOME
+function resolvePowergitHome(): string {
+  const override = process.env.POWERGIT_HOME
   if (override && override.trim().length > 0) {
     return resolve(override)
   }
-  return resolve(homedir(), '.psgit')
+  return resolve(homedir(), '.powergit')
 }
 
 function getSessionPath(customPath?: string): string {
   if (customPath) return resolve(customPath)
-  return resolve(resolvePsgitHome(), 'session.json')
+  return resolve(resolvePowergitHome(), 'session.json')
 }
 
 async function ensureDirectory(path: string) {
@@ -82,7 +82,7 @@ export function resolveSupabaseSessionPath(customPath?: string): string {
   } catch (error) {
     // fall back to local resolution when the shared helper is mocked without the function
     if (process.env.POWERSYNC_DEBUG_SUPABASE === '1') {
-      console.warn('[psgit] resolveSupabaseSessionPathShared invocation failed; using local path fallback.', error)
+      console.warn('[powergit] resolveSupabaseSessionPathShared invocation failed; using local path fallback.', error)
     }
   }
   const normalized = resolve(base)

@@ -55,7 +55,7 @@ function parseArgs(rawArgs) {
 }
 
 function launchDaemon(env, passThrough) {
-  const args = ['--filter', '@svc/daemon', 'start', ...passThrough];
+  const args = ['--filter', '@powersync-community/powergit-daemon', 'start', ...passThrough];
   const child = spawn('pnpm', args, {
     cwd: repoRoot,
     stdio: 'inherit',

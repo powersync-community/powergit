@@ -11,8 +11,8 @@ function sharedSrc(path: string) {
 export default defineConfig({
   resolve: {
     alias: [
-      { find: '@shared/core/node', replacement: sharedSrc('node.ts') },
-      { find: '@shared/core', replacement: sharedSrc('index.ts') },
+      { find: '@powersync-community/powergit-core/node', replacement: sharedSrc('node.ts') },
+      { find: '@powersync-community/powergit-core', replacement: sharedSrc('index.ts') },
     ],
   },
   test: {

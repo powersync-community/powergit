@@ -134,7 +134,7 @@ async function performGuestLogin(deviceUrl: string): Promise<void> {
 
 async function runDeviceLoginFlow(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const loginProc = spawn('pnpm', ['--filter', '@pkg/cli', 'exec', 'tsx', 'src/bin.ts', 'login'], {
+    const loginProc = spawn('pnpm', ['--filter', '@powersync-community/powergit', 'exec', 'tsx', 'src/bin.ts', 'login'], {
       cwd: repoRoot,
       env: { ...process.env },
       stdio: ['inherit', 'pipe', 'inherit'],
@@ -196,7 +196,7 @@ async function runDeviceLoginFlow(): Promise<void> {
       if (code === 0) {
         finalize()
       } else {
-        finalize(new Error('Command failed (authenticate daemon): pnpm --filter @pkg/cli exec tsx src/bin.ts login'))
+        finalize(new Error('Command failed (authenticate daemon): pnpm --filter @powersync-community/powergit exec tsx src/bin.ts login'))
       }
     })
   })

@@ -5,7 +5,7 @@ import { chmod, mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildRepoStreamTargets, type PowerSyncImportJob } from '@shared/core';
+import { buildRepoStreamTargets, type PowerSyncImportJob } from '@powersync-community/powergit-core';
 import type { StreamSubscriptionTarget } from './server.js';
 
 type StepId = 'clone' | 'prepare' | 'push' | 'subscribe' | 'cleanup';
@@ -20,10 +20,10 @@ const STEP_DEFINITIONS: Array<{ id: StepId; label: string }> = [
 
 const REMOTE_NAME = 'powersync';
 
-const REMOTE_HELPER_COMMAND = 'git-remote-powersync';
+const REMOTE_HELPER_COMMAND = 'git-remote-powergit';
 const REMOTE_HELPER_FILENAMES = process.platform === 'win32'
-  ? ['git-remote-powersync.exe', 'git-remote-powersync.cmd', 'git-remote-powersync.bat', 'git-remote-powersync']
-  : ['git-remote-powersync'];
+  ? ['git-remote-powergit.exe', 'git-remote-powergit.cmd', 'git-remote-powergit.bat', 'git-remote-powergit']
+  : ['git-remote-powergit'];
 const REMOTE_HELPER_NODE = process.env.POWERSYNC_REMOTE_HELPER_NODE ?? process.execPath;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -316,7 +316,7 @@ async function ensurePowerSyncRemoteHelperInternal(): Promise<void> {
   if (!findHelperOnPath()) {
     throw new Error(
       '[powersync-daemon] Unable to expose PowerSync remote helper on PATH. ' +
-        `Ensure ${WORKSPACE_BIN_DIR} is writable or install git-remote-powersync globally.`,
+        `Ensure ${WORKSPACE_BIN_DIR} is writable or install git-remote-powergit globally.`,
     );
   }
 }
@@ -363,7 +363,7 @@ async function resolveRemoteHelperEntry(): Promise<string> {
 
   throw new Error(
     '[powersync-daemon] PowerSync remote helper entry not found. ' +
-      'Run "pnpm --filter @pkg/remote-helper build" to generate dist/remote-helper/src/bin.js.',
+      'Run "pnpm --filter @powersync-community/powergit-remote-helper build" to generate dist/remote-helper/src/bin.js.',
   );
 }
 
@@ -422,10 +422,10 @@ async function ensureSharedCoreArtifacts(): Promise<void> {
   if (await fileExists(SHARED_CORE_DIST_ENTRY)) {
     return;
   }
-  await buildWorkspacePackage('@shared/core');
+  await buildWorkspacePackage('@powersync-community/powergit-core');
   if (!(await fileExists(SHARED_CORE_DIST_ENTRY))) {
     throw new Error(
-      '[powersync-daemon] Failed to build @shared/core. Ensure pnpm is installed and run "pnpm --filter @shared/core build".',
+      '[powersync-daemon] Failed to build @powersync-community/powergit-core. Ensure pnpm is installed and run "pnpm --filter @powersync-community/powergit-core build".',
     );
   }
 }
@@ -434,10 +434,10 @@ async function ensureRemoteHelperArtifacts(): Promise<void> {
   if (await fileExists(REMOTE_HELPER_DIST_ENTRY)) {
     return;
   }
-  await buildWorkspacePackage('@pkg/remote-helper');
+  await buildWorkspacePackage('@powersync-community/powergit-remote-helper');
   if (!(await fileExists(REMOTE_HELPER_DIST_ENTRY))) {
     throw new Error(
-      '[powersync-daemon] Failed to build @pkg/remote-helper. Run "pnpm --filter @pkg/remote-helper build" and try again.',
+      '[powersync-daemon] Failed to build @powersync-community/powergit-remote-helper. Run "pnpm --filter @powersync-community/powergit-remote-helper build" and try again.',
     );
   }
 }
@@ -575,7 +575,7 @@ function buildPowerSyncRemoteUrl(baseUrl: string, orgId: string, repoId: string)
   const normalizedBase = baseUrl.replace(/\/+$/, '');
   const encodedOrg = encodeURIComponent(orgId);
   const encodedRepo = encodeURIComponent(repoId);
-  return `powersync::${normalizedBase}/orgs/${encodedOrg}/repos/${encodedRepo}`;
+  return `powergit::${normalizedBase}/orgs/${encodedOrg}/repos/${encodedRepo}`;
 }
 
 function normalizeGithubRequest(request: GithubImportRequest): NormalizedGithubImportRequest {

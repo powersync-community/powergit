@@ -62,7 +62,7 @@
     ]
   },
   "devDependencies": {
-    "@pkg/remote-helper": "workspace:*",
+    "@powersync-community/powergit-remote-helper": "workspace:*",
     "supabase": "^2.66.0",
     "tsx": "^4.20.6"
   },

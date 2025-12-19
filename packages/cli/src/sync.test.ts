@@ -6,8 +6,8 @@ vi.mock('simple-git', () => ({
 }))
 
 
-vi.mock('@shared/core', async () => {
-  const actual = await vi.importActual<typeof import('@shared/core')>('@shared/core')
+vi.mock('@powersync-community/powergit-core', async () => {
+  const actual = await vi.importActual<typeof import('@powersync-community/powergit-core')>('@powersync-community/powergit-core')
   const mockClient = vi.fn()
   return {
     ...actual,
@@ -16,7 +16,7 @@ vi.mock('@shared/core', async () => {
 })
 
 import simpleGit from 'simple-git'
-import { PowerSyncRemoteClient } from '@shared/core'
+import { PowerSyncRemoteClient } from '@powersync-community/powergit-core'
 import { syncPowerSyncRepository } from './index.js'
 
 const simpleGitMock = simpleGit as unknown as Mock
@@ -62,10 +62,10 @@ describe('syncPowerSyncRepository', () => {
     const gitApi = {
       getRemotes: vi.fn(async () => [
         {
-          name: 'origin',
+          name: 'powersync',
           refs: {
-            fetch: 'powersync::https://api.example.com/orgs/acme/repos/infra',
-            push: 'powersync::https://api.example.com/orgs/acme/repos/infra',
+            fetch: 'powergit::https://api.example.com/orgs/acme/repos/infra',
+            push: 'powergit::https://api.example.com/orgs/acme/repos/infra',
           },
         },
       ]),
@@ -100,7 +100,7 @@ describe('syncPowerSyncRepository', () => {
       getRemotes: vi.fn(async () => [
         {
           name: 'powersync-upstream',
-          refs: { fetch: 'powersync::https://svc.example.dev/orgs/team/repos/runtime' },
+          refs: { fetch: 'powergit::https://svc.example.dev/orgs/team/repos/runtime' },
         },
       ]),
     }
@@ -130,6 +130,6 @@ describe('syncPowerSyncRepository', () => {
     const gitApi = { getRemotes: vi.fn(async () => []) }
     simpleGitMock.mockReturnValue(gitApi)
 
-    await expect(syncPowerSyncRepository('/tmp/repo')).rejects.toThrow(/Missing Git remote "origin"/)
+    await expect(syncPowerSyncRepository('/tmp/repo')).rejects.toThrow(/Missing Git remote "powersync"/)
   })
 })

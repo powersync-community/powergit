@@ -31,28 +31,28 @@ function firstNonEmpty(...candidates) {
 function resolveSupabaseAuthConfig(env) {
   const url = firstNonEmpty(
     env?.SUPABASE_URL,
-    env?.PSGIT_TEST_SUPABASE_URL,
+    env?.POWERGIT_TEST_SUPABASE_URL,
     process.env.SUPABASE_URL,
-    process.env.PSGIT_TEST_SUPABASE_URL,
+    process.env.POWERGIT_TEST_SUPABASE_URL,
   );
   const anonKey = firstNonEmpty(
     env?.SUPABASE_ANON_KEY,
-    env?.PSGIT_TEST_SUPABASE_ANON_KEY,
+    env?.POWERGIT_TEST_SUPABASE_ANON_KEY,
     process.env.SUPABASE_ANON_KEY,
-    process.env.PSGIT_TEST_SUPABASE_ANON_KEY,
+    process.env.POWERGIT_TEST_SUPABASE_ANON_KEY,
   );
   const email = firstNonEmpty(
     env?.POWERGIT_EMAIL,
-    env?.PSGIT_TEST_SUPABASE_EMAIL,
+    env?.POWERGIT_TEST_SUPABASE_EMAIL,
     process.env.POWERGIT_EMAIL,
-    process.env.PSGIT_TEST_SUPABASE_EMAIL,
+    process.env.POWERGIT_TEST_SUPABASE_EMAIL,
     process.env.SUPABASE_EMAIL,
   );
   const password = firstNonEmpty(
     env?.POWERGIT_PASSWORD,
-    env?.PSGIT_TEST_SUPABASE_PASSWORD,
+    env?.POWERGIT_TEST_SUPABASE_PASSWORD,
     process.env.POWERGIT_PASSWORD,
-    process.env.PSGIT_TEST_SUPABASE_PASSWORD,
+    process.env.POWERGIT_TEST_SUPABASE_PASSWORD,
     process.env.SUPABASE_PASSWORD,
   );
   return { url, anonKey, email, password };
@@ -63,10 +63,10 @@ function resolvePowerSyncEndpoint(env, explicit) {
     explicit,
     env?.POWERSYNC_URL,
     env?.POWERSYNC_DAEMON_ENDPOINT,
-    env?.PSGIT_TEST_ENDPOINT,
+    env?.POWERGIT_TEST_ENDPOINT,
     process.env.POWERSYNC_URL,
     process.env.POWERSYNC_DAEMON_ENDPOINT,
-    process.env.PSGIT_TEST_ENDPOINT,
+    process.env.POWERGIT_TEST_ENDPOINT,
   );
 }
 

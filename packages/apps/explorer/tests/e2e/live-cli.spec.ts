@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process'
 import type { Page } from '@playwright/test'
 import { test, expect } from './diagnostics'
 import { BASE_URL } from '../../playwright.config'
-import { parsePowerSyncUrl } from '@shared/core'
+import { parsePowerSyncUrl } from '@powersync-community/powergit-core'
 import { loadProfileEnvironment } from '../../../../cli/src/profile-env.js'
 
 const WAIT_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_E2E_WAIT_MS ?? '300000', 10)
@@ -26,7 +26,7 @@ const REQUIRED_ENV_VARS = [
   'SUPABASE_PASSWORD',
   'POWERSYNC_URL',
   'POWERSYNC_DAEMON_URL',
-  'PSGIT_TEST_REMOTE_URL',
+  'POWERGIT_TEST_REMOTE_URL',
 ]
 
 const __filename = fileURLToPath(import.meta.url)
@@ -97,7 +97,7 @@ type CliCommandOptions = {
 }
 
 function runCliCommand(args: string[], label: string, options: CliCommandOptions = {}) {
-  const result = spawnSync('pnpm', ['--filter', '@pkg/cli', 'exec', 'tsx', 'src/bin.ts', ...args], {
+  const result = spawnSync('pnpm', ['--filter', '@powersync-community/powergit', 'exec', 'tsx', 'src/bin.ts', ...args], {
     cwd: repoRoot,
     env: { ...process.env },
     stdio: 'inherit',
@@ -106,7 +106,7 @@ function runCliCommand(args: string[], label: string, options: CliCommandOptions
     if (options.tolerateFailure) {
       return
     }
-    throw new Error(`CLI command failed (${label}): pnpm --filter @pkg/cli exec tsx src/bin.ts ${args.join(' ')}`)
+    throw new Error(`CLI command failed (${label}): pnpm --filter @powersync-community/powergit exec tsx src/bin.ts ${args.join(' ')}`)
   }
 }
 
@@ -264,7 +264,7 @@ describeLive('CLI-seeded repo (live PowerSync)', () => {
     supabasePassword = requireEnv('SUPABASE_PASSWORD')
     daemonBaseUrl = normalizeBaseUrl(requireEnv('POWERSYNC_DAEMON_URL'))
 
-    const remoteUrl = requireEnv('PSGIT_TEST_REMOTE_URL')
+    const remoteUrl = requireEnv('POWERGIT_TEST_REMOTE_URL')
     const parsed = parsePowerSyncUrl(remoteUrl)
     orgId = parsed.org
     repoId = parsed.repo

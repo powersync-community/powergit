@@ -37,12 +37,12 @@ export function parsePowerSyncUrl(url: string): ParsedPSUrl {
   const parts = u.pathname.split('/').filter(Boolean);
   const orgIdx = parts.lastIndexOf('orgs');
   const repoIdx = parts.lastIndexOf('repos');
-  if (orgIdx === -1 || repoIdx === -1 || repoIdx !== orgIdx + 2) throw new Error('Invalid powersync URL');
+  if (orgIdx === -1 || repoIdx === -1 || repoIdx !== orgIdx + 2) throw new Error('Invalid powergit URL');
 
   const baseSegments = parts.slice(0, orgIdx);
   const org = decodeURIComponent(parts[orgIdx + 1] ?? '');
   const repo = decodeURIComponent(parts[repoIdx + 1] ?? '');
-  if (!org || !repo) throw new Error('Invalid powersync URL');
+  if (!org || !repo) throw new Error('Invalid powergit URL');
 
   const basePath = baseSegments.length ? `/${baseSegments.map(segment => encodeURIComponent(segment)).join('/')}` : '';
   return { endpoint: u.origin, basePath, org, repo };
@@ -51,6 +51,7 @@ export function parsePowerSyncUrl(url: string): ParsedPSUrl {
 export * from './supabase.js'
 export * from './powersync/schema.js'
 export * from './powersync/streams.js'
+export { PROFILE_DEFAULTS, cloneProfileDefaults } from './profile-defaults.js'
 export { PowerSyncRemoteClient } from './node.js'
 export type { RepoDataSummary } from './node.js'
 export * from './git.js'

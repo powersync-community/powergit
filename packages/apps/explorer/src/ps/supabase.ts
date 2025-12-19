@@ -3,10 +3,10 @@ import { createClient, type Session, type SupabaseClient } from '@supabase/supab
 let cachedClient: SupabaseClient | null = null
 
 const FALLBACK_ENV_KEYS: Record<string, string[]> = {
-  VITE_SUPABASE_URL: ['PSGIT_TEST_SUPABASE_URL'],
-  VITE_SUPABASE_ANON_KEY: ['PSGIT_TEST_SUPABASE_ANON_KEY'],
+  VITE_SUPABASE_URL: ['POWERGIT_TEST_SUPABASE_URL'],
+  VITE_SUPABASE_ANON_KEY: ['POWERGIT_TEST_SUPABASE_ANON_KEY'],
   VITE_SUPABASE_SCHEMA: [],
-  VITE_POWERSYNC_ENDPOINT: ['POWERSYNC_URL', 'PSGIT_TEST_ENDPOINT'],
+  VITE_POWERSYNC_ENDPOINT: ['POWERSYNC_URL', 'POWERGIT_TEST_ENDPOINT'],
 }
 
 const FALLBACK_DEFAULTS: Record<string, string> = {

@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { createSupabaseFileStorage, clearSupabaseFileStorage } from '@shared/core'
+import { createSupabaseFileStorage, clearSupabaseFileStorage } from '@powersync-community/powergit-core'
 import { extractJwtMetadata } from './token.js'
 import {
   clearStoredCredentials,
@@ -62,22 +62,22 @@ function delay(ms: number): Promise<void> {
 
 function inferSupabaseUrl(explicit?: string): string | undefined {
   if (explicit) return explicit
-  return process.env.SUPABASE_URL ?? process.env.PSGIT_TEST_SUPABASE_URL
+  return process.env.SUPABASE_URL ?? process.env.POWERGIT_TEST_SUPABASE_URL
 }
 
 function inferSupabaseAnonKey(explicit?: string): string | undefined {
   if (explicit) return explicit
-  return process.env.SUPABASE_ANON_KEY ?? process.env.PSGIT_TEST_SUPABASE_ANON_KEY
+  return process.env.SUPABASE_ANON_KEY ?? process.env.POWERGIT_TEST_SUPABASE_ANON_KEY
 }
 
 function inferSupabaseEmail(explicit?: string): string | undefined {
   if (explicit) return explicit
-  return process.env.SUPABASE_EMAIL ?? process.env.PSGIT_TEST_SUPABASE_EMAIL
+  return process.env.SUPABASE_EMAIL ?? process.env.POWERGIT_TEST_SUPABASE_EMAIL
 }
 
 function inferSupabasePassword(explicit?: string): string | undefined {
   if (explicit) return explicit
-  return process.env.SUPABASE_PASSWORD ?? process.env.PSGIT_TEST_SUPABASE_PASSWORD
+  return process.env.SUPABASE_PASSWORD ?? process.env.POWERGIT_TEST_SUPABASE_PASSWORD
 }
 
 export async function loginWithSupabasePassword(options: LoginOptions = {}): Promise<LoginResult> {
@@ -85,7 +85,7 @@ export async function loginWithSupabasePassword(options: LoginOptions = {}): Pro
   const supabaseAnonKey = inferSupabaseAnonKey(options.supabaseAnonKey)
   const email = inferSupabaseEmail(options.supabaseEmail)
   const password = inferSupabasePassword(options.supabasePassword)
-  const endpoint = options.endpoint ?? process.env.POWERSYNC_URL ?? process.env.PSGIT_TEST_ENDPOINT
+  const endpoint = options.endpoint ?? process.env.POWERSYNC_URL ?? process.env.POWERGIT_TEST_ENDPOINT
 
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error('Supabase URL and anon key are required for Supabase login. Set SUPABASE_URL and SUPABASE_ANON_KEY.')
@@ -105,7 +105,7 @@ export async function loginWithSupabasePassword(options: LoginOptions = {}): Pro
       persistSession,
       autoRefreshToken: true,
       storage: storage ?? undefined,
-      storageKey: 'psgit',
+      storageKey: 'powergit',
     },
   })
 
@@ -191,7 +191,7 @@ export async function logout(options: { sessionPath?: string; daemonUrl?: string
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (process.env.POWERSYNC_DEBUG_LOGOUT === '1') {
-      console.warn('[psgit] failed to notify daemon logout', message)
+      console.warn('[powergit] failed to notify daemon logout', message)
     }
   }
 }

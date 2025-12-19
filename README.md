@@ -57,7 +57,7 @@ TanStack DB gives us a great query layer, but it does not include a sync engine 
 ## Architecture Overview
 At a high level the happy path looks like this:
 
-1. **Import request (UI → daemon).** A user pastes a GitHub URL into the explorer. The frontend posts that payload to the local daemon. The daemon clones the repo, configures the custom `powersync::` remote, fetches every ref, and pushes the data into Supabase via our remote-helper.
+1. **Import request (UI → daemon).** A user pastes a GitHub URL into the explorer. The frontend posts that payload to the local daemon. The daemon clones the repo, configures the custom `powergit::` remote, fetches every ref, and pushes the data into Supabase via our remote-helper.
 2. **Persist metadata + packs.** During `git push --mirror`, the daemon writes refs/commits/file_changes rows into Supabase tables and uploads each pack file to the Supabase Storage bucket (`git-packs`). Only metadata lands in `public.objects`; the raw pack bytes live in storage.
 3. **PowerSync replication.** The PowerSync service streams those tables down to every connected explorer instance. The browser uses `@powersync/web` + TanStack DB collections to reactively query refs, commits, file changes, and the lightweight pack metadata.
 4. **File tree & viewer.** When the explorer receives the first pack row for a repo, `gitStore.indexPacks` downloads the pack via the daemon’s signed URL endpoint, indexes it inside the browser’s virtual FS, and marks the referenced commit as “ready.” The file tree then renders real Git entries while the viewer can read blobs directly from the locally indexed pack.

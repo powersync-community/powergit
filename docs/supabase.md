@@ -15,7 +15,7 @@ Powergit stores Git metadata in Supabase Postgres and streams it to clients via 
    pnpm dev:stack
    ```
 
-   This runs `supabase start`, starts the local PowerSync service, ensures the schema from `supabase/schema.sql` is applied, seeds PowerSync sync rules from `supabase/powersync/sync-rules.yaml`, and syncs a `local-dev` profile into `~/.psgit/profiles.json`.
+   This runs `supabase start`, starts the local PowerSync service, ensures the schema from `supabase/schema.sql` is applied, seeds PowerSync sync rules from `supabase/powersync/sync-rules.yaml`, and syncs a `local-dev` profile into `~/.powergit/profiles.json`.
 
 2. Start the explorer against the local stack:
 
@@ -34,10 +34,32 @@ Powergit stores Git metadata in Supabase Postgres and streams it to clients via 
 When you need the daemon + browser to share a Supabase-issued token (useful for tests and some auth flows):
 
 ```bash
-pnpm --filter @pkg/cli login
+pnpm --filter @powersync-community/powergit login
 ```
 
-The CLI prints a device code and a verification URL (`POWERSYNC_DAEMON_DEVICE_URL`, default `http://localhost:5783/auth`). Open it, sign in, and the token is stored under `~/.psgit`.
+The CLI prints a device code and a verification URL (`POWERSYNC_DAEMON_DEVICE_URL`, default `http://localhost:5783/auth`). Open it, sign in, and the token is stored under `~/.powergit`.
+
+### CLI live tests (optional)
+
+When you have the local PowerSync + Supabase stack running (for example via `pnpm dev:stack` or your own Docker Compose deployment), you can run an additional Vitest suite that exercises `powergit sync` against the live services. Provide the connection details through environment variables so the test can discover the stack:
+
+| Variable | Purpose |
+| --- | --- |
+| `POWERGIT_TEST_REMOTE_URL` | PowerSync remote URL (e.g. `powergit::https://localhost:8080/orgs/acme/repos/infra`). *Required to enable the test.* |
+| `POWERGIT_TEST_REMOTE_NAME` | Git remote name to target (defaults to `powersync`). |
+| `POWERGIT_TEST_SUPABASE_URL` | Supabase REST URL (used for password login). |
+| `POWERGIT_TEST_SUPABASE_EMAIL` | Supabase user email used for HS256 login. |
+| `POWERGIT_TEST_SUPABASE_PASSWORD` | Supabase user password used for HS256 login. |
+| `POWERGIT_TEST_ENDPOINT` | Explicit PowerSync endpoint override (optional). |
+| `POWERSYNC_DATABASE_URL` | Connection string to the Supabase Postgres instance for seeding stream definitions (defaults to `postgres://postgres:postgres@127.0.0.1:55432/postgres`). |
+
+With the stack up and variables exported, run the tests:
+
+```bash
+pnpm --filter @powersync-community/powergit test
+```
+
+If a required variable is missing, the suite fails fast with a descriptive error so you never accidentally run the stub-only path.
 
 ## Daemonless import (GitHub Actions + Edge Function)
 

@@ -19,15 +19,15 @@ describe('supabase env fallbacks', () => {
   beforeEach(() => {
     __resetSupabaseClientForTests()
     vi.unstubAllEnvs()
-    delete process.env.PSGIT_TEST_SUPABASE_URL
-    delete process.env.PSGIT_TEST_SUPABASE_ANON_KEY
+    delete process.env.POWERGIT_TEST_SUPABASE_URL
+    delete process.env.POWERGIT_TEST_SUPABASE_ANON_KEY
     delete process.env.VITE_SUPABASE_URL
     delete process.env.VITE_SUPABASE_ANON_KEY
   })
 
-  it('falls back to PSGIT_TEST_SUPABASE_* when available', () => {
-    process.env.PSGIT_TEST_SUPABASE_URL = 'http://127.0.0.1:55431'
-    process.env.PSGIT_TEST_SUPABASE_ANON_KEY = 'anon-key'
+  it('falls back to POWERGIT_TEST_SUPABASE_* when available', () => {
+    process.env.POWERGIT_TEST_SUPABASE_URL = 'http://127.0.0.1:55431'
+    process.env.POWERGIT_TEST_SUPABASE_ANON_KEY = 'anon-key'
 
     expect(isSupabaseConfigured()).toBe(true)
   })

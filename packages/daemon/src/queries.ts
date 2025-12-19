@@ -7,8 +7,8 @@ import type {
   PowerSyncTableName,
   RefRow,
   RepoSummaryRow,
-} from '@shared/core';
-import { powerSyncSchemaSpec } from '@shared/core/powersync/schema';
+} from '@powersync-community/powergit-core';
+import { powerSyncSchemaSpec } from '@powersync-community/powergit-core/powersync/schema';
 
 type WriteContext = Parameters<Parameters<PowerSyncDatabase['writeTransaction']>[0]>[0];
 

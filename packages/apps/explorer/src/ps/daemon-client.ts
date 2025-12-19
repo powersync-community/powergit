@@ -1,4 +1,4 @@
-import type { PowerSyncImportJob } from '@shared/core'
+import type { PowerSyncImportJob } from '@powersync-community/powergit-core'
 import { getAccessToken } from './supabase'
 import { dispatchGithubImport, type GithubActionsImportRequest } from './github-actions'
 

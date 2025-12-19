@@ -19,7 +19,7 @@ import type { PersistPushResult, PushUpdateRow } from './queries.js';
 import { SupabaseWriter } from './supabase-writer.js';
 import { GithubImportManager } from './importer.js';
 import { resolveSessionPath } from './auth/index.js';
-import { createSupabaseFileStorage, resolveSupabaseSessionPath } from '@shared/core';
+import { createSupabaseFileStorage, resolveSupabaseSessionPath } from '@powersync-community/powergit-core';
 import { PackStorage } from './storage.js';
 
 const SUPABASE_ONLY_MODE =
@@ -302,7 +302,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       persistSession: true,
       autoRefreshToken: true,
       storage: supabaseStorage,
-      storageKey: 'psgit',
+      storageKey: 'powergit',
     },
     db: {
       schema: supabaseSchema ?? undefined,
@@ -557,7 +557,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   database = databaseInstance;
   const subscriptionManager = new StreamSubscriptionManager(databaseInstance);
   const daemonBaseUrl = `http://127.0.0.1:${config.port}`;
-  const recordImportJob = async (job: import('@shared/core').PowerSyncImportJob) => {
+  const recordImportJob = async (job: import('@powersync-community/powergit-core').PowerSyncImportJob) => {
     const now = job.updatedAt ?? new Date().toISOString();
     const repoKey = `${job.orgId}/${job.repoId}`;
     await databaseInstance.writeTransaction(async (tx) => {
@@ -768,13 +768,13 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       if (authEndpoint && !authToken) {
         return {
           status: 'pending',
-          reason: 'Awaiting Supabase authentication; run `psgit login` to continue.',
+          reason: 'Awaiting Supabase authentication; run `powergit login` to continue.',
           context: buildAuthContext(),
         };
       }
       return {
         status: 'auth_required',
-        reason: 'PowerSync credentials missing; run `psgit login` to authenticate via Supabase.',
+        reason: 'PowerSync credentials missing; run `powergit login` to authenticate via Supabase.',
         context: buildAuthContext(),
       };
     },

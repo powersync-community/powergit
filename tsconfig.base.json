@@ -16,10 +16,10 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@shared/core": [
+      "@powersync-community/powergit-core": [
         "packages/shared/src/index.ts"
       ],
-      "@shared/core/*": [
+      "@powersync-community/powergit-core/*": [
         "packages/shared/src/*"
       ]
     }

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 
-const DEFAULT_SESSION_RELATIVE_PATH = '.psgit/session.json';
+const DEFAULT_SESSION_RELATIVE_PATH = '.powergit/session.json';
 
 export interface StoredAuthCredentials {
   endpoint: string;
@@ -16,6 +16,10 @@ export interface StoredAuthCredentials {
 export function resolveSessionPath(customPath?: string): string {
   if (customPath) {
     return resolve(customPath);
+  }
+  const override = process.env.POWERGIT_HOME;
+  if (override && override.trim().length > 0) {
+    return resolve(override, 'session.json');
   }
   return resolve(homedir(), DEFAULT_SESSION_RELATIVE_PATH);
 }

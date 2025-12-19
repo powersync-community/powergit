@@ -21,10 +21,10 @@
       "@tsdb/*": [
         "./src/tsdb/*"
       ],
-      "@shared/core": [
+      "@powersync-community/powergit-core": [
         "../../shared/src/index.ts"
       ],
-      "@shared/core/*": [
+      "@powersync-community/powergit-core/*": [
         "../../shared/src/*"
       ]
     }

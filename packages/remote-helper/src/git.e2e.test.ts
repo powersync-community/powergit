@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { startStack, stopStack } from '../../../scripts/test-stack-hooks.mjs'
-import { getServerSupabaseClient, parsePowerSyncUrl, buildRepoStreamTargets, formatStreamKey } from '@shared/core'
+import { getServerSupabaseClient, parsePowerSyncUrl, buildRepoStreamTargets, formatStreamKey } from '@powersync-community/powergit-core'
 
 const execFileAsync = promisify(execFile)
 const MAX_WAIT_MS = Number.parseInt(process.env.POWERSYNC_TEST_MAX_WAIT_MS ?? '60000', 10)
@@ -105,7 +105,7 @@ async function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 const tsxEsmPath = requireForTests.resolve('tsx/esm')
 
 async function createHelperExecutable(dir: string): Promise<string> {
-  const helperPath = join(dir, 'git-remote-powersync')
+  const helperPath = join(dir, 'git-remote-powergit')
   const entry = fileURLToPath(new URL('./bin.ts', import.meta.url))
   const script = [
     '#!/usr/bin/env node',
@@ -139,13 +139,13 @@ describeIfSupabase('git push/fetch via PowerSync remote helper', () => {
     stackEnv = await startStack({ skipDemoSeed: true })
     powersyncEndpoint = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
     const remoteUrl =
-      process.env.PSGIT_TEST_REMOTE_URL ??
-      stackEnv?.PSGIT_TEST_REMOTE_URL ??
-      `powersync::${powersyncEndpoint}/orgs/demo/repos/infra`
+      process.env.POWERGIT_TEST_REMOTE_URL ??
+      stackEnv?.POWERGIT_TEST_REMOTE_URL ??
+      `powergit::${powersyncEndpoint}/orgs/demo/repos/infra`
     const parsed = parsePowerSyncUrl(remoteUrl)
     org = parsed.org
     repo = parsed.repo
-    powersyncRemoteUrl = `powersync::${powersyncEndpoint}/orgs/${org}/repos/${repo}`
+    powersyncRemoteUrl = `powergit::${powersyncEndpoint}/orgs/${org}/repos/${repo}`
 
     helperDir = await mkdtemp(join(tmpdir(), 'powersync-helper-'))
     await createHelperExecutable(helperDir)

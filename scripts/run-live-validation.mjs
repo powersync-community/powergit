@@ -2,10 +2,10 @@
 import { spawn } from 'node:child_process';
 
 const REQUIRED_ENV_VARS = [
-  'PSGIT_TEST_REMOTE_URL',
-  'PSGIT_TEST_SUPABASE_URL',
-  'PSGIT_TEST_SUPABASE_EMAIL',
-  'PSGIT_TEST_SUPABASE_PASSWORD',
+  'POWERGIT_TEST_REMOTE_URL',
+  'POWERGIT_TEST_SUPABASE_URL',
+  'POWERGIT_TEST_SUPABASE_EMAIL',
+  'POWERGIT_TEST_SUPABASE_PASSWORD',
 ];
 
 function main() {
@@ -25,7 +25,7 @@ function main() {
 
   const child = spawn(
     'pnpm',
-    ['--filter', '@pkg/cli', 'test', '--', '--run', 'src/cli.e2e.test.ts', '--reporter=default'],
+    ['--filter', '@powersync-community/powergit', 'test', '--', '--run', 'src/cli.e2e.test.ts', '--reporter=default'],
     {
       stdio: 'inherit',
       env: process.env,
