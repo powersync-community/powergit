@@ -1,5 +1,15 @@
 # @powersync-community/powergit
 
+## 1.2.1
+
+### Patch Changes
+
+- Fix missing build files
+- Updated dependencies
+  - @powersync-community/powergit-daemon@1.2.1
+  - @powersync-community/powergit-remote-helper@1.2.1
+  - @powersync-community/powergit-core@1.2.1
+
 ## 1.2.0
 
 ### Minor Changes

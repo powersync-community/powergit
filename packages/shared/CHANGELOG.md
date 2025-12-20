@@ -1,5 +1,11 @@
 # @powersync-community/powergit-core
 
+## 1.2.1
+
+### Patch Changes
+
+- Fix missing build files
+
 ## 1.2.0
 
 ### Minor Changes
