@@ -71,9 +71,9 @@ git remote -v
 > **Why `powergit::`?**
 > Git uses the prefix before `::` to pick a remote helper binary named `git-remote-<prefix>`. We ship `git-remote-powergit`, so the URL must start with `powergit::`.
 
-### Shorthand remote URLs (profiles/aliases)
+### Shorthand remote URLs (profiles)
 
-`powergit::/<org>/<repo>` uses the default profile (production out of the box). To target another stack, create a profile alias that bundles **both** the PowerSync and Supabase endpoints, then reference that alias in the remote URL:
+`powergit::/<org>/<repo>` uses the default profile (production out of the box). To target another stack, create a profile that bundles **both** the PowerSync and Supabase endpoints, then reference that profile in the remote URL:
 
 ```bash
 powergit profile set staging \
@@ -87,7 +87,7 @@ powergit profile set staging --set supabase.serviceRoleKey=<service-role-key>
 git remote add powersync powergit::staging/<org>/<repo>
 ```
 
-Supabase credentials are **not** part of the remote URL. They live in the profile/env and are used only for login/auth, so prefer aliases when you need a non-prod or custom stack.
+Supabase config (URL/anon key) and your login session are **not** part of the remote URL. Keep them in the profile/env (and never put a `supabase.serviceRoleKey` in a Git remote).
 
 ### Choose a different remote name
 
@@ -105,7 +105,7 @@ Before running commands that talk to PowerSync (push/fetch or `powergit sync`), 
 powergit login
 ```
 
-`powergit login` uses Supabase credentials from your profile or environment (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_EMAIL`, `SUPABASE_PASSWORD`). The resulting Supabase JWT is cached under `~/.powergit/session.json` and automatically reused by the CLI.
+`powergit login` uses Supabase credentials from your profile or environment (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_EMAIL`, `SUPABASE_PASSWORD`). The resulting Supabase JWT is cached per profile under `~/.powergit/daemon/<profile>/session.json` and automatically reused by the daemon.
 
 Need to stash a token manually (for CI or when you already have one)?
 

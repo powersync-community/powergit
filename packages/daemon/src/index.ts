@@ -543,6 +543,11 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
 
   const buildAuthContext = (): Record<string, unknown> | null => {
     const context: Record<string, unknown> = {};
+    const profileNameCandidate =
+      (process.env.POWERGIT_PROFILE ?? process.env.STACK_PROFILE ?? process.env.POWERGIT_ACTIVE_PROFILE)?.trim() ?? '';
+    if (profileNameCandidate) {
+      context.profile = profileNameCandidate;
+    }
     if (authEndpoint) {
       context.endpoint = authEndpoint;
     }

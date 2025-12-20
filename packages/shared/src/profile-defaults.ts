@@ -1,7 +1,10 @@
 /**
  * Canonical profile defaults shared across the CLI and helper tooling.
- * Keep environment-specific secrets out of source control; update this module
- * before publishing if endpoints or seeded credentials change.
+ * Keep secrets (e.g. Supabase service role keys) out of source control.
+ *
+ * Notes:
+ * - Supabase project URLs and anon keys are typically public (used in client apps).
+ * - PowerSync tokens, Supabase service role keys, and user credentials are secrets.
  */
 
 export const PROFILE_DEFAULTS = {

@@ -59,7 +59,7 @@ export interface RepoDataSummary {
   counts: Record<PowerSyncTableName, number>
 }
 
-export { resolvePowergitRemote, resolvePowergitRemoteUrl } from './remote-alias.js'
+export { resolvePowergitRemote, resolvePowergitRemoteUrl } from './remote-profile.js'
 
 interface JsonFetchPack {
   pack?: string

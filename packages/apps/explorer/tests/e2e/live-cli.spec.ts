@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process'
 import type { Page } from '@playwright/test'
 import { test, expect } from './diagnostics'
 import { BASE_URL } from '../../playwright.config'
-import { parsePowerSyncUrl } from '@powersync-community/powergit-core'
+import { resolvePowergitRemote } from '@powersync-community/powergit-core/node'
 import { loadProfileEnvironment } from '../../../../cli/src/profile-env.js'
 
 const WAIT_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_E2E_WAIT_MS ?? '300000', 10)
@@ -265,7 +265,7 @@ describeLive('CLI-seeded repo (live PowerSync)', () => {
     daemonBaseUrl = normalizeBaseUrl(requireEnv('POWERSYNC_DAEMON_URL'))
 
     const remoteUrl = requireEnv('POWERGIT_TEST_REMOTE_URL')
-    const parsed = parsePowerSyncUrl(remoteUrl)
+    const parsed = resolvePowergitRemote(remoteUrl)
     orgId = parsed.org
     repoId = parsed.repo
 

@@ -10,6 +10,22 @@ export interface StoredCredentials {
   obtainedAt?: string
 }
 
+function sanitizeProfileKey(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return 'default'
+  return trimmed.replace(/[^a-zA-Z0-9._-]+/g, '-')
+}
+
+function resolveProfileNameFromEnv(): string {
+  const candidate =
+    process.env.POWERGIT_PROFILE ??
+    process.env.STACK_PROFILE ??
+    process.env.POWERGIT_ACTIVE_PROFILE ??
+    'prod'
+  const trimmed = String(candidate ?? '').trim()
+  return trimmed.length > 0 ? trimmed : 'prod'
+}
+
 function resolvePowergitHome(): string {
   const override = process.env.POWERGIT_HOME
   if (override && override.trim().length > 0) {
@@ -20,7 +36,8 @@ function resolvePowergitHome(): string {
 
 function getSessionPath(customPath?: string): string {
   if (customPath) return resolve(customPath)
-  return resolve(resolvePowergitHome(), 'session.json')
+  const profileKey = sanitizeProfileKey(resolveProfileNameFromEnv())
+  return resolve(resolvePowergitHome(), 'daemon', profileKey, 'session.json')
 }
 
 async function ensureDirectory(path: string) {

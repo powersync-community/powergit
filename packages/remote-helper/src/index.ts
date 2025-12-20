@@ -2,7 +2,9 @@
 import { spawn } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { parsePowerSyncUrl, type GitPushSummary, buildRepoStreamTargets } from '@powersync-community/powergit-core'
+import { homedir } from 'node:os'
+import { resolve as resolvePath } from 'node:path'
+import { type GitPushSummary, buildRepoStreamTargets } from '@powersync-community/powergit-core'
 import {
   PowerSyncRemoteClient,
   type FetchPackResult,
@@ -12,9 +14,9 @@ import {
 
 const ZERO_SHA = '0000000000000000000000000000000000000000'
 const MAX_COMMITS_PER_UPDATE = Number.parseInt(process.env.POWERSYNC_MAX_PUSH_COMMITS ?? '256', 10)
-const DEFAULT_DAEMON_URL = process.env.POWERSYNC_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? 'http://127.0.0.1:5030'
+const DEFAULT_DAEMON_URL = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
 const DEFAULT_DAEMON_START_COMMAND = process.env.PNPM_WORKSPACE_DIR
-  ? 'pnpm --filter @powersync-community/powergit-daemon start'
+  ? 'pnpm dev:daemon'
   : 'powergit-daemon'
 const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? DEFAULT_DAEMON_START_COMMAND
 const DAEMON_AUTOSTART_DISABLED = (process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
@@ -25,11 +27,12 @@ const CLI_LOGIN_HINT = process.env.POWERSYNC_LOGIN_COMMAND ?? 'powergit login'
 const AUTH_STATUS_POLL_INTERVAL_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_AUTH_POLL_MS ?? '500', 10)
 const DAEMON_START_HINT =
   'PowerSync daemon unreachable — start it with "powergit-daemon" or point POWERSYNC_DAEMON_URL at a running instance.'
+const DAEMON_WORKSPACE_DIR = process.env.PNPM_WORKSPACE_DIR ?? process.cwd()
 
 interface FetchRequest { sha: string; name: string }
 interface PushRequest { src: string; dst: string; force?: boolean }
 
-let parsed: ReturnType<typeof parsePowerSyncUrl> | null = null
+let parsed: { org: string; repo: string } | null = null
 let daemonClient: PowerSyncRemoteClient | null = null
 let daemonBaseUrl = normalizeBaseUrl(DEFAULT_DAEMON_URL)
 let daemonProfileName: string | null = null
@@ -234,9 +237,9 @@ function normalizeBaseUrl(url: string): string {
   return url.replace(/\/$/, '')
 }
 
-function ensureRemote(): { org: string; repo: string; endpoint: string; basePath?: string } | null {
+function ensureRemote(): { org: string; repo: string } | null {
   if (!parsed) return null
-  return { org: parsed.org, repo: parsed.repo, endpoint: parsed.endpoint, basePath: parsed.basePath }
+  return { org: parsed.org, repo: parsed.repo }
 }
 
 async function ensureDaemonSubscribed(): Promise<void> {
@@ -268,6 +271,55 @@ async function ensureDaemonSubscribed(): Promise<void> {
 }
 
 let daemonStartInFlight = false
+
+function resolvePowergitHome(): string {
+  const override = process.env.POWERGIT_HOME
+  if (override && override.trim().length > 0) {
+    return resolvePath(override.trim())
+  }
+  return resolvePath(homedir(), '.powergit')
+}
+
+function sanitizeProfileKey(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return 'default'
+  // Keep it filesystem friendly but deterministic.
+  return trimmed.replace(/[^a-zA-Z0-9._-]+/g, '-')
+}
+
+function resolveDaemonStatePaths(profileName: string | null): { dbPath: string; sessionPath: string } {
+  const profileKey = sanitizeProfileKey(profileName ?? 'default')
+  const baseDir = resolvePath(resolvePowergitHome(), 'daemon', profileKey)
+  return {
+    dbPath: resolvePath(baseDir, 'powersync-daemon.db'),
+    sessionPath: resolvePath(baseDir, 'session.json'),
+  }
+}
+
+function extractContextString(context: Record<string, unknown> | null | undefined, key: string): string | null {
+  if (!context) return null
+  const value = context[key]
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function extractDaemonProfileName(context: Record<string, unknown> | null | undefined): string | null {
+  return extractContextString(context, 'profile') ?? extractContextString(context, 'profileName')
+}
+
+function extractDaemonEndpoint(context: Record<string, unknown> | null | undefined): string | null {
+  return extractContextString(context, 'endpoint')
+}
+
+function resolveLoginHint(): string {
+  const override = process.env.POWERSYNC_LOGIN_COMMAND
+  if (override && override.trim().length > 0) return override.trim()
+  if (daemonProfileName && daemonProfileName.trim().length > 0 && daemonProfileName !== 'prod') {
+    return `STACK_PROFILE=${daemonProfileName} powergit login`
+  }
+  return 'powergit login'
+}
 
 async function ensureDaemonReady(): Promise<void> {
   if (typeof globalThis.fetch !== 'function') return
@@ -304,8 +356,84 @@ async function ensureDaemonReady(): Promise<void> {
     }
   }
 
+  await ensureDaemonMatchesRemote()
+
   daemonStartInFlight = false
   await ensureDaemonAuthenticated()
+}
+
+async function ensureDaemonMatchesRemote(): Promise<void> {
+  if (!daemonProfileName && !daemonEndpointOverride) {
+    return
+  }
+  const status = await fetchDaemonAuthStatus()
+  const context = status?.context ?? null
+  const currentProfile = extractDaemonProfileName(context)
+  const currentEndpoint = extractDaemonEndpoint(context)
+
+  const desiredProfile = daemonProfileName
+  const desiredEndpoint = daemonEndpointOverride
+
+  const profileMismatch =
+    Boolean(desiredProfile && currentProfile && desiredProfile.trim().length > 0 && currentProfile !== desiredProfile)
+  const endpointMismatch =
+    Boolean(
+      desiredEndpoint &&
+        currentEndpoint &&
+        normalizeBaseUrl(currentEndpoint) !== normalizeBaseUrl(desiredEndpoint),
+    )
+
+  if (!profileMismatch && !endpointMismatch) {
+    return
+  }
+
+  if (DAEMON_AUTOSTART_DISABLED) {
+    const target = desiredProfile ? `profile "${desiredProfile}"` : 'the requested stack'
+    const running = currentProfile ? ` (currently "${currentProfile}")` : ''
+    throw new Error(
+      `PowerSync daemon is running with the wrong configuration${running}. Restart it for ${target} and retry.`,
+    )
+  }
+
+  debugLog(
+    `[powersync] restarting daemon (profileMismatch=${profileMismatch}, endpointMismatch=${endpointMismatch})`,
+  )
+
+  await requestDaemonShutdown()
+  await waitForDaemonExit()
+  daemonClient = null
+
+  // Restart with the requested environment/profile.
+  launchDaemon()
+
+  const deadline = Date.now() + DAEMON_START_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (await isDaemonResponsive()) {
+      return
+    }
+    await delay(200)
+  }
+  throw new Error(`${DAEMON_START_HINT} (daemon restart timed out)`)
+}
+
+async function requestDaemonShutdown(): Promise<void> {
+  try {
+    const res = await fetch(`${daemonBaseUrl}/shutdown`, { method: 'POST' })
+    if (res.ok) return
+    const text = await res.text().catch(() => '')
+    throw new Error(`shutdown returned ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`)
+  } catch (error) {
+    throw new Error(`failed to request daemon shutdown (${(error as Error).message})`)
+  }
+}
+
+async function waitForDaemonExit(timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!(await isDaemonResponsive())) return
+    await delay(200)
+  }
+  throw new Error('daemon shutdown timed out')
 }
 
 type NormalizedAuthStatus =
@@ -390,14 +518,14 @@ async function ensureDaemonAuthenticated(): Promise<void> {
     if (lastStatus.status === 'auth_required') {
       const instructions = formatDeviceInstructions(lastStatus.context)
       throw new Error(
-        `PowerSync daemon is not authenticated. Run "${CLI_LOGIN_HINT}" to sign in via Supabase.${
+        `PowerSync daemon is not authenticated. Run "${resolveLoginHint()}" to sign in via Supabase.${
           instructions ? ` ${instructions}.` : ''
         }`,
       )
     }
     if (lastStatus.status === 'error') {
       const reason = lastStatus.reason ? ` (${lastStatus.reason})` : ''
-      throw new Error(`PowerSync daemon authentication failed${reason}. Run "${CLI_LOGIN_HINT}" and retry.`)
+      throw new Error(`PowerSync daemon authentication failed${reason}. Run "${resolveLoginHint()}" and retry.`)
     }
   }
 
@@ -419,6 +547,7 @@ function launchDaemon(): void {
       detached: true,
       stdio: 'ignore',
       env,
+      cwd: DAEMON_WORKSPACE_DIR,
     })
     child.unref()
   } catch (error) {
@@ -431,28 +560,49 @@ function buildDaemonEnv(): NodeJS.ProcessEnv {
     if (!daemonEndpointOverride) return process.env
   }
   const env = { ...process.env }
-  if (daemonEndpointOverride) {
-    if (!env.POWERSYNC_URL) {
-      env.POWERSYNC_URL = daemonEndpointOverride
-    }
-    if (!env.POWERSYNC_DAEMON_ENDPOINT) {
-      env.POWERSYNC_DAEMON_ENDPOINT = daemonEndpointOverride
-    }
-    if (!env.POWERSYNC_ENDPOINT) {
-      env.POWERSYNC_ENDPOINT = daemonEndpointOverride
-    }
-  }
   if (daemonProfileName) {
-    if (!env.STACK_PROFILE) {
-      env.STACK_PROFILE = daemonProfileName
+    const profileManagedKeys = [
+      'POWERSYNC_URL',
+      'POWERSYNC_DAEMON_ENDPOINT',
+      'POWERSYNC_ENDPOINT',
+      'POWERGIT_TEST_ENDPOINT',
+      'SUPABASE_URL',
+      'SUPABASE_ANON_KEY',
+      'SUPABASE_SERVICE_ROLE_KEY',
+      'SUPABASE_EMAIL',
+      'SUPABASE_PASSWORD',
+      'SUPABASE_SCHEMA',
+      'POWERGIT_TEST_SUPABASE_URL',
+      'POWERGIT_TEST_SUPABASE_ANON_KEY',
+      'POWERGIT_TEST_SUPABASE_SERVICE_ROLE_KEY',
+      'POWERGIT_TEST_SUPABASE_EMAIL',
+      'POWERGIT_TEST_SUPABASE_PASSWORD',
+    ]
+    for (const key of profileManagedKeys) {
+      delete env[key]
     }
-    if (!env.POWERGIT_PROFILE) {
-      env.POWERGIT_PROFILE = daemonProfileName
-    }
-    if (!env.POWERGIT_ACTIVE_PROFILE) {
-      env.POWERGIT_ACTIVE_PROFILE = daemonProfileName
-    }
+
+    env.STACK_PROFILE = daemonProfileName
+    env.POWERGIT_PROFILE = daemonProfileName
+    env.POWERGIT_ACTIVE_PROFILE = daemonProfileName
   }
+
+  if (daemonEndpointOverride) {
+    env.POWERSYNC_URL = daemonEndpointOverride
+    env.POWERSYNC_DAEMON_ENDPOINT = daemonEndpointOverride
+    env.POWERSYNC_ENDPOINT = daemonEndpointOverride
+    env.POWERGIT_TEST_ENDPOINT = daemonEndpointOverride
+  }
+
+  const stateProfileName = daemonProfileName ?? env.STACK_PROFILE ?? env.POWERGIT_PROFILE ?? env.POWERGIT_ACTIVE_PROFILE ?? null
+  const statePaths = resolveDaemonStatePaths(stateProfileName)
+  if (!env.POWERSYNC_DAEMON_DB_PATH) {
+    env.POWERSYNC_DAEMON_DB_PATH = statePaths.dbPath
+  }
+  if (!env.POWERSYNC_DAEMON_SESSION_PATH) {
+    env.POWERSYNC_DAEMON_SESSION_PATH = statePaths.sessionPath
+  }
+
   return env
 }
 
@@ -491,13 +641,9 @@ function tryParseRemote(candidate?: string): boolean {
   if (!candidate) return false
   try {
     const resolved = resolvePowergitRemote(candidate)
-    parsed = parsePowerSyncUrl(resolved.url)
-    if (!daemonEndpointOverride) {
-      daemonEndpointOverride = parsed.basePath ? `${parsed.endpoint}${parsed.basePath}` : parsed.endpoint
-    }
-    if (resolved.profileName && !daemonProfileName) {
-      daemonProfileName = resolved.profileName
-    }
+    parsed = { org: resolved.org, repo: resolved.repo }
+    if (!daemonEndpointOverride && resolved.powersyncUrl) daemonEndpointOverride = resolved.powersyncUrl
+    if (resolved.profileName && !daemonProfileName) daemonProfileName = resolved.profileName
     return true
   } catch (error) {
     if (candidate.includes('::') || candidate.includes('://')) {

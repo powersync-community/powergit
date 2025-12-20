@@ -2,8 +2,6 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 
-const DEFAULT_SESSION_RELATIVE_PATH = '.powergit/session.json';
-
 export interface StoredAuthCredentials {
   endpoint: string;
   token: string;
@@ -13,15 +11,36 @@ export interface StoredAuthCredentials {
   metadata?: Record<string, unknown> | null;
 }
 
+function resolvePowergitHome(): string {
+  const override = process.env.POWERGIT_HOME;
+  if (override && override.trim().length > 0) {
+    return resolve(override.trim());
+  }
+  return resolve(homedir(), '.powergit');
+}
+
+function sanitizeProfileKey(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return 'default';
+  return trimmed.replace(/[^a-zA-Z0-9._-]+/g, '-');
+}
+
+function resolveProfileNameFromEnv(): string {
+  const candidate =
+    process.env.POWERGIT_PROFILE ??
+    process.env.STACK_PROFILE ??
+    process.env.POWERGIT_ACTIVE_PROFILE ??
+    'prod';
+  const trimmed = String(candidate ?? '').trim();
+  return trimmed.length > 0 ? trimmed : 'prod';
+}
+
 export function resolveSessionPath(customPath?: string): string {
   if (customPath) {
     return resolve(customPath);
   }
-  const override = process.env.POWERGIT_HOME;
-  if (override && override.trim().length > 0) {
-    return resolve(override, 'session.json');
-  }
-  return resolve(homedir(), DEFAULT_SESSION_RELATIVE_PATH);
+  const profileKey = sanitizeProfileKey(resolveProfileNameFromEnv());
+  return resolve(resolvePowergitHome(), 'daemon', profileKey, 'session.json');
 }
 
 async function ensureDirectoryExists(filePath: string): Promise<void> {

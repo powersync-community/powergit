@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Mock } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 vi.mock('simple-git', () => ({
   default: vi.fn(),
@@ -26,12 +29,27 @@ const mockGetRepoSummary = vi.fn()
 
 describe('syncPowerSyncRepository', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>
+  const originalHome = process.env.POWERGIT_HOME
+  let tempHome: string
 
   beforeEach(() => {
     simpleGitMock.mockReset()
     PowerSyncRemoteClientMock.mockReset()
     mockGetRepoSummary.mockReset()
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    tempHome = mkdtempSync(join(tmpdir(), 'powergit-sync-test-'))
+    process.env.POWERGIT_HOME = tempHome
+    writeFileSync(
+      join(tempHome, 'profiles.json'),
+      JSON.stringify(
+        {
+          test: { powersync: { url: 'https://api.example.com' } },
+        },
+        null,
+        2,
+      ),
+    )
 
     PowerSyncRemoteClientMock.mockImplementation(() => ({
       getRepoSummary: mockGetRepoSummary,
@@ -56,6 +74,14 @@ describe('syncPowerSyncRepository', () => {
   afterEach(() => {
     warnSpy.mockRestore()
     delete (global as any).fetch
+    if (originalHome !== undefined) {
+      process.env.POWERGIT_HOME = originalHome
+    } else {
+      delete process.env.POWERGIT_HOME
+    }
+    if (tempHome) {
+      rmSync(tempHome, { recursive: true, force: true })
+    }
   })
 
   it('fetches summary via daemon and returns counts', async () => {
@@ -64,8 +90,8 @@ describe('syncPowerSyncRepository', () => {
         {
           name: 'powersync',
           refs: {
-            fetch: 'powergit::https://api.example.com/orgs/acme/repos/infra',
-            push: 'powergit::https://api.example.com/orgs/acme/repos/infra',
+            fetch: 'powergit::test/acme/infra',
+            push: 'powergit::test/acme/infra',
           },
         },
       ]),
@@ -100,7 +126,7 @@ describe('syncPowerSyncRepository', () => {
       getRemotes: vi.fn(async () => [
         {
           name: 'powersync-upstream',
-          refs: { fetch: 'powergit::https://svc.example.dev/orgs/team/repos/runtime' },
+          refs: { fetch: 'powergit::test/team/runtime' },
         },
       ]),
     }

@@ -37,7 +37,7 @@ When you need the daemon + browser to share a Supabase-issued token (useful for 
 pnpm --filter @powersync-community/powergit login
 ```
 
-The CLI prints a device code and a verification URL (`POWERSYNC_DAEMON_DEVICE_URL`, default `http://localhost:5783/auth`). Open it, sign in, and the token is stored under `~/.powergit`.
+The CLI prints a device code and a verification URL (`POWERSYNC_DAEMON_DEVICE_URL`, default `http://localhost:5783/auth`). Open it, sign in, and the token is stored under `~/.powergit/daemon/<profile>/`.
 
 ### CLI live tests (optional)
 
@@ -45,7 +45,7 @@ When you have the local PowerSync + Supabase stack running (for example via `pnp
 
 | Variable | Purpose |
 | --- | --- |
-| `POWERGIT_TEST_REMOTE_URL` | PowerSync remote URL (e.g. `powergit::https://localhost:8080/orgs/acme/repos/infra`). *Required to enable the test.* |
+| `POWERGIT_TEST_REMOTE_URL` | Powergit remote URL (e.g. `powergit::/acme/infra`, `powergit::staging/acme/infra`, or `powergit::local-dev/acme/infra`). *Required to enable the test.* |
 | `POWERGIT_TEST_REMOTE_NAME` | Git remote name to target (defaults to `powersync`). |
 | `POWERGIT_TEST_SUPABASE_URL` | Supabase REST URL (used for password login). |
 | `POWERGIT_TEST_SUPABASE_EMAIL` | Supabase user email used for HS256 login. |

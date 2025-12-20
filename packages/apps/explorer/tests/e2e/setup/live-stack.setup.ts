@@ -205,7 +205,6 @@ async function runDeviceLoginFlow(): Promise<void> {
 async function loginDaemonIfNeeded(): Promise<void> {
   const daemonUrl =
     process.env.POWERSYNC_DAEMON_URL ??
-    process.env.POWERSYNC_DAEMON_ENDPOINT ??
     'http://127.0.0.1:5030'
   const daemonBase = daemonUrl.replace(/\/+$/, '')
   const status = await fetch(`${daemonBase}/auth/status`)

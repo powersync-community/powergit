@@ -23,7 +23,6 @@ export interface ResolveDaemonConfigOptions {
   port?: number;
 }
 
-const DEFAULT_DB_RELATIVE_PATH = '.powersync/daemon/powersync-daemon.db';
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 5030;
 
@@ -35,12 +34,37 @@ function resolveEnvList(value?: string): string[] {
     .filter(Boolean);
 }
 
+function resolvePowergitHome(): string {
+  const override = process.env.POWERGIT_HOME;
+  if (override && override.trim().length > 0) {
+    return resolve(override.trim());
+  }
+  return resolve(homedir(), '.powergit');
+}
+
+function sanitizeProfileKey(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return 'default';
+  return trimmed.replace(/[^a-zA-Z0-9._-]+/g, '-');
+}
+
+function resolveProfileNameFromEnv(): string {
+  const candidate = process.env.POWERGIT_PROFILE ?? process.env.STACK_PROFILE ?? process.env.POWERGIT_ACTIVE_PROFILE ?? 'prod';
+  const trimmed = String(candidate ?? '').trim();
+  return trimmed.length > 0 ? trimmed : 'prod';
+}
+
+function resolveDefaultDbPath(): string {
+  const profileKey = sanitizeProfileKey(resolveProfileNameFromEnv());
+  return resolve(resolvePowergitHome(), 'daemon', profileKey, 'powersync-daemon.db');
+}
+
 async function ensureDirectoryExists(targetPath: string): Promise<void> {
   await fs.mkdir(targetPath, { recursive: true });
 }
 
 export async function resolveDaemonConfig(options: ResolveDaemonConfigOptions = {}): Promise<DaemonConfig> {
-  const dbPath = resolve(options.dbPath ?? process.env.POWERSYNC_DAEMON_DB_PATH ?? resolve(homedir(), DEFAULT_DB_RELATIVE_PATH));
+  const dbPath = resolve(options.dbPath ?? process.env.POWERSYNC_DAEMON_DB_PATH ?? resolveDefaultDbPath());
   await ensureDirectoryExists(dirname(dbPath));
 
   const endpoint = options.endpoint ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? process.env.POWERSYNC_URL ?? undefined;

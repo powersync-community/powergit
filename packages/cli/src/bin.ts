@@ -452,8 +452,7 @@ async function runLogoutCommand(args: LogoutCommandArgs) {
 }
 
 async function runDaemonStopCommand(args: DaemonStopCommandArgs) {
-  const defaultDaemonUrl =
-    process.env.POWERSYNC_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? 'http://127.0.0.1:5030'
+  const defaultDaemonUrl = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
   const baseUrl = normalizeDaemonBaseUrl(args.daemonUrl ?? defaultDaemonUrl)
   const responsive = await isDaemonResponsiveLocal(baseUrl)
   if (!responsive) {
@@ -774,7 +773,7 @@ function buildCli() {
         y
           .positional('url', {
             type: 'string',
-            describe: 'Powergit remote URL (powergit::/org/repo or powergit::https://…)',
+            describe: 'Powergit remote URL (powergit::/org/repo or powergit::<profile>/org/repo)',
           })
           .option('remote', {
             alias: 'r',

@@ -8,7 +8,8 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { startStack, stopStack } from '../../../scripts/test-stack-hooks.mjs'
-import { getServerSupabaseClient, parsePowerSyncUrl, buildRepoStreamTargets, formatStreamKey } from '@powersync-community/powergit-core'
+import { getServerSupabaseClient, buildRepoStreamTargets, formatStreamKey } from '@powersync-community/powergit-core'
+import { resolvePowergitRemote } from '@powersync-community/powergit-core/node'
 
 const execFileAsync = promisify(execFile)
 const MAX_WAIT_MS = Number.parseInt(process.env.POWERSYNC_TEST_MAX_WAIT_MS ?? '60000', 10)
@@ -141,11 +142,11 @@ describeIfSupabase('git push/fetch via PowerSync remote helper', () => {
     const remoteUrl =
       process.env.POWERGIT_TEST_REMOTE_URL ??
       stackEnv?.POWERGIT_TEST_REMOTE_URL ??
-      `powergit::${powersyncEndpoint}/orgs/demo/repos/infra`
-    const parsed = parsePowerSyncUrl(remoteUrl)
+      `powergit::local-dev/demo/infra`
+    const parsed = resolvePowergitRemote(remoteUrl)
     org = parsed.org
     repo = parsed.repo
-    powersyncRemoteUrl = `powergit::${powersyncEndpoint}/orgs/${org}/repos/${repo}`
+    powersyncRemoteUrl = remoteUrl
 
     helperDir = await mkdtemp(join(tmpdir(), 'powersync-helper-'))
     await createHelperExecutable(helperDir)

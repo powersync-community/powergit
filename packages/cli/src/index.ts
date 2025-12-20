@@ -1,19 +1,18 @@
 
 import { mkdtemp, rm, writeFile, mkdir, cp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { tmpdir, homedir } from 'node:os'
+import { join, sep, resolve as resolvePath } from 'node:path'
 import { spawn } from 'node:child_process'
 import simpleGit from 'simple-git'
 import {
   PowerSyncRemoteClient,
   type RepoDataSummary,
-  parsePowerSyncUrl,
   REPO_STREAM_SUFFIXES,
   type RepoStreamSuffix,
   buildRepoStreamTargets,
   type RepoStreamTarget,
 } from '@powersync-community/powergit-core'
-import { resolvePowergitRemoteUrl } from '@powersync-community/powergit-core/node'
+import { resolvePowergitRemote } from '@powersync-community/powergit-core/node'
 export { loadProfileEnvironment, resolveProfileDirectory, resolveProfilesPath } from './profile-env.js'
 
 type StreamSuffix = RepoStreamSuffix
@@ -48,9 +47,7 @@ async function subscribeRepoStreams(baseUrl: string, streams: StreamSubscription
 }
 
 export const DEFAULT_DAEMON_URL =
-  process.env.POWERSYNC_DAEMON_URL ??
-  process.env.POWERSYNC_DAEMON_ENDPOINT ??
-  'http://127.0.0.1:5030'
+  process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
 const DEFAULT_DAEMON_START_COMMAND = process.env.PNPM_WORKSPACE_DIR ? 'pnpm dev:daemon' : 'powergit-daemon'
 const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? DEFAULT_DAEMON_START_COMMAND
 const DAEMON_AUTOSTART_DISABLED = (process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
@@ -211,10 +208,10 @@ export interface SyncCommandResult {
 }
 
 type DaemonAuthStatusCheck =
-  | { status: 'ready'; reason?: string | null }
-  | { status: 'pending'; reason?: string | null }
-  | { status: 'auth_required'; reason?: string | null }
-  | { status: 'error'; reason?: string | null }
+  | { status: 'ready'; reason?: string | null; context?: Record<string, unknown> | null }
+  | { status: 'pending'; reason?: string | null; context?: Record<string, unknown> | null }
+  | { status: 'auth_required'; reason?: string | null; context?: Record<string, unknown> | null }
+  | { status: 'error'; reason?: string | null; context?: Record<string, unknown> | null }
   | null
 
 export async function syncPowerSyncRepository(dir: string, options: SyncCommandOptions = {}): Promise<SyncCommandResult> {
@@ -233,11 +230,16 @@ export async function syncPowerSyncRepository(dir: string, options: SyncCommandO
     throw new Error(`Git remote "${remoteName}" does not have a fetch URL configured.`)
   }
 
-  const expandedUrl = resolvePowergitRemoteUrl(candidateUrl)
-  const { endpoint, org, repo } = parsePowerSyncUrl(expandedUrl)
+  const resolvedRemote = resolvePowergitRemote(candidateUrl)
+  const org = resolvedRemote.org
+  const repo = resolvedRemote.repo
+  const endpoint = resolvedRemote.powersyncUrl ?? ''
+  if (!endpoint) {
+    throw new Error('Missing PowerSync endpoint. Configure a profile with powersync.url or set POWERSYNC_URL.')
+  }
 
   const daemonBaseUrl = normalizeBaseUrl(options.daemonUrl ?? process.env.POWERSYNC_DAEMON_URL ?? DEFAULT_DAEMON_URL)
-  await ensureDaemonReady(daemonBaseUrl)
+  await ensureDaemonReady(daemonBaseUrl, { profileName: resolvedRemote.profileName ?? undefined, endpoint })
   const authStatus = await fetchDaemonAuthStatus(daemonBaseUrl)
   if (!authStatus || authStatus.status !== 'ready') {
     const reason = authStatus?.reason ? ` (${authStatus.reason})` : ''
@@ -272,8 +274,71 @@ export function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, '')
 }
 
-export async function ensureDaemonReady(baseUrl: string): Promise<void> {
-  if (await isDaemonResponsive(baseUrl)) {
+function resolvePowergitHome(): string {
+  const override = process.env.POWERGIT_HOME
+  if (override && override.trim().length > 0) {
+    return resolvePath(override.trim())
+  }
+  return resolvePath(homedir(), '.powergit')
+}
+
+function sanitizeProfileKey(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return 'default'
+  return trimmed.replace(/[^a-zA-Z0-9._-]+/g, '-')
+}
+
+function resolveDaemonStatePaths(profileName: string | null): { dbPath: string; sessionPath: string } {
+  const profileKey = sanitizeProfileKey(profileName ?? 'default')
+  const baseDir = resolvePath(resolvePowergitHome(), 'daemon', profileKey)
+  return {
+    dbPath: resolvePath(baseDir, 'powersync-daemon.db'),
+    sessionPath: resolvePath(baseDir, 'session.json'),
+  }
+}
+
+function extractContextString(context: Record<string, unknown> | null | undefined, key: string): string | null {
+  if (!context) return null
+  const value = context[key]
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function extractDaemonProfileName(context: Record<string, unknown> | null | undefined): string | null {
+  return extractContextString(context, 'profile') ?? extractContextString(context, 'profileName')
+}
+
+function extractDaemonEndpoint(context: Record<string, unknown> | null | undefined): string | null {
+  return extractContextString(context, 'endpoint')
+}
+
+function resolveEnvProfileName(env: NodeJS.ProcessEnv = process.env): string | null {
+  const candidate = env.POWERGIT_PROFILE ?? env.STACK_PROFILE ?? env.POWERGIT_ACTIVE_PROFILE
+  if (typeof candidate !== 'string') return null
+  const trimmed = candidate.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function resolveEnvPowerSyncEndpoint(env: NodeJS.ProcessEnv = process.env): string | null {
+  const candidate = env.POWERSYNC_URL ?? env.POWERSYNC_DAEMON_ENDPOINT ?? env.POWERSYNC_ENDPOINT ?? env.POWERGIT_TEST_ENDPOINT ?? null
+  if (typeof candidate !== 'string') return null
+  const trimmed = candidate.trim()
+  return trimmed.length > 0 ? normalizeBaseUrl(trimmed) : null
+}
+
+export async function ensureDaemonReady(
+  baseUrl: string,
+  options: { profileName?: string | null; endpoint?: string | null } = {},
+): Promise<void> {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+  const desiredProfileName =
+    options.profileName === undefined ? resolveEnvProfileName() : options.profileName?.trim() ? options.profileName.trim() : null
+  const desiredEndpoint =
+    options.endpoint === undefined ? resolveEnvPowerSyncEndpoint() : options.endpoint?.trim() ? normalizeBaseUrl(options.endpoint.trim()) : null
+
+  if (await isDaemonResponsive(normalizedBaseUrl)) {
+    await ensureDaemonMatchesDesiredConfig(normalizedBaseUrl, { profileName: desiredProfileName, endpoint: desiredEndpoint })
     return
   }
 
@@ -282,7 +347,7 @@ export async function ensureDaemonReady(baseUrl: string): Promise<void> {
   }
 
   try {
-    launchDaemon()
+    launchDaemon({ profileName: desiredProfileName, endpoint: desiredEndpoint })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(`${DAEMON_START_HINT} (${message})`)
@@ -290,7 +355,7 @@ export async function ensureDaemonReady(baseUrl: string): Promise<void> {
 
   const deadline = Date.now() + DAEMON_START_TIMEOUT_MS
   while (Date.now() < deadline) {
-    if (await isDaemonResponsive(baseUrl)) {
+    if (await isDaemonResponsive(normalizedBaseUrl)) {
       return
     }
     await delay(200)
@@ -311,18 +376,137 @@ async function isDaemonResponsive(baseUrl: string): Promise<boolean> {
   }
 }
 
-function launchDaemon(): void {
+async function ensureDaemonMatchesDesiredConfig(
+  baseUrl: string,
+  desired: { profileName: string | null; endpoint: string | null },
+): Promise<void> {
+  if (!desired.profileName && !desired.endpoint) {
+    return
+  }
+  const status = await fetchDaemonAuthStatus(baseUrl)
+  const context = status?.context ?? null
+  const currentProfile = extractDaemonProfileName(context)
+  const currentEndpoint = extractDaemonEndpoint(context)
+
+  const profileMismatch =
+    Boolean(desired.profileName && currentProfile && desired.profileName.trim().length > 0 && currentProfile !== desired.profileName)
+  const endpointMismatch =
+    Boolean(desired.endpoint && currentEndpoint && normalizeBaseUrl(currentEndpoint) !== normalizeBaseUrl(desired.endpoint))
+
+  if (!profileMismatch && !endpointMismatch) {
+    return
+  }
+
+  if (DAEMON_AUTOSTART_DISABLED) {
+    const target = desired.profileName ? `profile "${desired.profileName}"` : 'the requested stack'
+    const running = currentProfile ? ` (currently "${currentProfile}")` : ''
+    throw new Error(`PowerSync daemon is running with the wrong configuration${running}. Restart it for ${target} and retry.`)
+  }
+
+  await requestDaemonShutdown(baseUrl)
+  await waitForDaemonExit(baseUrl)
+  launchDaemon({ profileName: desired.profileName, endpoint: desired.endpoint })
+
+  const deadline = Date.now() + DAEMON_START_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (await isDaemonResponsive(baseUrl)) {
+      return
+    }
+    await delay(200)
+  }
+  throw new Error(`${DAEMON_START_HINT} (daemon restart timed out)`)
+}
+
+async function requestDaemonShutdown(baseUrl: string): Promise<void> {
+  try {
+    const response = await fetch(`${baseUrl}/shutdown`, { method: 'POST' })
+    if (response.ok) return
+    const text = await response.text().catch(() => '')
+    throw new Error(`shutdown returned ${response.status} ${response.statusText}${text ? ` — ${text}` : ''}`)
+  } catch (error) {
+    throw new Error(`failed to request daemon shutdown (${(error as Error).message})`)
+  }
+}
+
+async function waitForDaemonExit(baseUrl: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!(await isDaemonResponsive(baseUrl))) return
+    await delay(200)
+  }
+  throw new Error('daemon shutdown timed out')
+}
+
+function launchDaemon(options: { profileName?: string | null; endpoint?: string | null } = {}): void {
   const child = spawn(DAEMON_START_COMMAND, {
     shell: true,
     detached: true,
     stdio: 'ignore',
-    env: process.env,
+    env: buildDaemonEnv(options),
     cwd: DAEMON_WORKSPACE_DIR,
   })
   child.on('error', (error) => {
     console.warn('[powergit] failed to launch PowerSync daemon', error)
   })
   child.unref()
+}
+
+function buildDaemonEnv(options: { profileName?: string | null; endpoint?: string | null } = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+
+  const desiredProfileName =
+    options.profileName === undefined ? resolveEnvProfileName(env) : options.profileName?.trim() ? options.profileName.trim() : null
+  const desiredEndpoint =
+    options.endpoint === undefined ? resolveEnvPowerSyncEndpoint(env) : options.endpoint?.trim() ? normalizeBaseUrl(options.endpoint.trim()) : null
+
+  const currentProfileName = resolveEnvProfileName(env)
+  const switchingProfiles = Boolean(desiredProfileName && currentProfileName && desiredProfileName !== currentProfileName)
+  if (switchingProfiles) {
+    const profileManagedKeys = [
+      'POWERSYNC_URL',
+      'POWERSYNC_DAEMON_ENDPOINT',
+      'POWERSYNC_ENDPOINT',
+      'POWERGIT_TEST_ENDPOINT',
+      'SUPABASE_URL',
+      'SUPABASE_ANON_KEY',
+      'SUPABASE_SERVICE_ROLE_KEY',
+      'SUPABASE_EMAIL',
+      'SUPABASE_PASSWORD',
+      'SUPABASE_SCHEMA',
+      'POWERGIT_TEST_SUPABASE_URL',
+      'POWERGIT_TEST_SUPABASE_ANON_KEY',
+      'POWERGIT_TEST_SUPABASE_SERVICE_ROLE_KEY',
+      'POWERGIT_TEST_SUPABASE_EMAIL',
+      'POWERGIT_TEST_SUPABASE_PASSWORD',
+    ]
+    for (const key of profileManagedKeys) {
+      delete env[key]
+    }
+  }
+
+  const stateProfile = desiredProfileName ?? currentProfileName ?? 'prod'
+  const statePaths = resolveDaemonStatePaths(stateProfile)
+  if (!env.POWERSYNC_DAEMON_DB_PATH) {
+    env.POWERSYNC_DAEMON_DB_PATH = statePaths.dbPath
+  }
+  if (!env.POWERSYNC_DAEMON_SESSION_PATH) {
+    env.POWERSYNC_DAEMON_SESSION_PATH = statePaths.sessionPath
+  }
+
+  if (desiredEndpoint) {
+    env.POWERSYNC_URL = desiredEndpoint
+    env.POWERSYNC_DAEMON_ENDPOINT = desiredEndpoint
+    env.POWERSYNC_ENDPOINT = desiredEndpoint
+    env.POWERGIT_TEST_ENDPOINT = desiredEndpoint
+  }
+
+  if (desiredProfileName) {
+    env.STACK_PROFILE = desiredProfileName
+    env.POWERGIT_PROFILE = desiredProfileName
+    env.POWERGIT_ACTIVE_PROFILE = desiredProfileName
+  }
+
+  return env
 }
 
 function delay(ms: number): Promise<void> {
@@ -339,7 +523,7 @@ async function fetchDaemonAuthStatus(baseUrl: string): Promise<DaemonAuthStatusC
     if (!response.ok) {
       return null
     }
-    const payload = (await response.json().catch(() => null)) as { status?: unknown; reason?: unknown } | null
+    const payload = (await response.json().catch(() => null)) as { status?: unknown; reason?: unknown; context?: unknown } | null
     if (!payload || typeof payload.status !== 'string') {
       return null
     }
@@ -348,7 +532,11 @@ async function fetchDaemonAuthStatus(baseUrl: string): Promise<DaemonAuthStatusC
       return null
     }
     const reason = typeof payload.reason === 'string' ? payload.reason : null
-    return { status, reason }
+    const context =
+      payload.context && typeof payload.context === 'object' && !Array.isArray(payload.context)
+        ? (payload.context as Record<string, unknown>)
+        : null
+    return { status, reason, context }
   } catch {
     return null
   }

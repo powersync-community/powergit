@@ -7,7 +7,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile, spawn, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
-import { parsePowerSyncUrl, PowerSyncRemoteClient, buildRepoStreamTargets, formatStreamKey } from '@powersync-community/powergit-core'
+import { PowerSyncRemoteClient, buildRepoStreamTargets, formatStreamKey } from '@powersync-community/powergit-core'
+import { resolvePowergitRemote } from '@powersync-community/powergit-core/node'
 import { startStack, stopStack } from '../../../scripts/test-stack-hooks.mjs'
 import { seedDemoRepository } from './index.js'
 import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials } from './auth/session.js'
@@ -125,7 +126,7 @@ async function runScript(scriptRelativePath: string, extraEnv: NodeJS.ProcessEnv
 }
 
 async function seedLiveStackData(config: LiveStackConfig) {
-  const { org, repo } = parsePowerSyncUrl(config.remoteUrl)
+  const { org, repo } = resolvePowergitRemote(config.remoteUrl)
   await seedDemoRepository({
     remoteUrl: config.remoteUrl,
     remoteName: config.remoteName,
@@ -180,13 +181,13 @@ describe('powergit CLI e2e', () => {
   }
 
   it('adds and updates the default powersync remote', async () => {
-    const firstUrl = 'powergit::https://example.dev/orgs/acme/repos/infra'
+    const firstUrl = 'powergit::/acme/infra'
     const { stdout: addStdout } = await runCli(['remote', 'add', 'powersync', firstUrl])
     expect(addStdout).toContain(`Added PowerSync remote (powersync): ${firstUrl}`)
 
     expect(await getRemoteUrl()).toBe(firstUrl)
 
-    const secondUrl = 'powergit::https://example.dev/orgs/acme/repos/runtime'
+    const secondUrl = 'powergit::/acme/runtime'
     const { stdout: updateStdout } = await runCli(['remote', 'add', 'powersync', secondUrl])
     expect(updateStdout).toContain(`Added PowerSync remote (powersync): ${secondUrl}`)
 
@@ -195,7 +196,7 @@ describe('powergit CLI e2e', () => {
 
   it('respects REMOTE_NAME overrides', async () => {
     const customRemote = 'powersync-upstream'
-    const remoteUrl = 'powergit::https://example.dev/orgs/acme/repos/mobile'
+    const remoteUrl = 'powergit::/acme/mobile'
 
     const { stdout } = await runCli(
       ['remote', 'add', 'powersync', remoteUrl],
@@ -505,7 +506,7 @@ describeLive('powergit sync against live PowerSync stack', () => {
     const remoteName = liveStackConfig.remoteName
     const daemonBaseUrl = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
     const branchName = `cli-stream-${Date.now().toString(36)}`
-    const { org, repo } = parsePowerSyncUrl(remoteUrl)
+    const { org, repo } = resolvePowergitRemote(remoteUrl)
     const streamTargets = buildRepoStreamTargets(org, repo)
     const streamKeys = streamTargets.map(formatStreamKey)
 

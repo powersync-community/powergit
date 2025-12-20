@@ -12,15 +12,22 @@ type ProfileConfig = {
 
 type ProfilesFile = Record<string, ProfileConfig>
 
-type ProfileState = {
-  current?: string
-}
-
 const DEFAULT_PROFILE_NAME = 'prod'
 
 export type ResolvedPowergitRemote = {
-  url: string
-  profileName?: string | null
+  org: string
+  repo: string
+  /**
+   * Profile name selected from the remote URL.
+   * - `powergit::/org/repo` => `prod`
+   * - `powergit::<profile>/org/repo` => `<profile>`
+   */
+  profileName: string
+  /**
+   * The resolved PowerSync base URL (no trailing slash).
+   * This is the stack-level endpoint, not a repo-scoped URL.
+   */
+  powersyncUrl: string
 }
 
 function resolvePowergitHome(): string {
@@ -54,22 +61,11 @@ function resolveProfileName(preferred?: string | null): string {
   if (preferred && preferred.trim().length > 0) {
     return preferred.trim()
   }
-
-  const envOverride =
-    process.env.POWERGIT_PROFILE ??
-    process.env.STACK_PROFILE ??
-    process.env.POWERGIT_ACTIVE_PROFILE
-  if (envOverride && envOverride.trim().length > 0) {
-    return envOverride.trim()
-  }
-
-  const statePath = resolve(resolvePowergitHome(), 'profile.json')
-  const state = readJsonFile<ProfileState>(statePath)
-  if (state?.current && state.current.trim().length > 0) {
-    return state.current.trim()
-  }
-
   return DEFAULT_PROFILE_NAME
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '')
 }
 
 function resolveProfileEndpoint(profileName: string): string {
@@ -82,66 +78,62 @@ function resolveProfileEndpoint(profileName: string): string {
   if (!endpoint || endpoint.trim().length === 0) {
     throw new Error(`Profile "${profileName}" does not define a PowerSync endpoint.`)
   }
-  return endpoint.trim().replace(/\/+$/, '')
+  return normalizeBaseUrl(endpoint)
 }
 
-function parseAliasPath(raw: string): { alias?: string; org: string; repo: string } {
+function parseProfilePath(raw: string): { profileName?: string; org: string; repo: string } {
   const trimmed = raw.replace(/^\/+/, '')
   const segments = trimmed.split('/').filter(Boolean)
   if (segments.length === 2) {
     return { org: segments[0], repo: segments[1] }
   }
   if (segments.length === 3) {
-    return { alias: segments[0], org: segments[1], repo: segments[2] }
+    return { profileName: segments[0], org: segments[1], repo: segments[2] }
   }
   if (segments.length === 4 && segments[0] === 'orgs' && segments[2] === 'repos') {
     return { org: segments[1], repo: segments[3] }
   }
   if (segments.length === 5 && segments[1] === 'orgs' && segments[3] === 'repos') {
-    return { alias: segments[0], org: segments[2], repo: segments[4] }
+    return { profileName: segments[0], org: segments[2], repo: segments[4] }
   }
   throw new Error('Invalid powergit URL')
 }
 
-export function resolvePowergitRemote(input: string, options: { profile?: string | null } = {}): ResolvedPowergitRemote {
+export function resolvePowergitRemote(
+  input: string,
+  options: { profile?: string | null } = {},
+): ResolvedPowergitRemote {
   const idx = input.indexOf('::')
-  if (idx === -1) {
-    return { url: input }
-  }
-  const raw = input.slice(idx + 2)
+  const raw = idx === -1 ? input : input.slice(idx + 2)
   if (raw.includes('://')) {
-    return { url: input }
+    throw new Error(
+      'Explicit endpoint remotes are not supported. Use powergit::/org/repo (prod) or powergit::<profile>/org/repo.',
+    )
+  }
+  const looksLikeProfilePath = raw.includes('/') && !raw.startsWith('refs/')
+  if (idx === -1 && !looksLikeProfilePath) {
+    throw new Error('Invalid powergit URL')
   }
 
-  const parsed = parseAliasPath(raw)
+  const parsed = parseProfilePath(raw)
   if (!parsed.org || !parsed.repo) {
     throw new Error('Invalid powergit URL')
   }
 
-  if (!parsed.alias && !options.profile) {
-    const envEndpoint =
-      process.env.POWERSYNC_URL ??
-      process.env.POWERSYNC_DAEMON_ENDPOINT ??
-      process.env.POWERSYNC_ENDPOINT ??
-      process.env.POWERGIT_TEST_ENDPOINT ??
-      null
-    if (envEndpoint && envEndpoint.trim().length > 0) {
-      const normalized = envEndpoint.trim().replace(/\/+$/, '')
-      return {
-        url: `powergit::${normalized}/orgs/${encodeURIComponent(parsed.org)}/repos/${encodeURIComponent(parsed.repo)}`,
-        profileName: null,
-      }
-    }
-  }
-
-  const profileName = resolveProfileName(parsed.alias ?? options.profile ?? null)
+  const profileName = resolveProfileName(parsed.profileName ?? options.profile ?? null)
   const endpoint = resolveProfileEndpoint(profileName)
   return {
-    url: `powergit::${endpoint}/orgs/${encodeURIComponent(parsed.org)}/repos/${encodeURIComponent(parsed.repo)}`,
+    org: parsed.org,
+    repo: parsed.repo,
     profileName,
+    powersyncUrl: endpoint,
   }
 }
 
 export function resolvePowergitRemoteUrl(input: string, options: { profile?: string | null } = {}): string {
-  return resolvePowergitRemote(input, options).url
+  const resolved = resolvePowergitRemote(input, options)
+  if (resolved.profileName === DEFAULT_PROFILE_NAME) {
+    return `powergit::/${resolved.org}/${resolved.repo}`
+  }
+  return `powergit::${resolved.profileName}/${resolved.org}/${resolved.repo}`
 }

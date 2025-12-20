@@ -357,7 +357,7 @@ async function runCommand(cmd, args, options = {}) {
 }
 
 async function stopDaemonViaCli() {
-  const daemonUrl = process.env.POWERSYNC_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? 'http://127.0.0.1:5030'
+  const daemonUrl = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
   const args = [
     '--filter',
     '@powersync-community/powergit',
@@ -565,7 +565,7 @@ function buildStackEnv(statusEnv) {
   const psPort = `${process.env.PS_PORT ?? statusEnv.PS_PORT ?? POWERSYNC_INTERNAL_PORT}`
   const powersyncEndpoint =
     process.env.POWERSYNC_URL ?? statusEnv.POWERSYNC_URL ?? `http://127.0.0.1:${powersyncPort}`
-  const remoteUrl = `powergit::${powersyncEndpoint.replace(/\/$/, '')}/orgs/${DEFAULT_ORG}/repos/${DEFAULT_REPO}`
+  const remoteUrl = `powergit::local-dev/${DEFAULT_ORG}/${DEFAULT_REPO}`
   const databaseUrl = resolvedDatabaseUrl
   const daemonDeviceLoginUrl =
     process.env.POWERSYNC_DAEMON_DEVICE_URL ??
@@ -574,7 +574,6 @@ function buildStackEnv(statusEnv) {
   const daemonEndpoint =
     process.env.POWERSYNC_DAEMON_URL ??
     statusEnv.POWERSYNC_DAEMON_URL ??
-    process.env.POWERSYNC_DAEMON_ENDPOINT ??
     'http://127.0.0.1:5030'
 
   return {
@@ -650,7 +649,7 @@ function applyDaemonStatusToStackEnv(env, status) {
   if (endpoint) {
     env.powersyncEndpoint = endpoint
     process.env.POWERSYNC_URL = endpoint
-    env.remoteUrl = `powergit::${endpoint.replace(/\/$/, '')}/orgs/${DEFAULT_ORG}/repos/${DEFAULT_REPO}`
+    env.remoteUrl = `powergit::local-dev/${DEFAULT_ORG}/${DEFAULT_REPO}`
   }
 }
 
