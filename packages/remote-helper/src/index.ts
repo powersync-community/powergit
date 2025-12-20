@@ -7,7 +7,7 @@ import {
   PowerSyncRemoteClient,
   type FetchPackResult,
   type PushPackResult,
-  resolvePowergitRemoteUrl,
+  resolvePowergitRemote,
 } from '@powersync-community/powergit-core/node'
 
 const ZERO_SHA = '0000000000000000000000000000000000000000'
@@ -32,6 +32,8 @@ interface PushRequest { src: string; dst: string; force?: boolean }
 let parsed: ReturnType<typeof parsePowerSyncUrl> | null = null
 let daemonClient: PowerSyncRemoteClient | null = null
 let daemonBaseUrl = normalizeBaseUrl(DEFAULT_DAEMON_URL)
+let daemonProfileName: string | null = null
+let daemonEndpointOverride: string | null = null
 let fetchBatch: FetchRequest[] = []
 let pushBatch: PushRequest[] = []
 let cachedSourceRepoUrl: string | null | undefined
@@ -411,15 +413,47 @@ async function ensureDaemonAuthenticated(): Promise<void> {
 
 function launchDaemon(): void {
   try {
+    const env = buildDaemonEnv()
     const child = spawn(DAEMON_START_COMMAND, {
       shell: true,
       detached: true,
       stdio: 'ignore',
+      env,
     })
     child.unref()
   } catch (error) {
     throw new Error(`unable to spawn PowerSync daemon (${(error as Error).message})`)
   }
+}
+
+function buildDaemonEnv(): NodeJS.ProcessEnv {
+  if (!daemonProfileName) {
+    if (!daemonEndpointOverride) return process.env
+  }
+  const env = { ...process.env }
+  if (daemonEndpointOverride) {
+    if (!env.POWERSYNC_URL) {
+      env.POWERSYNC_URL = daemonEndpointOverride
+    }
+    if (!env.POWERSYNC_DAEMON_ENDPOINT) {
+      env.POWERSYNC_DAEMON_ENDPOINT = daemonEndpointOverride
+    }
+    if (!env.POWERSYNC_ENDPOINT) {
+      env.POWERSYNC_ENDPOINT = daemonEndpointOverride
+    }
+  }
+  if (daemonProfileName) {
+    if (!env.STACK_PROFILE) {
+      env.STACK_PROFILE = daemonProfileName
+    }
+    if (!env.POWERGIT_PROFILE) {
+      env.POWERGIT_PROFILE = daemonProfileName
+    }
+    if (!env.POWERGIT_ACTIVE_PROFILE) {
+      env.POWERGIT_ACTIVE_PROFILE = daemonProfileName
+    }
+  }
+  return env
 }
 
 function delay(ms: number): Promise<void> {
@@ -456,8 +490,14 @@ function initFromArgs() {
 function tryParseRemote(candidate?: string): boolean {
   if (!candidate) return false
   try {
-    const expanded = resolvePowergitRemoteUrl(candidate)
-    parsed = parsePowerSyncUrl(expanded)
+    const resolved = resolvePowergitRemote(candidate)
+    parsed = parsePowerSyncUrl(resolved.url)
+    if (!daemonEndpointOverride) {
+      daemonEndpointOverride = parsed.basePath ? `${parsed.endpoint}${parsed.basePath}` : parsed.endpoint
+    }
+    if (resolved.profileName && !daemonProfileName) {
+      daemonProfileName = resolved.profileName
+    }
     return true
   } catch (error) {
     if (candidate.includes('::') || candidate.includes('://')) {

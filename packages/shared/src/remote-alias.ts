@@ -18,6 +18,11 @@ type ProfileState = {
 
 const DEFAULT_PROFILE_NAME = 'prod'
 
+export type ResolvedPowergitRemote = {
+  url: string
+  profileName?: string | null
+}
+
 function resolvePowergitHome(): string {
   const override = process.env.POWERGIT_HOME
   if (override && override.trim().length > 0) {
@@ -98,14 +103,14 @@ function parseAliasPath(raw: string): { alias?: string; org: string; repo: strin
   throw new Error('Invalid powergit URL')
 }
 
-export function resolvePowergitRemoteUrl(input: string, options: { profile?: string | null } = {}): string {
+export function resolvePowergitRemote(input: string, options: { profile?: string | null } = {}): ResolvedPowergitRemote {
   const idx = input.indexOf('::')
   if (idx === -1) {
-    return input
+    return { url: input }
   }
   const raw = input.slice(idx + 2)
   if (raw.includes('://')) {
-    return input
+    return { url: input }
   }
 
   const parsed = parseAliasPath(raw)
@@ -122,11 +127,21 @@ export function resolvePowergitRemoteUrl(input: string, options: { profile?: str
       null
     if (envEndpoint && envEndpoint.trim().length > 0) {
       const normalized = envEndpoint.trim().replace(/\/+$/, '')
-      return `powergit::${normalized}/orgs/${encodeURIComponent(parsed.org)}/repos/${encodeURIComponent(parsed.repo)}`
+      return {
+        url: `powergit::${normalized}/orgs/${encodeURIComponent(parsed.org)}/repos/${encodeURIComponent(parsed.repo)}`,
+        profileName: null,
+      }
     }
   }
 
   const profileName = resolveProfileName(parsed.alias ?? options.profile ?? null)
   const endpoint = resolveProfileEndpoint(profileName)
-  return `powergit::${endpoint}/orgs/${encodeURIComponent(parsed.org)}/repos/${encodeURIComponent(parsed.repo)}`
+  return {
+    url: `powergit::${endpoint}/orgs/${encodeURIComponent(parsed.org)}/repos/${encodeURIComponent(parsed.repo)}`,
+    profileName,
+  }
+}
+
+export function resolvePowergitRemoteUrl(input: string, options: { profile?: string | null } = {}): string {
+  return resolvePowergitRemote(input, options).url
 }
