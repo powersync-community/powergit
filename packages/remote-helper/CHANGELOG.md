@@ -1,5 +1,16 @@
 # @powersync-community/powergit-remote-helper
 
+## 1.1.0
+
+### Minor Changes
+
+- 61c02aa: include prod config
+
+### Patch Changes
+
+- Updated dependencies [61c02aa]
+  - @powersync-community/powergit-core@1.1.0
+
 ## 1.0.0
 
 ### Major Changes
