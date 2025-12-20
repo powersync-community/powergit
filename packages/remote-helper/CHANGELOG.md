@@ -1,5 +1,16 @@
 # @powersync-community/powergit-remote-helper
 
+## 1.2.0
+
+### Minor Changes
+
+- a47659c: Profiles are now the only way we can setup remote addresses with different origins. Using a <profile>/<org>/<repo> path we can reason about different profiles
+
+### Patch Changes
+
+- Updated dependencies [a47659c]
+  - @powersync-community/powergit-core@1.2.0
+
 ## 1.1.0
 
 ### Minor Changes
