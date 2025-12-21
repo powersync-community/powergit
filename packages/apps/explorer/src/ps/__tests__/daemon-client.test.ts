@@ -95,7 +95,7 @@ describe('daemon-client', () => {
     const mod = await import('../daemon-client')
     expect(mod.isDaemonPreferred()).toBe(true)
     await expect(mod.notifyDaemonLogout()).resolves.toBe(true)
-    expect(mockFetch).toHaveBeenCalledWith('http://127.0.0.1:8787/auth/logout', expect.objectContaining({ method: 'POST' }))
+    expect(mockFetch).toHaveBeenCalledWith('http://127.0.0.1:5030/auth/logout', expect.objectContaining({ method: 'POST' }))
   })
 
   it('extracts device challenges from daemon context', async () => {
@@ -126,5 +126,33 @@ describe('daemon-client', () => {
       expiresAt: null,
       mode: null,
     })
+  })
+
+  it('completes device login even when daemon mode is disabled', async () => {
+    vi.unstubAllEnvs()
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch
+    globalThis.fetch = mockFetch
+
+    vi.doMock('../supabase', () => ({ getAccessToken: vi.fn() }))
+
+    const mod = await import('../daemon-client')
+    const ok = await mod.completeDaemonDeviceLogin({
+      challengeId: 'abc123',
+      session: {
+        access_token: 'access-token',
+        refresh_token: 'refresh-token',
+      },
+    })
+    expect(ok).toBe(true)
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:5030/auth/device',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    )
+    const body = (mockFetch.mock.calls[0]?.[1] as { body?: string } | undefined)?.body ?? ''
+    expect(body).toContain('"challengeId":"abc123"')
+    expect(body).toContain('"access_token":"access-token"')
+    expect(body).toContain('"refresh_token":"refresh-token"')
   })
 })

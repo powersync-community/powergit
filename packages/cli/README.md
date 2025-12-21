@@ -105,15 +105,11 @@ Before running commands that talk to PowerSync (push/fetch or `powergit sync`), 
 powergit login
 ```
 
-`powergit login` uses Supabase credentials from your profile or environment (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_EMAIL`, `SUPABASE_PASSWORD`). The resulting Supabase JWT is cached per profile under `~/.powergit/daemon/<profile>/session.json` and automatically reused by the daemon.
+`powergit login` starts a device-code flow. The daemon prints a device code and an `Open:` URL — open it, sign in with Supabase, and keep the tab open until the CLI reports success. The Supabase session is cached per profile under `~/.powergit/daemon/<profile>/session.json` and reused by the daemon.
 
-Need to stash a token manually (for CI or when you already have one)?
+If you don’t see an `Open:` URL, set `daemon.deviceLoginUrl` in your profile or export `POWERSYNC_DAEMON_DEVICE_URL`.
 
-```bash
-powergit login --manual --endpoint https://powersync.example.com --token <JWT>
-```
-
-When you want to discard credentials, run `powergit logout` to delete the cache file.
+To discard credentials, run `powergit logout`.
 
 ## Inspect PowerSync metadata quickly
 

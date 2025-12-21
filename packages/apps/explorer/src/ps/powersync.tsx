@@ -14,7 +14,6 @@ import {
   obtainPowerSyncToken,
   type DaemonAuthStatus,
 } from './daemon-client'
-import { getAccessToken } from './supabase'
 import { useAppNotices } from '../ui/notices'
 import { useStatusRegistry } from '../ui/status-provider'
 
@@ -573,15 +572,20 @@ export const PowerSyncProvider: React.FC<React.PropsWithChildren> = ({ children 
 
     let cancelled = false
     const complete = async () => {
-      const token = await getAccessToken()
-      if (!token) {
+      const activeSession = session
+      if (!activeSession?.access_token || !activeSession.refresh_token) {
         pendingDeviceRef.current = null
         return
       }
       const endpoint = readEnvString('VITE_POWERSYNC_ENDPOINT')
       const ok = await completeDaemonDeviceLogin({
         challengeId: challenge.challengeId,
-        token,
+        session: {
+          access_token: activeSession.access_token,
+          refresh_token: activeSession.refresh_token,
+          expires_in: typeof activeSession.expires_in === 'number' ? activeSession.expires_in : null,
+          expires_at: typeof activeSession.expires_at === 'number' ? activeSession.expires_at : null,
+        },
         endpoint,
         expiresAt: challenge.expiresAt ?? null,
       })

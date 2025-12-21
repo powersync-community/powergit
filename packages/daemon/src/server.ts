@@ -267,6 +267,14 @@ export function createDaemonServer(options: DaemonServerOptions): DaemonServer {
           const allowMethods = corsConfig?.allowMethods ?? Array.from(new Set([...methods, 'OPTIONS']));
           res.setHeader('Access-Control-Allow-Methods', allowMethods.join(', '));
           res.setHeader('Access-Control-Allow-Headers', allowHeaders.join(', '));
+          const privateNetwork =
+            typeof req.headers['access-control-request-private-network'] === 'string'
+              ? req.headers['access-control-request-private-network'].trim().toLowerCase()
+              : '';
+          if (privateNetwork === 'true') {
+            // Required by modern browsers when a public origin accesses localhost (Private Network Access).
+            res.setHeader('Access-Control-Allow-Private-Network', 'true');
+          }
         }
         res.statusCode = 204;
         res.end();

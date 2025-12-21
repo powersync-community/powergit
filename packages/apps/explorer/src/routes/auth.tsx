@@ -10,6 +10,7 @@ import {
   signUpWithPassword,
   signOut,
 } from '@ps/supabase'
+import { completeDaemonDeviceLogin } from '@ps/daemon-client'
 import { useSupabaseAuth } from '@ps/auth-context'
 
 export const Route = createFileRoute('/auth' as any)({
@@ -17,7 +18,7 @@ export const Route = createFileRoute('/auth' as any)({
 })
 
 export function AuthRoute() {
-  const { status, isConfigured, error } = useSupabaseAuth()
+  const { status, isConfigured, error, session } = useSupabaseAuth()
   const navigate = Route.useNavigate()
   const allowGuest = React.useMemo(() => isAnonymousSignInSupported(), [])
   const location = useLocation()
@@ -30,6 +31,31 @@ export function AuthRoute() {
     if (params.has('state')) return true
     return false
   }, [location.search])
+  const deviceCode = React.useMemo(() => {
+    const search = location.search ?? ''
+    if (!search) return null
+    const params = new URLSearchParams(search)
+    return params.get('device_code') ?? params.get('challenge') ?? params.get('state')
+  }, [location.search])
+  const daemonUrlOverride = React.useMemo(() => {
+    const search = location.search ?? ''
+    if (!search) return null
+    const params = new URLSearchParams(search)
+    const raw = params.get('daemon_url') ?? params.get('daemonUrl') ?? params.get('daemon')
+    if (!raw || !raw.trim()) return null
+    try {
+      const parsed = new URL(raw.trim())
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+      const host = parsed.hostname
+      if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') return null
+      return `${parsed.protocol}//${parsed.host}`
+    } catch {
+      return null
+    }
+  }, [location.search])
+  const [deviceLoginState, setDeviceLoginState] = React.useState<'idle' | 'submitting' | 'done' | 'error'>('idle')
+  const [deviceLoginError, setDeviceLoginError] = React.useState<string | null>(null)
+  const attemptedDeviceCode = React.useRef<string | null>(null)
   const [signingOut, setSigningOut] = React.useState(false)
   const redirectedRef = React.useRef(false)
 
@@ -54,6 +80,57 @@ export function AuthRoute() {
       redirectedRef.current = false
     }
   }, [status, navigate, deviceFlowActive])
+
+  React.useEffect(() => {
+    if (!deviceFlowActive) return
+    if (!deviceCode || typeof deviceCode !== 'string' || deviceCode.trim().length === 0) return
+    if (status !== 'authenticated') return
+    if (!session?.access_token || !session.refresh_token) return
+
+    if (attemptedDeviceCode.current === deviceCode) return
+    attemptedDeviceCode.current = deviceCode
+
+    let cancelled = false
+    setDeviceLoginState('submitting')
+    setDeviceLoginError(null)
+
+    const complete = async () => {
+      const ok = await completeDaemonDeviceLogin({
+        challengeId: deviceCode,
+        session: {
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          expires_in: typeof session.expires_in === 'number' ? session.expires_in : null,
+          expires_at: typeof session.expires_at === 'number' ? session.expires_at : null,
+        },
+        daemonBaseUrl: daemonUrlOverride,
+      })
+      if (cancelled) return
+      if (ok) {
+        setDeviceLoginState('done')
+        return
+      }
+      setDeviceLoginState('error')
+      setDeviceLoginError(
+        'Could not reach the local PowerSync daemon. Ensure `powergit-daemon` is running, then refresh this page or rerun `powergit login`.',
+      )
+    }
+
+    void complete()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    deviceFlowActive,
+    deviceCode,
+    status,
+    session?.access_token,
+    session?.refresh_token,
+    session?.expires_at,
+    session?.expires_in,
+    daemonUrlOverride,
+  ])
 
   if (!isConfigured && !isSupabaseConfigured()) {
     return (
@@ -89,13 +166,26 @@ export function AuthRoute() {
   }
 
   if (status === 'authenticated' && deviceFlowActive) {
+    const deviceMessage = (() => {
+      switch (deviceLoginState) {
+        case 'submitting':
+          return 'Submitting your Supabase session to the local daemon…'
+        case 'done':
+          return 'CLI login complete. You can return to the terminal.'
+        case 'error':
+          return deviceLoginError ?? 'Failed to complete CLI login.'
+        default:
+          return 'Keep this tab open until the CLI reports success.'
+      }
+    })()
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 text-center">
         <div className="max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white px-6 py-8 text-slate-700 shadow">
           <h2 className="text-lg font-semibold text-slate-900">Daemon login in progress</h2>
           <p className="text-sm">
-            You&rsquo;re already signed in. We&rsquo;ll reuse this session to finish the CLI login automatically. Keep this tab open until the CLI reports success.
+            You&rsquo;re already signed in. We&rsquo;ll reuse this session to finish the CLI login automatically.
           </p>
+          <p className="text-sm">{deviceMessage}</p>
           <p className="text-xs text-slate-500">
             Need to switch accounts? Sign out below and sign back in with the desired credentials.
           </p>

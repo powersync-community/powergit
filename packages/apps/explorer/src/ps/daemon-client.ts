@@ -2,7 +2,7 @@ import type { PowerSyncImportJob } from '@powersync-community/powergit-core'
 import { getAccessToken } from './supabase'
 import { dispatchGithubImport, type GithubActionsImportRequest } from './github-actions'
 
-const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8787'
+const DEFAULT_DAEMON_URL = 'http://127.0.0.1:5030'
 const REQUEST_TIMEOUT_MS = 5_000
 
 function readEnvFlag(name: string, fallback = 'false') {
@@ -126,12 +126,13 @@ async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promi
   }
 }
 
-async function postJson(path: string, body?: Record<string, unknown>): Promise<boolean> {
+async function postJson(path: string, body?: Record<string, unknown>, options: { baseUrl?: string } = {}): Promise<boolean> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const baseUrl = options.baseUrl ?? daemonBaseUrl
 
   try {
-    const res = await fetch(`${daemonBaseUrl}${path}`, {
+    const res = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -301,21 +302,33 @@ export async function deleteDaemonRepo(orgId: string, repoId: string): Promise<b
 
 export async function completeDaemonDeviceLogin(payload: {
   challengeId: string
-  token: string
+  session: {
+    access_token: string
+    refresh_token: string
+    expires_in?: number | null
+    expires_at?: number | null
+  }
   endpoint?: string | null
   expiresAt?: string | null
   obtainedAt?: string | null
   metadata?: Record<string, unknown> | null
+  daemonBaseUrl?: string | null
 }): Promise<boolean> {
-  if (!daemonEnabled) return false
-  return postJson('/auth/device', {
-    challengeId: payload.challengeId,
-    token: payload.token,
-    endpoint: payload.endpoint ?? null,
-    expiresAt: payload.expiresAt ?? null,
-    obtainedAt: payload.obtainedAt ?? null,
-    metadata: payload.metadata ?? null,
-  })
+  const baseUrl = payload.daemonBaseUrl && payload.daemonBaseUrl.trim().length > 0
+    ? payload.daemonBaseUrl.trim()
+    : undefined
+  return postJson(
+    '/auth/device',
+    {
+      challengeId: payload.challengeId,
+      session: payload.session,
+      endpoint: payload.endpoint ?? null,
+      expiresAt: payload.expiresAt ?? null,
+      obtainedAt: payload.obtainedAt ?? null,
+      metadata: payload.metadata ?? null,
+    },
+    baseUrl ? { baseUrl } : undefined,
+  )
 }
 
 export interface DaemonGithubImportRequest {
