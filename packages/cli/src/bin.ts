@@ -334,6 +334,9 @@ async function runLoginCommand(args: LoginCommandArgs) {
       if (fallbackUrl) {
         const separator = fallbackUrl.includes('?') ? '&' : '?'
         console.log(`   Open: ${fallbackUrl}${separator}device_code=${challenge.challengeId}`)
+      } else {
+        console.log('   No device login URL configured.')
+        console.log('   Set daemon.deviceLoginUrl in your profile or export POWERSYNC_DAEMON_DEVICE_URL.')
       }
     }
     console.log(`   Device code: ${challenge.challengeId}`)

@@ -24,6 +24,9 @@ export const PROFILE_DEFAULTS = {
     powersync: {
       url: 'https://69330b17af0dc7f75977d41a.powersync.journeyapps.com',
     },
+    daemon: {
+      deviceLoginUrl: 'https://powersync-community.github.io/powergit/auth',
+    },
     supabase: {
       url: 'https://swycjfithtzfzwwekmnq.supabase.co',
       anonKey:
