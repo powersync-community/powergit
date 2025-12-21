@@ -6,6 +6,7 @@ import { join, resolve, dirname } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile, spawn, spawnSync } from 'node:child_process'
+import { createServer } from 'node:net'
 import { promisify } from 'node:util'
 import { PowerSyncRemoteClient, buildRepoStreamTargets, formatStreamKey } from '@powersync-community/powergit-core'
 import { resolvePowergitRemote } from '@powersync-community/powergit-core/node'
@@ -139,6 +140,54 @@ async function seedLiveStackData(config: LiveStackConfig) {
 
 async function runGit(args: string[], cwd: string) {
   return execFileAsync('git', args, { cwd })
+}
+
+async function findOpenPort(): Promise<number> {
+  return await new Promise((resolvePromise, rejectPromise) => {
+    const server = createServer()
+    server.once('error', rejectPromise)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      if (!address || typeof address === 'string') {
+        server.close(() => rejectPromise(new Error('Failed to resolve open port.')))
+        return
+      }
+      const { port } = address
+      server.close(() => resolvePromise(port))
+    })
+  })
+}
+
+async function waitForHealth(baseUrl: string, child: ReturnType<typeof spawn>, timeoutMs = 7000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`Daemon exited early with code ${child.exitCode}`)
+    }
+    try {
+      const res = await fetch(`${baseUrl}/health`)
+      if (res.ok) return
+    } catch {
+      // keep polling
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 200))
+  }
+  throw new Error('Daemon did not become healthy before timeout.')
+}
+
+async function stopDaemon(baseUrl: string, child: ReturnType<typeof spawn>, timeoutMs = 5000) {
+  if (child.exitCode !== null) return
+  try {
+    await fetch(`${baseUrl}/shutdown`, { method: 'POST' })
+  } catch {
+    // ignore
+  }
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) return
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 200))
+  }
+  child.kill('SIGTERM')
 }
 
 describe('powergit CLI e2e', () => {
@@ -410,6 +459,69 @@ describeLive('powergit sync against live PowerSync stack', () => {
       },
     )
   }
+
+  it('starts the built daemon from a clean working directory', async () => {
+    if (skipLiveSuite) {
+      return
+    }
+    const builtDaemonBin = resolve(repoRoot, 'packages/cli/dist/cli/src/powergit-daemon.js')
+    const builtDaemonEntry = resolve(repoRoot, 'packages/daemon/dist/daemon/src/index.js')
+    if (!existsSync(builtDaemonBin)) {
+      console.warn('[cli] skipping built daemon smoke test — build artifacts missing')
+      return
+    }
+    if (!existsSync(builtDaemonEntry)) {
+      console.warn('[cli] skipping built daemon smoke test — daemon build artifacts missing')
+      return
+    }
+    const supabaseAnonKey =
+      process.env.SUPABASE_ANON_KEY ?? process.env.POWERGIT_TEST_SUPABASE_ANON_KEY
+    if (!supabaseAnonKey) {
+      console.warn('[cli] skipping built daemon smoke test — SUPABASE_ANON_KEY missing')
+      return
+    }
+
+    const daemonPort = await findOpenPort()
+    const daemonDir = await mkdtemp(join(tmpdir(), 'powergit-daemon-'))
+    const baseUrl = `http://127.0.0.1:${daemonPort}`
+
+    const child = spawn(
+      'node',
+      [builtDaemonBin],
+      {
+        cwd: repoDir,
+        env: {
+          ...process.env,
+          SUPABASE_URL: liveStackConfig.supabaseUrl,
+          SUPABASE_ANON_KEY: supabaseAnonKey,
+          POWERSYNC_DAEMON_HOST: '127.0.0.1',
+          POWERSYNC_DAEMON_PORT: String(daemonPort),
+          POWERSYNC_DAEMON_DB_PATH: join(daemonDir, 'powersync-daemon.db'),
+          POWERSYNC_DAEMON_SESSION_PATH: join(daemonDir, 'session.json'),
+          POWERSYNC_DISABLE_SUPABASE_WRITER: 'true',
+          SUPABASE_ONLY_MODE: 'true',
+          POWERGIT_NO_STACK_ENV: 'true',
+          POWERGIT_HOME: daemonDir,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    )
+
+    const stderrChunks: string[] = []
+    child.stderr?.on('data', (chunk) => {
+      stderrChunks.push(chunk.toString())
+    })
+
+    try {
+      await waitForHealth(baseUrl, child, 10_000)
+      const stderr = stderrChunks.join('')
+      expect(stderr).not.toContain('ERR_MODULE_NOT_FOUND')
+      expect(stderr).not.toContain('Cannot find package')
+    } finally {
+      await stopDaemon(baseUrl, child)
+      await rm(daemonDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }, 30_000)
 
   function runCliInDir(targetDir: string, args: string[], env: NodeJS.ProcessEnv = {}) {
     return execFileAsync(
