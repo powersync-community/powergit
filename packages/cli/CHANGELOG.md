@@ -1,5 +1,15 @@
 # @powersync-community/powergit
 
+## 1.2.3
+
+### Patch Changes
+
+- Login loopback fixes
+- Updated dependencies
+  - @powersync-community/powergit-daemon@1.2.3
+  - @powersync-community/powergit-remote-helper@1.2.3
+  - @powersync-community/powergit-core@1.2.3
+
 ## 1.2.2
 
 ### Patch Changes

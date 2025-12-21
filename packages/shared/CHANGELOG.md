@@ -1,5 +1,11 @@
 # @powersync-community/powergit-core
 
+## 1.2.3
+
+### Patch Changes
+
+- Login loopback fixes
+
 ## 1.2.2
 
 ### Patch Changes
