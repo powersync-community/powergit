@@ -1,5 +1,13 @@
 # @powersync-community/powergit-remote-helper
 
+## 1.2.2
+
+### Patch Changes
+
+- Add prod site url
+- Updated dependencies
+  - @powersync-community/powergit-core@1.2.2
+
 ## 1.2.1
 
 ### Patch Changes

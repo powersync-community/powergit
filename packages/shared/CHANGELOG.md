@@ -1,5 +1,11 @@
 # @powersync-community/powergit-core
 
+## 1.2.2
+
+### Patch Changes
+
+- Add prod site url
+
 ## 1.2.1
 
 ### Patch Changes
