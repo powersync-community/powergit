@@ -130,8 +130,8 @@ describe('daemon-client', () => {
 
   it('completes device login even when daemon mode is disabled', async () => {
     vi.unstubAllEnvs()
-    const mockFetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch
-    globalThis.fetch = mockFetch
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true })
+    globalThis.fetch = mockFetch as unknown as typeof fetch
 
     vi.doMock('../supabase', () => ({ getAccessToken: vi.fn() }))
 
