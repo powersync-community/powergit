@@ -139,13 +139,17 @@ export class GithubImportManager {
 
       await this.runStep(job, 'prepare', async () => {
         defaultBranch = await detectCurrentBranch(repoDir!);
-        const remoteUrl = buildPowerSyncRemoteUrl(this.options.daemonBaseUrl, request.orgId, request.repoId);
+        const remoteUrl = buildPowergitRemoteUrl(request.orgId, request.repoId);
         await ensureRemoteConfigured(repoDir!, remoteUrl);
         return `Remote configured (${REMOTE_NAME}) — default branch ${defaultBranch ?? 'unknown'}`;
       });
 
       await this.runStep(job, 'push', async () => {
-        await pushAllReferences(repoDir!);
+        const daemonBaseUrl = normalizeBaseUrl(this.options.daemonBaseUrl);
+        await pushAllReferences(repoDir!, {
+          ...process.env,
+          POWERSYNC_DAEMON_URL: daemonBaseUrl,
+        });
         return 'Pushed all branches and tags to PowerSync';
       });
 
@@ -480,7 +484,10 @@ function escapeForCmd(value: string): string {
   return value.replace(/"/g, '""');
 }
 
-async function runGit(args: string[], options: { cwd: string }): Promise<{ stdout: string; stderr: string }> {
+async function runGit(
+  args: string[],
+  options: { cwd: string; env?: NodeJS.ProcessEnv },
+): Promise<{ stdout: string; stderr: string }> {
   const display = `git ${args.join(' ')}`;
   console.info(`[powersync-daemon] ${display} (cwd: ${options.cwd})`);
   const progressCommands = new Set(['clone', 'fetch', 'push']);
@@ -488,6 +495,7 @@ async function runGit(args: string[], options: { cwd: string }): Promise<{ stdou
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, {
       cwd: options.cwd,
+      env: options.env ?? process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -556,10 +564,10 @@ async function ensureRemoteConfigured(repoDir: string, remoteUrl: string): Promi
   await runGit(['remote', 'add', REMOTE_NAME, remoteUrl], { cwd: repoDir });
 }
 
-async function pushAllReferences(repoDir: string): Promise<void> {
+async function pushAllReferences(repoDir: string, env?: NodeJS.ProcessEnv): Promise<void> {
   await ensurePowerSyncRemoteHelper();
-  await runGit(['fetch', '--progress', '--all', '--prune'], { cwd: repoDir });
-  await runGit(['push', '--progress', '--mirror', REMOTE_NAME], { cwd: repoDir });
+  await runGit(['fetch', '--progress', '--all', '--prune'], { cwd: repoDir, env });
+  await runGit(['push', '--progress', '--mirror', REMOTE_NAME], { cwd: repoDir, env });
 }
 
 async function detectCurrentBranch(repoDir: string): Promise<string | null> {
@@ -571,11 +579,22 @@ async function detectCurrentBranch(repoDir: string): Promise<string | null> {
   return null;
 }
 
-function buildPowerSyncRemoteUrl(baseUrl: string, orgId: string, repoId: string): string {
-  const normalizedBase = baseUrl.replace(/\/+$/, '');
-  const encodedOrg = encodeURIComponent(orgId);
-  const encodedRepo = encodeURIComponent(repoId);
-  return `powergit::${normalizedBase}/orgs/${encodedOrg}/repos/${encodedRepo}`;
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
+function resolveProfileNameFromEnv(): string {
+  const candidate = process.env.POWERGIT_PROFILE ?? process.env.STACK_PROFILE ?? process.env.POWERGIT_ACTIVE_PROFILE ?? 'prod';
+  const trimmed = String(candidate ?? '').trim();
+  return trimmed.length > 0 ? trimmed : 'prod';
+}
+
+function buildPowergitRemoteUrl(orgId: string, repoId: string): string {
+  const profileName = resolveProfileNameFromEnv();
+  if (profileName && profileName !== 'prod') {
+    return `powergit::${profileName}/${orgId}/${repoId}`;
+  }
+  return `powergit::/${orgId}/${repoId}`;
 }
 
 function normalizeGithubRequest(request: GithubImportRequest): NormalizedGithubImportRequest {
