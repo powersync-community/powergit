@@ -31,8 +31,15 @@
   },
   "include": [
     "src",
-    "tests",
     "playwright.config.ts",
     "vite-env.d.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "tests",
+    "src/**/__tests__/**",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
   ]
 }

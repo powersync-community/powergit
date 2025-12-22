@@ -5,8 +5,8 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { loadProfileEnvironment } from '@powersync-community/powergit-core/profile-env'
-import { PROFILE_DEFAULTS } from '@powersync-community/powergit-core'
+import { loadProfileEnvironment } from '../../shared/src/profile-env'
+import { PROFILE_DEFAULTS } from '../../shared/src/profile-defaults'
 
 const resolveFromRoot = (p: string) => path.resolve(fileURLToPath(new URL('.', import.meta.url)), p)
 const bufferPolyfillPath = resolveFromRoot(

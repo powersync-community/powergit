@@ -202,7 +202,7 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
         throw new Error('PowerSync daemon returned no token; ensure login succeeded before running the stream e2e.');
       }
 
-      const remoteUrl = `powergit::${endpoint.replace(/\/+$/, '')}/orgs/${orgId}/repos/${repoId}`;
+      const remoteUrl = `powergit::local-dev/${orgId}/${repoId}`;
 
       runCliCommand(
         ['demo-seed', '--remote-url', remoteUrl, '--branch', branchName, '--skip-sync'],

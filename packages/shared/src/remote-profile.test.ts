@@ -64,4 +64,10 @@ describe('resolvePowergitRemote', () => {
       powersyncUrl: 'https://powersync.staging.example.com',
     })
   })
+
+  it('rejects explicit endpoint remotes', () => {
+    expect(() =>
+      resolvePowergitRemote('powergit::https://example.com/orgs/acme/repos/infra'),
+    ).toThrow(/Explicit endpoint remotes are not supported/)
+  })
 })

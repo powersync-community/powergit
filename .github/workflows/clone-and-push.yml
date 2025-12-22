@@ -15,9 +15,6 @@ on:
       repo:
         description: "PowerSync repo id"
         required: true
-      edge_base_url:
-        description: "Edge base URL (functions/v1/powersync-remote)"
-        required: false
 
 jobs:
   clone-and-push:
@@ -54,14 +51,14 @@ jobs:
         run: |
           echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
           echo "$PWD/packages/remote-helper/node_modules/.bin" >> "$GITHUB_PATH"
-          ln -sf "$PWD/packages/remote-helper/dist/remote-helper/src/bin.js" "$PWD/packages/remote-helper/dist/remote-helper/src/git-remote-powersync"
-          chmod +x "$PWD/packages/remote-helper/dist/remote-helper/src/git-remote-powersync"
+          ln -sf "$PWD/packages/remote-helper/dist/remote-helper/src/bin.js" "$PWD/packages/remote-helper/dist/remote-helper/src/git-remote-powergit"
+          chmod +x "$PWD/packages/remote-helper/dist/remote-helper/src/git-remote-powergit"
           echo "$PWD/packages/remote-helper/dist/remote-helper/src" >> "$GITHUB_PATH"
 
       - name: Verify remote-helper is available
         run: |
-          if ! command -v git-remote-powersync >/dev/null 2>&1; then
-            echo "git-remote-powersync is missing from PATH. Contents of node_modules/.bin:"
+          if ! command -v git-remote-powergit >/dev/null 2>&1; then
+            echo "git-remote-powergit is missing from PATH. Contents of node_modules/.bin:"
             ls -l "$PWD/node_modules/.bin" || true
             ls -l "$PWD/packages/remote-helper/node_modules/.bin" || true
             ls -l "$PWD/packages/remote-helper/dist/remote-helper/src" || true
@@ -158,7 +155,6 @@ jobs:
 
       - name: Push
         env:
-          POWERSYNC_EDGE_BASE_URL: ${{ github.event.inputs.edge_base_url || secrets.POWERSYNC_EDGE_BASE_URL }}
           POWERSYNC_ORG: ${{ github.event.inputs.org }}
           POWERSYNC_REPO: ${{ github.event.inputs.repo }}
           POWERSYNC_REPO_URL: ${{ github.event.inputs.git_url }}
@@ -166,10 +162,9 @@ jobs:
           POWERSYNC_DAEMON_AUTOSTART: "false"
         run: |
           cd workdir
-          POWERSYNC_EDGE_BASE_URL=${POWERSYNC_DAEMON_URL:-http://127.0.0.1:5030}
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
-          git remote add powersync "powersync::$POWERSYNC_EDGE_BASE_URL/orgs/$POWERSYNC_ORG/repos/$POWERSYNC_REPO"
+          git remote add powersync "powergit::/$POWERSYNC_ORG/$POWERSYNC_REPO"
           git push powersync --all
           git push powersync --tags || true
 

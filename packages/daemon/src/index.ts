@@ -20,10 +20,30 @@ import { SupabaseWriter } from './supabase-writer.js';
 import { GithubImportManager } from './importer.js';
 import { resolveSessionPath } from './auth/index.js';
 import { createSupabaseFileStorage, resolveSupabaseSessionPath } from '@powersync-community/powergit-core';
+import { loadProfileEnvironment } from '@powersync-community/powergit-core/profile-env';
 import { PackStorage } from './storage.js';
 
 const SUPABASE_ONLY_MODE =
   (process.env.SUPABASE_ONLY_MODE ?? process.env.POWERSYNC_SUPABASE_ONLY ?? 'false').toLowerCase() === 'true';
+
+function hydrateProfileEnv() {
+  const stackEnvDisabled = (process.env.POWERGIT_NO_STACK_ENV ?? '').toLowerCase() === 'true';
+  try {
+    const result = loadProfileEnvironment({
+      updateState: false,
+      includeStackEnv: !stackEnvDisabled,
+    });
+    for (const [key, value] of Object.entries(result.combinedEnv)) {
+      if (typeof value !== 'string' || value.trim().length === 0) continue;
+      if (process.env[key] === undefined || process.env[key] === '') {
+        process.env[key] = value;
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[powersync-daemon] Failed to load profile defaults (${message}).`);
+  }
+}
 
 function normalizeAuthToken(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
@@ -262,6 +282,7 @@ class StreamSubscriptionManager {
 }
 
 export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Promise<void> {
+  hydrateProfileEnv();
   const config = await resolveDaemonConfig(options);
   await assertPortAvailable(config.host, config.port);
   console.info(`[powersync-daemon] starting (db: ${config.dbPath})`);
