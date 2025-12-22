@@ -335,6 +335,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       bucket: packBucket,
       baseUrl: supabaseUrl,
       signExpiresIn: packSignTtlSeconds,
+      allowCreateBucket: writerUsesServiceRole,
     });
 
   let packStorage: PackStorage | null = null;
