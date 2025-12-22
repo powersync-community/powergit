@@ -33,27 +33,48 @@ export class PackStorage {
     }
 
     const task = (async () => {
-      const { data, error } = await this.client.storage.getBucket(this.bucket)
-      if (data) return
+      if (this.allowCreateBucket) {
+        const { data, error } = await this.client.storage.getBucket(this.bucket)
+        if (data) return
 
-      const message = String(error?.message ?? '')
-      const isNotFound = message.toLowerCase().includes('not found')
+        const message = String((error as { message?: unknown } | null | undefined)?.message ?? '')
+        const isNotFound = message.toLowerCase().includes('not found')
 
-      if (!isNotFound && error) {
-        throw new Error(this.describeStorageError('bucket lookup', error))
+        if (!isNotFound && error) {
+          throw new Error(this.describeStorageError('bucket lookup', error))
+        }
+
+        const { error: createError } = await this.client.storage.createBucket(this.bucket, { public: false })
+        if (
+          createError &&
+          !String((createError as { message?: unknown } | null | undefined)?.message ?? '').includes('already exists')
+        ) {
+          throw new Error(this.describeStorageError('bucket create', createError))
+        }
+        return
       }
 
-      if (!this.allowCreateBucket) {
-        throw new Error(
-          `Supabase Storage bucket "${this.bucket}" is missing. Create it in Supabase (or apply the repo migrations) and add storage RLS policies. ` +
-            `See supabase/migrations/20251208120000_recreate_git_packs.sql.`,
-        )
+      // For non-admin credentials, avoid bucket metadata calls (they can return 404 even when the bucket exists).
+      // Instead, probe via the object API which is governed by storage.objects RLS policies.
+      const { error: probeError } = await this.client.storage.from(this.bucket).list('', { limit: 1 })
+      if (!probeError) return
+
+      const probeMessage = String((probeError as { message?: unknown } | null | undefined)?.message ?? '')
+      const probeStatus =
+        (probeError as { status?: unknown; statusCode?: unknown } | null | undefined)?.status ??
+        (probeError as { statusCode?: unknown } | null | undefined)?.statusCode
+      const notFound =
+        (typeof probeStatus === 'number' && probeStatus === 404) || probeMessage.toLowerCase().includes('not found')
+
+      if (!notFound) {
+        throw new Error(this.describeStorageError('bucket access', probeError))
       }
 
-      const { error: createError } = await this.client.storage.createBucket(this.bucket, { public: false })
-      if (createError && !String(createError.message ?? '').includes('already exists')) {
-        throw new Error(this.describeStorageError('bucket create', createError))
-      }
+      throw new Error(
+        `Supabase Storage bucket "${this.bucket}" is missing or not accessible with the current credentials (SUPABASE_URL=${this.baseUrl}). ` +
+          `If the bucket exists, ensure storage RLS policies allow the authenticated user to read/write it (or provide SUPABASE_SERVICE_ROLE_KEY). ` +
+          `See supabase/migrations/20251208120000_recreate_git_packs.sql.`,
+      )
     })()
 
     this.bucketReadyPromise = task
