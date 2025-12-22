@@ -12,6 +12,7 @@ export class PackStorage {
   private readonly bucket: string
   private readonly baseUrl: string
   private readonly signTtl: number
+  private bucketReadyPromise: Promise<void> | null = null
 
   constructor(private readonly client: SupabaseClient, options: PackStorageOptions) {
     this.bucket = options.bucket
@@ -20,18 +21,34 @@ export class PackStorage {
   }
 
   async ensureBucket(): Promise<void> {
-    const { data, error } = await this.client.storage.getBucket(this.bucket)
-    if (data) return
-    if (error && !String(error.message ?? '').toLowerCase().includes('not found')) {
-      throw error
+    if (this.bucketReadyPromise) {
+      return this.bucketReadyPromise
     }
-    const { error: createError } = await this.client.storage.createBucket(this.bucket, { public: false })
-    if (createError && !String(createError.message ?? '').includes('already exists')) {
-      throw createError
+
+    const task = (async () => {
+      const { data, error } = await this.client.storage.getBucket(this.bucket)
+      if (data) return
+      if (error && !String(error.message ?? '').toLowerCase().includes('not found')) {
+        throw error
+      }
+      const { error: createError } = await this.client.storage.createBucket(this.bucket, { public: false })
+      if (createError && !String(createError.message ?? '').includes('already exists')) {
+        throw createError
+      }
+    })()
+
+    this.bucketReadyPromise = task
+
+    try {
+      await task
+    } catch (error) {
+      this.bucketReadyPromise = null
+      throw error
     }
   }
 
   async uploadPack(key: string, contents: Uint8Array | Buffer): Promise<number> {
+    await this.ensureBucket()
     const payload = contents instanceof Uint8Array ? contents : new Uint8Array(contents)
     const { error } = await this.client.storage
       .from(this.bucket)
@@ -43,6 +60,7 @@ export class PackStorage {
   }
 
   async createSignedUrl(key: string): Promise<{ url: string; expiresAt: string } | null> {
+    await this.ensureBucket()
     const { data, error } = await this.client.storage.from(this.bucket).createSignedUrl(key, this.signTtl)
     if (error || !data?.signedUrl) {
       return null
@@ -54,6 +72,7 @@ export class PackStorage {
 
   async deleteObjects(keys: string[]): Promise<void> {
     if (!keys.length) return
+    await this.ensureBucket()
     const { error } = await this.client.storage.from(this.bucket).remove(keys)
     if (error) {
       throw error

@@ -18,6 +18,18 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
+    "./profile-env": {
+      "import": "./dist/profile-env.js",
+      "types": "./dist/profile-env.d.ts"
+    },
+    "./profile-manager": {
+      "import": "./dist/profile-manager.js",
+      "types": "./dist/profile-manager.d.ts"
+    },
+    "./stack-env": {
+      "import": "./dist/stack-env.js",
+      "types": "./dist/stack-env.d.ts"
+    },
     "./powersync/schema": {
       "import": "./dist/powersync/schema.js",
       "types": "./dist/powersync/schema.d.ts"

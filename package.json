@@ -10,7 +10,7 @@
     "build": "pnpm -r run build",
     "dev": "node ./scripts/run-with-local-env.mjs pnpm --filter @app/explorer dev",
     "dev:prod": "node ./scripts/run-with-local-env.mjs pnpm --filter @app/explorer dev:prod",
-    "dev:daemon": "node ./scripts/run-with-local-env.mjs node ./scripts/start-daemon-with-profile.mjs",
+    "dev:daemon": "pnpm --filter @powersync-community/powergit-core build && node ./scripts/run-with-local-env.mjs node ./scripts/start-daemon-with-profile.mjs",
     "dev:stack": "node ./scripts/dev-local-stack.mjs",
     "dev:stack:up": "node ./scripts/dev-stack-up.mjs",
     "dev:stack:down": "node ./scripts/dev-stack-down.mjs",

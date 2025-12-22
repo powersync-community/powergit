@@ -325,9 +325,27 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
         }) as SupabaseClient)
       : (supabase as SupabaseClient);
 
-  const packBucket = (process.env.SUPABASE_STORAGE_BUCKET ?? process.env.POWERSYNC_SUPABASE_STORAGE_BUCKET ?? 'git-packs').trim();
+  const packBucketCandidate = (process.env.SUPABASE_STORAGE_BUCKET ?? process.env.POWERSYNC_SUPABASE_STORAGE_BUCKET ?? 'git-packs').trim();
+  const packBucket = packBucketCandidate.length > 0 ? packBucketCandidate : 'git-packs';
   const packSignTtl = Number.parseInt(process.env.SUPABASE_STORAGE_TTL ?? process.env.POWERSYNC_SUPABASE_STORAGE_TTL ?? '120', 10);
+  const packSignTtlSeconds = Number.isFinite(packSignTtl) ? packSignTtl : 120;
+
+  const createPackStorage = (): PackStorage =>
+    new PackStorage(supabaseWriterClient, {
+      bucket: packBucket,
+      baseUrl: supabaseUrl,
+      signExpiresIn: packSignTtlSeconds,
+    });
+
   let packStorage: PackStorage | null = null;
+  try {
+    // Instantiate early so pushes/fetches do not depend on the auth callback creating the storage wrapper.
+    // Bucket verification is attempted later after Supabase authentication.
+    packStorage = createPackStorage();
+  } catch (error) {
+    console.error('[powersync-daemon] failed to initialise pack storage', error);
+    packStorage = null;
+  }
 
   let supabaseSession: Session | null = null;
   let supabaseAuthSubscription: { unsubscribe: () => void } | null = null;
@@ -346,8 +364,14 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   };
   const deviceChallenges = new Map<string, DeviceChallengeRecord>();
 
-  const resolveVerificationBaseUrl = () =>
-    process.env.POWERSYNC_DAEMON_DEVICE_URL ?? process.env.POWERSYNC_EXPLORER_URL ?? null;
+  const resolveVerificationBaseUrl = () => {
+    const configured = process.env.POWERSYNC_DAEMON_DEVICE_URL ?? process.env.POWERSYNC_EXPLORER_URL;
+    if (configured && configured.trim().length > 0) {
+      return configured.trim();
+    }
+    // Default to the daemon-hosted device login UI. For remote daemons, set POWERSYNC_DAEMON_DEVICE_URL explicitly.
+    return `http://127.0.0.1:${config.port}/ui/auth`;
+  };
 
   const buildVerificationUrl = (challengeId: string): string | null => {
     const base = resolveVerificationBaseUrl();
@@ -469,25 +493,22 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     }
     if (!packStorage) {
       try {
-        const storage = new PackStorage(supabaseWriterClient, {
-          bucket: packBucket,
-          baseUrl: supabaseUrl,
-          signExpiresIn: Number.isFinite(packSignTtl) ? packSignTtl : 120,
-        });
-        try {
-          await storage.ensureBucket();
-        } catch (error) {
-          const statusCode = (error as { status?: unknown; statusCode?: unknown })?.status ?? (error as { statusCode?: unknown })?.statusCode;
-          console.warn(
-            `[powersync-daemon] pack storage bucket check failed (${statusCode ?? 'unknown status'}); continuing. ` +
-              'Ensure the bucket exists and allows writes for this Supabase user or provide SUPABASE_SERVICE_ROLE_KEY.',
-          );
-        }
-        packStorage = storage;
+        packStorage = createPackStorage();
       } catch (error) {
         console.error('[powersync-daemon] failed to initialize pack storage after login', error);
         packStorage = null;
       }
+    }
+    if (packStorage) {
+      void packStorage.ensureBucket().catch((error) => {
+        const statusCode =
+          (error as { status?: unknown; statusCode?: unknown })?.status ??
+          (error as { statusCode?: unknown })?.statusCode;
+        console.warn(
+          `[powersync-daemon] pack storage bucket check failed (${statusCode ?? 'unknown status'}); continuing. ` +
+            'Ensure the bucket exists and allows writes for this Supabase user or provide SUPABASE_SERVICE_ROLE_KEY.',
+        );
+      });
     }
     if (SUPABASE_ONLY_MODE) {
       connected = true;
@@ -726,6 +747,47 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     }
   }
 
+  const getAuthStatus = (): DaemonAuthResponse => {
+    const supabaseOnly = SUPABASE_ONLY_MODE || !authEndpoint;
+    if (supabaseOnly && authToken) {
+      return {
+        status: 'ready',
+        token: authToken,
+        expiresAt: authExpiresAt,
+        context: buildAuthContext(),
+      };
+    }
+    if (authEndpoint && authToken) {
+      if (connected) {
+        return {
+          status: 'ready',
+          token: authToken,
+          expiresAt: authExpiresAt,
+          context: buildAuthContext(),
+        };
+      }
+      return {
+        status: 'pending',
+        reason: 'PowerSync connection pending; retry shortly.',
+        token: authToken,
+        expiresAt: authExpiresAt,
+        context: buildAuthContext(),
+      };
+    }
+    if (authEndpoint && !authToken) {
+      return {
+        status: 'pending',
+        reason: 'Awaiting Supabase authentication; run `powergit login` to continue.',
+        context: buildAuthContext(),
+      };
+    }
+    return {
+      status: 'auth_required',
+      reason: 'PowerSync credentials missing; run `powergit login` to authenticate via Supabase.',
+      context: buildAuthContext(),
+    };
+  };
+
   const server = createDaemonServer({
     host: config.host,
     port: config.port,
@@ -735,6 +797,12 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       connectedAt: connectedAt?.toISOString(),
       streamCount: subscriptionManager.getActiveCount(),
     }),
+    authUi: {
+      enabled: (process.env.POWERSYNC_DAEMON_AUTH_UI ?? '').trim().toLowerCase() !== 'false',
+      supabaseUrl,
+      supabaseAnonKey,
+      title: 'Powergit Login',
+    },
     onShutdownRequested: () => {
       requestShutdown('rpc');
     },
@@ -743,46 +811,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       allowHeaders: ['Content-Type', 'Authorization'],
       allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     },
-    getAuthStatus: () => {
-      const supabaseOnly = SUPABASE_ONLY_MODE || !authEndpoint;
-      if (supabaseOnly && authToken) {
-        return {
-          status: 'ready',
-          token: authToken,
-          expiresAt: authExpiresAt,
-          context: buildAuthContext(),
-        };
-      }
-      if (authEndpoint && authToken) {
-        if (connected) {
-          return {
-            status: 'ready',
-            token: authToken,
-            expiresAt: authExpiresAt,
-            context: buildAuthContext(),
-          };
-        }
-        return {
-          status: 'pending',
-          reason: 'PowerSync connection pending; retry shortly.',
-          token: authToken,
-          expiresAt: authExpiresAt,
-          context: buildAuthContext(),
-        };
-      }
-      if (authEndpoint && !authToken) {
-        return {
-          status: 'pending',
-          reason: 'Awaiting Supabase authentication; run `powergit login` to continue.',
-          context: buildAuthContext(),
-        };
-      }
-      return {
-        status: 'auth_required',
-        reason: 'PowerSync credentials missing; run `powergit login` to authenticate via Supabase.',
-        context: buildAuthContext(),
-      };
-    },
+    getAuthStatus,
     handleAuthDevice: async (payload) => {
       const request = (payload ?? {}) as Record<string, unknown>;
       cleanupExpiredChallenges();
@@ -876,6 +905,18 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       if (endpointHint) {
         authEndpoint = endpointHint;
       }
+
+      const currentStatus = getAuthStatus();
+      if (
+        (currentStatus.status === 'ready' && currentStatus.token) ||
+        (currentStatus.status === 'pending' && currentStatus.token)
+      ) {
+        if (!SUPABASE_ONLY_MODE && authEndpoint && authToken) {
+          scheduleConnect('auth-device');
+        }
+        return currentStatus;
+      }
+
       const id = randomBytes(6).toString('hex');
       const createdAt = Date.now();
       const expiresAt = createdAt + deviceChallengeTtlMs;
@@ -976,6 +1017,14 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
         let packSize: number | undefined;
 
         if (payload.packBase64 && payload.packBase64.length > 0) {
+          if (!packStorage) {
+            try {
+              packStorage = createPackStorage();
+            } catch (storageError) {
+              console.error('[powersync-daemon] failed to initialize pack storage for push', storageError);
+              packStorage = null;
+            }
+          }
           if (!packStorage) {
             throw new Error('Pack storage is not configured; cannot persist pack data');
           }

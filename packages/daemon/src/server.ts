@@ -1,9 +1,14 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { createRequire } from 'node:module';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { resolve as resolvePath, extname, sep as pathSeparator } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import busboy from 'busboy';
 import type { GitPushSummary, PowerSyncImportJob, RefRow, RepoSummaryRow } from '@powersync-community/powergit-core';
 import type { PersistPushResult, PushUpdateRow } from './queries.js';
 import { ImportValidationError } from './importer.js';
+import { DEVICE_LOGIN_CSS, DEVICE_LOGIN_JS, renderDeviceLoginHtml } from './auth/device-login-ui.js';
 
 export interface DaemonStatusSnapshot {
   startedAt: string;
@@ -51,6 +56,17 @@ export interface DaemonServerCorsOptions {
   allowCredentials?: boolean;
 }
 
+export interface DaemonAuthUiOptions {
+  /**
+   * Enable the built-in localhost device-login UI served at `/auth/`.
+   * Defaults to true.
+   */
+  enabled?: boolean;
+  supabaseUrl?: string | null;
+  supabaseAnonKey?: string | null;
+  title?: string | null;
+}
+
 export interface DaemonServerOptions {
   host: string;
   port: number;
@@ -73,6 +89,7 @@ export interface DaemonServerOptions {
   getImportJob?: (id: string) => Promise<PowerSyncImportJob | null> | PowerSyncImportJob | null;
   importGithubRepo?: (payload: GithubImportPayload) => Promise<PowerSyncImportJob>;
   cors?: DaemonServerCorsOptions;
+  authUi?: DaemonAuthUiOptions;
 }
 
 export interface DaemonServer {
@@ -85,6 +102,20 @@ function sendJson(res: http.ServerResponse, statusCode: number, payload: unknown
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Length', Buffer.byteLength(body));
+  res.end(body);
+}
+
+function sendText(res: http.ServerResponse, statusCode: number, contentType: string, body: string) {
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Length', Buffer.byteLength(body));
+  res.end(body);
+}
+
+function sendBuffer(res: http.ServerResponse, statusCode: number, contentType: string, body: Buffer) {
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Length', body.length);
   res.end(body);
 }
 
@@ -129,6 +160,92 @@ export interface DaemonPushRequest {
 }
 
 export type DaemonPushResponse = PersistPushResult & { message?: string };
+
+const require = createRequire(import.meta.url);
+let supabaseUmdCache: Buffer | null = null;
+
+function loadSupabaseUmdBundle(): Buffer | null {
+  if (supabaseUmdCache) return supabaseUmdCache;
+  try {
+    const resolved = require.resolve('@supabase/supabase-js/dist/umd/supabase.js');
+    supabaseUmdCache = readFileSync(resolved);
+    return supabaseUmdCache;
+  } catch (error) {
+    console.warn('[powersync-daemon] unable to load Supabase UMD bundle for /auth UI', error);
+    return null;
+  }
+}
+
+function resolveBundledUiDir(): string | null {
+  const override = process.env.POWERSYNC_DAEMON_UI_DIR;
+  if (override && override.trim().length > 0) {
+    const resolved = resolvePath(override.trim());
+    if (existsSync(resolvePath(resolved, 'index.html'))) {
+      return resolved;
+    }
+  }
+
+  // When running from a built package, the UI is bundled at dist/daemon/ui next to dist/daemon/src.
+  const bundled = resolvePath(fileURLToPath(new URL('../ui', import.meta.url)));
+  if (existsSync(resolvePath(bundled, 'index.html'))) {
+    return bundled;
+  }
+
+  // In the monorepo dev environment, fall back to the workspace Explorer build output if present.
+  const workspace = process.env.PNPM_WORKSPACE_DIR;
+  if (workspace && workspace.trim().length > 0) {
+    const candidate = resolvePath(workspace.trim(), 'packages/apps/explorer/dist');
+    if (existsSync(resolvePath(candidate, 'index.html'))) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function isSafeChildPath(parentDir: string, childPath: string): boolean {
+  const normalizedParent = parentDir.endsWith(pathSeparator) ? parentDir : `${parentDir}${pathSeparator}`;
+  return childPath === parentDir || childPath.startsWith(normalizedParent);
+}
+
+function contentTypeForPath(pathname: string): string {
+  const ext = extname(pathname).toLowerCase();
+  switch (ext) {
+    case '.html':
+      return 'text/html; charset=utf-8';
+    case '.js':
+      return 'application/javascript; charset=utf-8';
+    case '.css':
+      return 'text/css; charset=utf-8';
+    case '.json':
+    case '.map':
+      return 'application/json; charset=utf-8';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.ico':
+      return 'image/x-icon';
+    case '.wasm':
+      return 'application/wasm';
+    case '.woff2':
+      return 'font/woff2';
+    case '.woff':
+      return 'font/woff';
+    case '.ttf':
+      return 'font/ttf';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function looksLikeAssetRequest(pathname: string): boolean {
+  const lastSegment = pathname.split('/').pop() ?? '';
+  return lastSegment.includes('.');
+}
 
 function allowedMethodsForPath(pathname: string, options: DaemonServerOptions): string[] | null {
   if (/^\/repos\/import\/[^/]+$/.test(pathname)) {
@@ -221,6 +338,8 @@ function sanitizeStreams(value: unknown): StreamSubscriptionTarget[] {
 
 export function createDaemonServer(options: DaemonServerOptions): DaemonServer {
   const corsConfig = options.cors;
+  const authUiConfig = options.authUi ?? {};
+  const authUiEnabled = authUiConfig.enabled ?? true;
 
   function resolveAllowedOrigin(origin?: string | null): string | null {
     if (!corsConfig) return null;
@@ -254,6 +373,144 @@ export function createDaemonServer(options: DaemonServerOptions): DaemonServer {
 
       const url = new URL(req.url, `http://${req.headers.host ?? options.host}`);
       const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
+
+      if (req.method === 'GET' && (url.pathname === '/ui' || url.pathname.startsWith('/ui/'))) {
+        const uiDir = resolveBundledUiDir();
+        if (!uiDir) {
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+
+        if (url.pathname === '/ui') {
+          res.statusCode = 302;
+          res.setHeader('Location', `/ui/${url.search ?? ''}`);
+          res.end();
+          return;
+        }
+
+        if (url.pathname === '/ui/runtime-config.js') {
+          applyCorsHeaders(res, originHeader);
+          res.setHeader('Cache-Control', 'no-store');
+          const daemonUrl = `${url.protocol}//${url.host}`;
+          const readEnvString = (name: string): string | null => {
+            const raw = process.env[name];
+            if (!raw) return null;
+            const trimmed = raw.trim();
+            return trimmed.length > 0 ? trimmed : null;
+          };
+          const runtimeConfig = {
+            profile: readEnvString('POWERGIT_ACTIVE_PROFILE') ?? readEnvString('STACK_PROFILE') ?? null,
+            supabaseUrl: readEnvString('SUPABASE_URL') ?? null,
+            supabaseAnonKey: readEnvString('SUPABASE_ANON_KEY') ?? null,
+            supabaseSchema: readEnvString('SUPABASE_SCHEMA') ?? null,
+            powersyncEndpoint:
+              readEnvString('POWERSYNC_URL') ?? readEnvString('POWERSYNC_DAEMON_ENDPOINT') ?? readEnvString('POWERSYNC_ENDPOINT') ?? null,
+            daemonUrl,
+            daemonDeviceLoginUrl: `${daemonUrl}/ui/auth`,
+            useDaemon: true,
+          };
+          const body = `window.__POWERGIT_RUNTIME_CONFIG__ = ${JSON.stringify(runtimeConfig).replace(/</g, '\\u003c')};\n`;
+          sendText(res, 200, 'application/javascript; charset=utf-8', body);
+          return;
+        }
+
+        const relative = url.pathname.slice('/ui/'.length);
+        const requestedPath = relative.length === 0 ? 'index.html' : relative;
+        const resolvedPath = resolvePath(uiDir, requestedPath);
+        if (!isSafeChildPath(uiDir, resolvedPath)) {
+          res.statusCode = 403;
+          res.end();
+          return;
+        }
+
+        const serveIndex = () => {
+          const indexPath = resolvePath(uiDir, 'index.html');
+          if (!existsSync(indexPath)) {
+            res.statusCode = 404;
+            res.end();
+            return;
+          }
+          applyCorsHeaders(res, originHeader);
+          res.setHeader('Cache-Control', 'no-store');
+          sendBuffer(res, 200, 'text/html; charset=utf-8', readFileSync(indexPath));
+        };
+
+        try {
+          if (existsSync(resolvedPath) && statSync(resolvedPath).isFile()) {
+            applyCorsHeaders(res, originHeader);
+            const isIndex = requestedPath === 'index.html';
+            if (isIndex) {
+              res.setHeader('Cache-Control', 'no-store');
+            } else {
+              const cacheValue =
+                url.pathname.includes('/assets/') ? 'public, max-age=604800, immutable' : 'public, max-age=3600';
+              res.setHeader('Cache-Control', cacheValue);
+            }
+            sendBuffer(res, 200, contentTypeForPath(resolvedPath), readFileSync(resolvedPath));
+            return;
+          }
+        } catch {
+          // fall through to SPA handling
+        }
+
+        if (!looksLikeAssetRequest(url.pathname)) {
+          serveIndex();
+          return;
+        }
+
+        res.statusCode = 404;
+        res.end();
+        return;
+      }
+
+      if (authUiEnabled) {
+        if (req.method === 'GET' && url.pathname === '/auth') {
+          res.statusCode = 302;
+          res.setHeader('Location', `/auth/${url.search ?? ''}`);
+          res.end();
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/auth/') {
+          applyCorsHeaders(res, originHeader);
+          res.setHeader('Cache-Control', 'no-store');
+          const html = renderDeviceLoginHtml({
+            supabaseUrl: authUiConfig.supabaseUrl ?? null,
+            supabaseAnonKey: authUiConfig.supabaseAnonKey ?? null,
+            title: authUiConfig.title ?? null,
+          });
+          sendText(res, 200, 'text/html; charset=utf-8', html);
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/auth/style.css') {
+          applyCorsHeaders(res, originHeader);
+          res.setHeader('Cache-Control', 'no-store');
+          sendText(res, 200, 'text/css; charset=utf-8', `${DEVICE_LOGIN_CSS}\n`);
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/auth/device-login.js') {
+          applyCorsHeaders(res, originHeader);
+          res.setHeader('Cache-Control', 'no-store');
+          sendText(res, 200, 'application/javascript; charset=utf-8', `${DEVICE_LOGIN_JS}\n`);
+          return;
+        }
+
+        if (req.method === 'GET' && url.pathname === '/auth/supabase.js') {
+          const bundle = loadSupabaseUmdBundle();
+          if (!bundle) {
+            res.statusCode = 500;
+            res.end();
+            return;
+          }
+          applyCorsHeaders(res, originHeader);
+          res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+          sendBuffer(res, 200, 'application/javascript; charset=utf-8', bundle);
+          return;
+        }
+      }
 
       if (req.method === 'OPTIONS') {
         const methods = allowedMethodsForPath(url.pathname, options);

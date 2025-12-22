@@ -1,4 +1,5 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
+import { getRuntimeConfigString } from './runtime-config'
 
 let cachedClient: SupabaseClient | null = null
 
@@ -34,6 +35,18 @@ function isPlaceholder(value: string | undefined | null): boolean {
 }
 
 function readEnv(name: string): string | null {
+  const runtimeValue =
+    name === 'VITE_SUPABASE_URL'
+      ? getRuntimeConfigString('supabaseUrl')
+      : name === 'VITE_SUPABASE_ANON_KEY'
+        ? getRuntimeConfigString('supabaseAnonKey')
+        : name === 'VITE_SUPABASE_SCHEMA'
+          ? getRuntimeConfigString('supabaseSchema')
+          : null
+  if (runtimeValue) {
+    return runtimeValue
+  }
+
   const env = import.meta.env as Record<string, string | undefined>
   const runtimeEnv = ((globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env) ?? {}
 

@@ -1,16 +1,31 @@
 import type { PowerSyncImportJob } from '@powersync-community/powergit-core'
 import { getAccessToken } from './supabase'
 import { dispatchGithubImport, type GithubActionsImportRequest } from './github-actions'
+import { getRuntimeConfigBoolean, getRuntimeConfigString } from './runtime-config'
 
 const DEFAULT_DAEMON_URL = 'http://127.0.0.1:5030'
-const REQUEST_TIMEOUT_MS = 5_000
+const REQUEST_TIMEOUT_MS = 15_000
+
+function isAbortError(error: unknown): boolean {
+  if (!error) return false
+  if (error instanceof DOMException) return error.name === 'AbortError'
+  return typeof (error as { name?: unknown }).name === 'string' && (error as { name?: string }).name === 'AbortError'
+}
 
 function readEnvFlag(name: string, fallback = 'false') {
+  const runtimeOverride = name === 'VITE_POWERSYNC_USE_DAEMON' ? getRuntimeConfigBoolean('useDaemon') : null
+  if (runtimeOverride !== null) {
+    return runtimeOverride
+  }
   const env = import.meta.env as Record<string, string | undefined>
   return (env[name]?.trim() ?? fallback).toLowerCase() === 'true'
 }
 
 function readEnvString(name: string): string | null {
+  const runtimeOverride = name === 'VITE_POWERSYNC_DAEMON_URL' ? getRuntimeConfigString('daemonUrl') : null
+  if (runtimeOverride) {
+    return runtimeOverride
+  }
   const env = import.meta.env as Record<string, string | undefined>
   const value = env[name]
   if (!value) return null
@@ -18,7 +33,18 @@ function readEnvString(name: string): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-const daemonBaseUrl = readEnvString('VITE_POWERSYNC_DAEMON_URL') ?? DEFAULT_DAEMON_URL
+const daemonBaseUrl = (() => {
+  const configured = readEnvString('VITE_POWERSYNC_DAEMON_URL')
+  if (configured) return configured
+  if (typeof window !== 'undefined') {
+    const { hostname, pathname, origin } = window.location
+    const isLocalhost = hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1'
+    if (isLocalhost && pathname.startsWith('/ui/')) {
+      return origin
+    }
+  }
+  return DEFAULT_DAEMON_URL
+})()
 const daemonEnabled = readEnvFlag('VITE_POWERSYNC_USE_DAEMON')
 const actionsImportEnabled = readEnvFlag('VITE_POWERSYNC_ACTIONS_IMPORT', 'true')
 export function isDaemonEnabled(): boolean {
@@ -119,7 +145,9 @@ async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promi
     }
     return (await res.json()) as T
   } catch (error) {
-    console.warn('[Explorer][daemon] request failed', error)
+    if (!isAbortError(error)) {
+      console.warn('[Explorer][daemon] request failed', error)
+    }
     return null
   } finally {
     clearTimeout(timeout)
@@ -140,7 +168,9 @@ async function postJson(path: string, body?: Record<string, unknown>, options: {
     })
     return res.ok
   } catch (error) {
-    console.warn('[Explorer][daemon] POST request failed', error)
+    if (!isAbortError(error)) {
+      console.warn('[Explorer][daemon] POST request failed', error)
+    }
     return false
   } finally {
     clearTimeout(timeout)
@@ -162,7 +192,9 @@ async function fetchDaemonJson<T>(path: string, init?: RequestInit): Promise<{ s
     }
     return { status, data }
   } catch (error) {
-    console.warn('[Explorer][daemon] request failed', error)
+    if (!isAbortError(error)) {
+      console.warn('[Explorer][daemon] request failed', error)
+    }
     return { status: 0, data: null }
   } finally {
     clearTimeout(timeout)

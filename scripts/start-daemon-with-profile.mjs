@@ -15,7 +15,7 @@ const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, '..');
 
 async function loadProfile() {
-  const module = await import('../packages/cli/src/profile-env.js');
+  const module = await import('@powersync-community/powergit-core/profile-env');
   return module.loadProfileEnvironment;
 }
 

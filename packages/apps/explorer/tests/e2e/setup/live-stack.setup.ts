@@ -3,7 +3,7 @@ import net from 'node:net'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, chromium } from '@playwright/test'
-import { loadProfileEnvironment } from '../../../../../cli/src/profile-env.js'
+import { loadProfileEnvironment } from '@powersync-community/powergit-core/profile-env'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

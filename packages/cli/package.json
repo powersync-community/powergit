@@ -19,14 +19,14 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp src/profile-defaults-data.js dist/cli/src/profile-defaults-data.js && cp src/profile-env.js dist/cli/src/profile-env.js && chmod +x dist/cli/src/bin.js dist/cli/src/git-remote-powergit.js dist/cli/src/powergit-daemon.js",
+    "build": "pnpm --filter @powersync-community/powergit-core build && tsc -p tsconfig.json && chmod +x dist/cli/src/bin.js dist/cli/src/git-remote-powergit.js dist/cli/src/powergit-daemon.js",
     "cli": "tsx src/bin.ts",
     "login": "tsx src/bin.ts login",
     "prepack": "npm run build",
     "postinstall": "node scripts/postinstall.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'stub'",
-    "test": "vitest run"
+    "test": "pnpm --filter @powersync-community/powergit-core build && vitest run"
   },
   "dependencies": {
     "@powersync/common": "1.44.0",

@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { loadProfileEnvironment } from '../../cli/src/profile-env.js'
+import { loadProfileEnvironment } from '@powersync-community/powergit-core/profile-env'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

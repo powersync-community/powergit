@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { resolve as resolvePath } from 'node:path'
-import { loadProfileEnvironment } from './profile-env.js'
+import { loadProfileEnvironment } from '@powersync-community/powergit-core/profile-env'
 
 const require = createRequire(import.meta.url)
 

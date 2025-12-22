@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadProfileEnvironment } from '../../cli/src/profile-env.js'
+import { loadProfileEnvironment } from '@powersync-community/powergit-core/profile-env'
 
 // Use a dedicated port to avoid clashing with local dev server defaults
 const PORT = Number(process.env.PORT || 5191)

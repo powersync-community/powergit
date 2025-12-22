@@ -107,7 +107,11 @@ powergit login
 
 `powergit login` starts a device-code flow. The daemon prints a device code and an `Open:` URL — open it, sign in with Supabase, and keep the tab open until the CLI reports success. The Supabase session is cached per profile under `~/.powergit/daemon/<profile>/session.json` and reused by the daemon.
 
-If you don’t see an `Open:` URL, set `daemon.deviceLoginUrl` in your profile or export `POWERSYNC_DAEMON_DEVICE_URL`.
+By default the daemon serves the device-login page locally at `http://127.0.0.1:5030/ui/auth`.
+
+If you don’t see an `Open:` URL, set `daemon.deviceLoginUrl` in your profile or export `POWERSYNC_DAEMON_DEVICE_URL` (useful when the daemon runs somewhere other than localhost).
+
+If the browser can’t POST back to your local daemon (e.g. `net::ERR_BLOCKED_BY_CLIENT`), try an incognito window or disable ad blockers/privacy shields for the device login page.
 
 To discard credentials, run `powergit logout`.
 

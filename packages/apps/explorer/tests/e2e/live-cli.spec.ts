@@ -7,7 +7,7 @@ import type { Page } from '@playwright/test'
 import { test, expect } from './diagnostics'
 import { BASE_URL } from '../../playwright.config'
 import { resolvePowergitRemote } from '@powersync-community/powergit-core/node'
-import { loadProfileEnvironment } from '../../../../cli/src/profile-env.js'
+import { loadProfileEnvironment } from '@powersync-community/powergit-core/profile-env'
 
 const WAIT_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_E2E_WAIT_MS ?? '300000', 10)
 const WAIT_INTERVAL_MS = Number.parseInt(process.env.POWERSYNC_E2E_POLL_MS ?? '1500', 10)

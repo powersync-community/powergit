@@ -4,20 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node ./scripts/dev-with-stack.mjs",
-    "dev:remote": "vite",
+    "dev": "pnpm --filter @powersync-community/powergit-core build && node ./scripts/dev-with-stack.mjs",
+    "dev:remote": "pnpm --filter @powersync-community/powergit-core build && vite",
     "build": "pnpm --filter @powersync-community/powergit-core build && tsc -p tsconfig.json && vite build",
+    "build:daemon": "VITE_BASE_PATH=/ui/ VITE_POWERSYNC_USE_DAEMON=true pnpm run build",
     "build:prod": "STACK_PROFILE=prod pnpm run build",
     "preview": "vite preview",
     "lint": "echo 'stub'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test": "pnpm --filter @powersync-community/powergit-core build && vitest run",
+    "test:e2e": "pnpm --filter @powersync-community/powergit-core build && playwright test",
     "test:e2e:local": "pnpm test:e2e",
     "test:e2e:staging": "STACK_PROFILE=staging pnpm test:e2e",
     "test:e2e:staging:ci": "STACK_PROFILE=staging pnpm exec playwright test",
-    "dev:local": "VITE_POWERSYNC_USE_DAEMON=true vite",
-    "dev:prod": "VITE_POWERSYNC_USE_DAEMON=false vite --mode production --port 5784"
+    "dev:local": "pnpm --filter @powersync-community/powergit-core build && VITE_POWERSYNC_USE_DAEMON=true vite",
+    "dev:prod": "pnpm --filter @powersync-community/powergit-core build && VITE_POWERSYNC_USE_DAEMON=false vite --mode production --port 5784"
   },
   "dependencies": {
     "@isomorphic-git/lightning-fs": "^4.6.2",
@@ -46,6 +47,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
+    "@powersync-community/powergit-core": "workspace:*",
     "@tailwindcss/postcss": "^4.0.9",
     "@tailwindcss/typography": "^0.5.19",
     "@testing-library/react": "^14.2.0",

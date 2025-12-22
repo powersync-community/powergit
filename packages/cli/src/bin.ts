@@ -12,8 +12,8 @@ import {
   buildEnvFromProfile,
   type ProfileConfig,
   type ResolvedProfile,
-} from './profile-manager.js'
-import { loadStackEnv } from './stack-env.js'
+} from '@powersync-community/powergit-core/profile-manager'
+import { loadStackEnv } from '@powersync-community/powergit-core/stack-env'
 
 const CLI_NAME = 'powergit'
 const LOG_PREFIX = `[${CLI_NAME}]`
@@ -327,18 +327,23 @@ async function runLoginCommand(args: LoginCommandArgs) {
     const challenge = override ?? observedChallenge
     if (!challenge || !challenge.challengeId) return
     console.log(prefix)
-    if (challenge.verificationUrl) {
-      console.log(`   Open: ${challenge.verificationUrl}`)
-    } else {
-      const fallbackUrl = process.env.POWERSYNC_DAEMON_DEVICE_URL ?? process.env.POWERSYNC_EXPLORER_URL
-      if (fallbackUrl) {
-        const separator = fallbackUrl.includes('?') ? '&' : '?'
-        console.log(`   Open: ${fallbackUrl}${separator}device_code=${challenge.challengeId}`)
-      } else {
-        console.log('   No device login URL configured.')
-        console.log('   Set daemon.deviceLoginUrl in your profile or export POWERSYNC_DAEMON_DEVICE_URL.')
+    const openUrl = (() => {
+      if (challenge.verificationUrl) {
+        return challenge.verificationUrl
       }
+      const fallbackUrl = process.env.POWERSYNC_DAEMON_DEVICE_URL ?? process.env.POWERSYNC_EXPLORER_URL
+      if (!fallbackUrl) return null
+      const separator = fallbackUrl.includes('?') ? '&' : '?'
+      return `${fallbackUrl}${separator}device_code=${challenge.challengeId}`
+    })()
+    if (openUrl) {
+      console.log('   Open:')
+      console.log(`   ${openUrl}`)
+    } else {
+      console.log('   No device login URL configured.')
+      console.log('   Set daemon.deviceLoginUrl in your profile or export POWERSYNC_DAEMON_DEVICE_URL.')
     }
+    console.log('   If the page can’t reach your local daemon (e.g. net::ERR_BLOCKED_BY_CLIENT), try incognito or disable ad blockers/privacy shields.')
     console.log(`   Device code: ${challenge.challengeId}`)
     if (challenge.expiresAt) {
       console.log(`   Expires: ${challenge.expiresAt}`)
@@ -364,15 +369,14 @@ async function runLoginCommand(args: LoginCommandArgs) {
             : typeof (context as { device_code?: unknown }).device_code === 'string'
               ? (context as { device_code?: string }).device_code
               : null
+      if (!challengeId) {
+        return
+      }
       const verificationUrl = typeof context.verificationUrl === 'string' ? context.verificationUrl : null
       const expiresAt = typeof context.expiresAt === 'string' ? context.expiresAt : null
       observedChallenge = { challengeId, verificationUrl, expiresAt }
       if (!printedPendingPrompt) {
-        if (status.reason) {
-          console.log(`Daemon requested interactive login: ${status.reason}`)
-        } else {
-          console.log('Daemon requested interactive login.')
-        }
+        console.log('Daemon requested interactive login.')
         explainChallenge('To finish authentication:', observedChallenge)
         console.log('Waiting for daemon authentication to complete...')
         printedPendingPrompt = true
@@ -381,23 +385,15 @@ async function runLoginCommand(args: LoginCommandArgs) {
   })
 
   const initialStatus = loginResult.initialStatus
-  if (initialStatus?.status === 'pending') {
-    if (initialStatus.reason && !printedPendingPrompt) {
-      console.log(`Daemon requested interactive login: ${initialStatus.reason}`)
-    }
-    if (!printedPendingPrompt) {
-      if (loginResult.challenge) {
-        explainChallenge('To finish authentication:', {
-          challengeId: loginResult.challenge.challengeId,
-          verificationUrl: loginResult.challenge.verificationUrl ?? null,
-          expiresAt: loginResult.challenge.expiresAt ?? null,
-        })
-      } else {
-        explainChallenge('To finish authentication:')
-      }
-      console.log('Waiting for daemon authentication to complete...')
-      printedPendingPrompt = true
-    }
+  if (initialStatus?.status === 'pending' && loginResult.challenge?.challengeId && !printedPendingPrompt) {
+    console.log('Daemon requested interactive login.')
+    explainChallenge('To finish authentication:', {
+      challengeId: loginResult.challenge.challengeId,
+      verificationUrl: loginResult.challenge.verificationUrl ?? null,
+      expiresAt: loginResult.challenge.expiresAt ?? null,
+    })
+    console.log('Waiting for daemon authentication to complete...')
+    printedPendingPrompt = true
   }
 
   const finalStatus = loginResult.finalStatus

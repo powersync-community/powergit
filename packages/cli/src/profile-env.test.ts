@@ -76,7 +76,7 @@ describe('loadProfileEnvironment', () => {
     )
 
     vi.resetModules()
-    const { loadProfileEnvironment } = await import('./profile-env.js')
+    const { loadProfileEnvironment } = await import('@powersync-community/powergit-core/profile-env')
 
     const result = loadProfileEnvironment({
       profile: 'staging',

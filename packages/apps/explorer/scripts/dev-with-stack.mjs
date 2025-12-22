@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { loadProfileEnvironment } from '../../../cli/src/profile-env.js'
+import { loadProfileEnvironment } from '@powersync-community/powergit-core/profile-env'
 import {
   resolveDaemonBaseUrl,
   isDaemonResponsive,

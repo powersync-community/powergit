@@ -248,6 +248,17 @@ export const PowerSyncProvider: React.FC<React.PropsWithChildren> = ({ children 
       return
     }
 
+    const pathname =
+      typeof window === 'object' && window && typeof window.location?.pathname === 'string'
+        ? window.location.pathname
+        : ''
+    const isAuthRoute = /\/auth(?:\/|$)/.test(pathname)
+    if (isAuthRoute) {
+      dismissNoticeByKey('daemon-status')
+      dismissStatus('daemon-auth')
+      return
+    }
+
     const status = daemonStatus
     if (!status) {
       const message = (

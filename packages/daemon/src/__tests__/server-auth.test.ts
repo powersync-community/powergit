@@ -58,6 +58,53 @@ describe('createDaemonServer auth routes', () => {
     }
   });
 
+  it('serves the built-in device login UI under /auth/', async () => {
+    const { baseUrl, close } = await listenServer({
+      host: '127.0.0.1',
+      port: 0,
+      getStatus: () => ({
+        startedAt: new Date().toISOString(),
+        connected: true,
+        streamCount: 0,
+      }),
+      authUi: {
+        supabaseUrl: 'https://example.supabase.co',
+        supabaseAnonKey: 'anon-key',
+        title: 'Powergit Login',
+      },
+    });
+
+    try {
+      const redirectRes = await fetch(`${baseUrl}/auth?device_code=abc123`, { redirect: 'manual' });
+      expect(redirectRes.status).toBe(302);
+      expect(redirectRes.headers.get('location')).toBe('/auth/?device_code=abc123');
+
+      const pageRes = await fetch(`${baseUrl}/auth/?device_code=abc123`);
+      expect(pageRes.status).toBe(200);
+      expect(pageRes.headers.get('content-type')).toContain('text/html');
+      const html = await pageRes.text();
+      expect(html).toContain('Powergit Login');
+      expect(html).toContain('"supabaseUrl":"https://example.supabase.co"');
+
+      const cssRes = await fetch(`${baseUrl}/auth/style.css`);
+      expect(cssRes.status).toBe(200);
+      expect(cssRes.headers.get('content-type')).toContain('text/css');
+
+      const jsRes = await fetch(`${baseUrl}/auth/device-login.js`);
+      expect(jsRes.status).toBe(200);
+      expect(jsRes.headers.get('content-type')).toContain('application/javascript');
+      expect(await jsRes.text()).toContain('submitDevice');
+
+      const supabaseRes = await fetch(`${baseUrl}/auth/supabase.js`);
+      expect(supabaseRes.status).toBe(200);
+      expect(supabaseRes.headers.get('content-type')).toContain('application/javascript');
+      const bundlePrefix = (await supabaseRes.text()).slice(0, 10);
+      expect(bundlePrefix).toContain('!function');
+    } finally {
+      await close();
+    }
+  });
+
   it('adds CORS headers and responds to preflight requests', async () => {
     const { baseUrl, close } = await listenServer({
       host: '127.0.0.1',

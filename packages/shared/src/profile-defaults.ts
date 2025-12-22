@@ -14,7 +14,7 @@ export const PROFILE_DEFAULTS = {
     },
     daemon: {
       endpoint: 'http://127.0.0.1:5030',
-      deviceLoginUrl: 'http://localhost:5783/auth',
+      deviceLoginUrl: 'http://127.0.0.1:5030/ui/auth',
     },
     supabase: {
       url: 'http://127.0.0.1:55431',
@@ -25,7 +25,7 @@ export const PROFILE_DEFAULTS = {
       url: 'https://69330b17af0dc7f75977d41a.powersync.journeyapps.com',
     },
     daemon: {
-      deviceLoginUrl: 'https://powersync-community.github.io/powergit/auth',
+      deviceLoginUrl: 'http://127.0.0.1:5030/ui/auth',
     },
     supabase: {
       url: 'https://swycjfithtzfzwwekmnq.supabase.co',

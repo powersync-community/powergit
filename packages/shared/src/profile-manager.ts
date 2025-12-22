@@ -1,7 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import os from 'node:os'
-import { cloneProfileDefaults } from './profile-defaults-data.js'
+import { cloneProfileDefaults } from './profile-defaults.js'
 
 export interface PowerSyncProfileConfig {
   url?: string
@@ -75,15 +75,73 @@ function ensureDir(path: string) {
 function readJsonFile<T>(path: string): T | null {
   try {
     const raw = readFileSync(path, 'utf8')
-    return JSON.parse(raw) as T
+    const parsed = JSON.parse(raw) as T
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed
+    }
   } catch {
-    return null
+    // ignore
   }
+  return null
 }
 
 function writeJsonFile(path: string, data: unknown) {
   ensureDir(dirname(path))
   writeFileSync(path, JSON.stringify(data, null, 2) + '\n', 'utf8')
+}
+
+const LEGACY_DEVICE_LOGIN_URL = 'https://powersync-community.github.io/powergit/auth'
+
+function normalizeUrlForCompare(value: string): string {
+  const trimmed = value.trim()
+  const noQuery = trimmed.split('?')[0] ?? trimmed
+  return noQuery.replace(/\/+$/, '')
+}
+
+function migrateProfilesFile(profiles: ProfilesFile, defaults: ProfilesFile): { profiles: ProfilesFile; changed: boolean } {
+  let changed = false
+  const legacy = normalizeUrlForCompare(LEGACY_DEVICE_LOGIN_URL)
+
+  for (const [name, config] of Object.entries(profiles)) {
+    if (!config || typeof config !== 'object') continue
+    const desired = defaults[name]?.daemon?.deviceLoginUrl
+    if (!desired || typeof desired !== 'string' || desired.trim().length === 0) continue
+
+    const daemonDeviceLoginUrl = config.daemon?.deviceLoginUrl
+    const daemonDeviceUrl = config.daemon?.deviceUrl
+    const powersyncDeviceLoginUrl = config.powersync?.deviceLoginUrl
+    const powersyncDeviceUrl = config.powersync?.deviceUrl
+
+    const hasLegacy =
+      (typeof daemonDeviceLoginUrl === 'string' && normalizeUrlForCompare(daemonDeviceLoginUrl) === legacy) ||
+      (typeof daemonDeviceUrl === 'string' && normalizeUrlForCompare(daemonDeviceUrl) === legacy) ||
+      (typeof powersyncDeviceLoginUrl === 'string' && normalizeUrlForCompare(powersyncDeviceLoginUrl) === legacy) ||
+      (typeof powersyncDeviceUrl === 'string' && normalizeUrlForCompare(powersyncDeviceUrl) === legacy)
+
+    if (!hasLegacy) continue
+
+    config.daemon = { ...(config.daemon ?? {}), deviceLoginUrl: desired }
+    if (typeof config.daemon.deviceUrl === 'string' && normalizeUrlForCompare(config.daemon.deviceUrl) === legacy) {
+      delete config.daemon.deviceUrl
+    }
+    if (config.powersync) {
+      if (
+        typeof config.powersync.deviceLoginUrl === 'string' &&
+        normalizeUrlForCompare(config.powersync.deviceLoginUrl) === legacy
+      ) {
+        delete config.powersync.deviceLoginUrl
+      }
+      if (
+        typeof config.powersync.deviceUrl === 'string' &&
+        normalizeUrlForCompare(config.powersync.deviceUrl) === legacy
+      ) {
+        delete config.powersync.deviceUrl
+      }
+    }
+    changed = true
+  }
+
+  return { profiles, changed }
 }
 
 function createDefaultProfiles(): ProfilesFile {
@@ -92,12 +150,17 @@ function createDefaultProfiles(): ProfilesFile {
 
 function loadProfiles(): { profiles: ProfilesFile; source: 'default' | 'file' } {
   const fileData = readJsonFile<ProfilesFile>(PROFILES_PATH)
-  if (!fileData || typeof fileData !== 'object' || Array.isArray(fileData)) {
+  if (!fileData) {
     const defaults = createDefaultProfiles()
     writeJsonFile(PROFILES_PATH, defaults)
     return { profiles: defaults, source: 'default' }
   }
-  return { profiles: fileData, source: 'file' }
+  const defaults = createDefaultProfiles()
+  const migration = migrateProfilesFile(fileData, defaults)
+  if (migration.changed) {
+    writeJsonFile(PROFILES_PATH, migration.profiles)
+  }
+  return { profiles: migration.profiles, source: 'file' }
 }
 
 function loadProfileState(): { current: string; exists: boolean } {
@@ -115,8 +178,7 @@ function saveProfileState(name: string) {
 export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<string, string>; stackEnvPath?: string } {
   const result: Record<string, string> = {}
 
-  const powersyncEndpoint =
-    profile.powersync?.url ?? profile.powersync?.endpoint ?? undefined
+  const powersyncEndpoint = profile.powersync?.url ?? profile.powersync?.endpoint ?? undefined
   if (powersyncEndpoint) {
     const endpoint = powersyncEndpoint
     result.POWERSYNC_URL = endpoint
@@ -124,8 +186,7 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
     result.POWERGIT_TEST_ENDPOINT = endpoint
   }
 
-  const daemonEndpoint =
-    profile.daemon?.endpoint ?? profile.powersync?.daemonUrl ?? undefined
+  const daemonEndpoint = profile.daemon?.endpoint ?? profile.powersync?.daemonUrl ?? undefined
   if (daemonEndpoint) {
     result.POWERSYNC_DAEMON_URL = daemonEndpoint
   }
@@ -175,7 +236,7 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
     result.SUPABASE_SCHEMA = profile.supabase.schema
   }
 
-  if (profile.env) {
+  if (profile.env && typeof profile.env === 'object') {
     for (const [key, value] of Object.entries(profile.env)) {
       if (value === undefined || value === null) continue
       result[key] = String(value)
@@ -267,4 +328,16 @@ export function saveProfile(name: string, config: ProfileConfig): void {
   const { profiles } = loadProfiles()
   const updated = { ...profiles, [name]: config }
   writeJsonFile(PROFILES_PATH, updated)
+}
+
+export function resolveProfileDirectory(): string {
+  return POWERGIT_DIR
+}
+
+export function resolveProfilesPath(): string {
+  return PROFILES_PATH
+}
+
+export function profilesFileExists(): boolean {
+  return existsSync(PROFILES_PATH)
 }

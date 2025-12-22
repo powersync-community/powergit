@@ -13,7 +13,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp src/worker.js dist/daemon/src/worker.js",
+    "build": "pnpm --filter @app/explorer build:daemon && tsc -p tsconfig.json && cp src/worker.js dist/daemon/src/worker.js && node scripts/bundle-explorer-ui.mjs",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "start:local": "pnpm --workspace-root run dev:daemon -- --profile local-dev",

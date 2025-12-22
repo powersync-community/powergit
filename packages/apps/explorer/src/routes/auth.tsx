@@ -111,8 +111,19 @@ export function AuthRoute() {
         return
       }
       setDeviceLoginState('error')
+      const daemonTarget = (() => {
+        if (daemonUrlOverride) return daemonUrlOverride
+        if (typeof window !== 'undefined') {
+          const { hostname, pathname, origin } = window.location
+          const isLocalhost = hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1'
+          if (isLocalhost && pathname.startsWith('/ui/')) {
+            return origin
+          }
+        }
+        return 'http://127.0.0.1:5030'
+      })()
       setDeviceLoginError(
-        'Could not reach the local PowerSync daemon. Ensure `powergit-daemon` is running, then refresh this page or rerun `powergit login`.',
+        `Could not reach the local PowerSync daemon (${daemonTarget}) or the request timed out. Ensure \`powergit-daemon\` is running. If DevTools shows "net::ERR_BLOCKED_BY_CLIENT", disable ad blockers/privacy shields for this page and try again.`,
       )
     }
 

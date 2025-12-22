@@ -13,7 +13,7 @@ import {
   type RepoStreamTarget,
 } from '@powersync-community/powergit-core'
 import { resolvePowergitRemote } from '@powersync-community/powergit-core/node'
-export { loadProfileEnvironment, resolveProfileDirectory, resolveProfilesPath } from './profile-env.js'
+export { loadProfileEnvironment, resolveProfileDirectory, resolveProfilesPath } from '@powersync-community/powergit-core/profile-env'
 
 type StreamSuffix = RepoStreamSuffix
 type StreamSubscriptionRequest = RepoStreamTarget
