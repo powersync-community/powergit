@@ -116,6 +116,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.POWERSYNC_SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY || secrets.POWERSYNC_SUPABASE_ANON_KEY }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || secrets.POWERSYNC_SUPABASE_ANON_KEY }}
+          POWERGIT_EMAIL: ${{ secrets.POWERGIT_EMAIL }}
+          POWERGIT_PASSWORD: ${{ secrets.POWERGIT_PASSWORD }}
           JOB_ID: ${{ github.event.inputs.job_id }}
           ORG_ID: ${{ github.event.inputs.org }}
           REPO_ID: ${{ github.event.inputs.repo }}
@@ -131,11 +134,15 @@ jobs:
           }
           const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
           const now = new Date().toISOString()
+
+          const isUuid = (value) =>
+            typeof value === 'string' &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())
+
           const requestedByRaw = (process.env.REQUESTED_BY ?? '').trim()
-          const requestedBy = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedByRaw)
-            ? requestedByRaw
-            : null
-          const payload = {
+          const requestedBy = isUuid(requestedByRaw) ? requestedByRaw : null
+
+          const buildPayload = (requestedByValue) => ({
             id: process.env.JOB_ID,
             org_id: process.env.ORG_ID,
             repo_id: process.env.REPO_ID,
@@ -143,13 +150,40 @@ jobs:
             status: 'running',
             created_at: now,
             updated_at: now,
-            requested_by: requestedBy,
+            requested_by: requestedByValue,
             source: 'actions',
             workflow_url: process.env.WORKFLOW_URL ?? null,
-          }
+          })
+
           ;(async () => {
-            const { error } = await supabase.from('import_jobs').upsert(payload, { onConflict: 'id' })
-            if (error) throw error
+            const initial = await supabase.from('import_jobs').upsert(buildPayload(requestedBy), { onConflict: 'id' })
+            if (!initial.error) return
+
+            if (initial.error.code !== '42501') throw initial.error
+
+            // RLS fallback: authenticate with a known user and record the job as that user.
+            const anonKey = (process.env.SUPABASE_ANON_KEY ?? '').trim()
+            const email = (process.env.POWERGIT_EMAIL ?? '').trim()
+            const password = (process.env.POWERGIT_PASSWORD ?? '').trim()
+            if (!anonKey || !email || !password) {
+              throw initial.error
+            }
+
+            const authed = createClient(process.env.SUPABASE_URL, anonKey, {
+              auth: { persistSession: false, autoRefreshToken: false },
+            })
+            const { data, error: loginError } = await authed.auth.signInWithPassword({ email, password })
+            if (loginError) throw new Error(`Supabase login failed: ${loginError.message}`)
+            const userId = data?.user?.id ?? ''
+            if (!isUuid(userId)) throw new Error('Supabase login did not return a valid user id')
+
+            // Use REQUESTED_BY only when it matches the authenticated user, otherwise
+            // pin the job to the CI user so the insert/update RLS policies pass.
+            const effectiveRequestedBy = requestedBy && requestedBy === userId ? requestedBy : userId
+            const retry = await authed
+              .from('import_jobs')
+              .upsert(buildPayload(effectiveRequestedBy), { onConflict: 'id' })
+            if (retry.error) throw retry.error
           })().catch((err) => {
             console.error('Failed to record import job running', err)
             process.exit(1)
@@ -254,6 +288,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.POWERSYNC_SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.POWERSYNC_SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY || secrets.POWERSYNC_SUPABASE_ANON_KEY }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || secrets.POWERSYNC_SUPABASE_ANON_KEY }}
+          POWERGIT_EMAIL: ${{ secrets.POWERGIT_EMAIL }}
+          POWERGIT_PASSWORD: ${{ secrets.POWERGIT_PASSWORD }}
           JOB_ID: ${{ github.event.inputs.job_id }}
           WORKFLOW_STATUS: ${{ job.status }}
         run: |
@@ -267,9 +304,35 @@ jobs:
             updated_at: now,
             error: status === 'error' ? 'GitHub Actions import failed' : null,
           }
+
+          const isUuid = (value) =>
+            typeof value === 'string' &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())
+
           ;(async () => {
-            const { error } = await supabase.from('import_jobs').update(update).eq('id', process.env.JOB_ID)
-            if (error) throw error
+            const initial = await supabase.from('import_jobs').update(update).eq('id', process.env.JOB_ID)
+            if (!initial.error) return
+
+            if (initial.error.code !== '42501') throw initial.error
+
+            // RLS fallback: authenticate with a known user and update the job as that user.
+            const anonKey = (process.env.SUPABASE_ANON_KEY ?? '').trim()
+            const email = (process.env.POWERGIT_EMAIL ?? '').trim()
+            const password = (process.env.POWERGIT_PASSWORD ?? '').trim()
+            if (!anonKey || !email || !password) {
+              throw initial.error
+            }
+
+            const authed = createClient(process.env.SUPABASE_URL, anonKey, {
+              auth: { persistSession: false, autoRefreshToken: false },
+            })
+            const { data, error: loginError } = await authed.auth.signInWithPassword({ email, password })
+            if (loginError) throw new Error(`Supabase login failed: ${loginError.message}`)
+            const userId = data?.user?.id ?? ''
+            if (!isUuid(userId)) throw new Error('Supabase login did not return a valid user id')
+
+            const retry = await authed.from('import_jobs').update(update).eq('id', process.env.JOB_ID)
+            if (retry.error) throw retry.error
           })().catch((err) => {
             console.error('Failed to record import job result', err)
             process.exit(1)

@@ -198,10 +198,13 @@ function Commits() {
           id: j.id,
           status: j.status,
           error: j.error,
+          workflow_url: j.workflow_url,
           updated_at: j.updated_at,
         })),
     [importJobs, orgId, repoId],
-  ) as { data: Array<{ id: string; status: string | null; error: string | null; updated_at: string | null }> }
+  ) as {
+    data: Array<{ id: string; status: string | null; error: string | null; workflow_url: string | null; updated_at: string | null }>
+  }
 
   const packRows = useLiveQuery(
     (q) =>
@@ -298,6 +301,7 @@ function Commits() {
   const [filterResetKey, setFilterResetKey] = React.useState(0)
   const [refreshStatus, setRefreshStatus] = React.useState<'idle' | 'loading' | 'queued' | 'running' | 'done' | 'error'>('idle')
   const [refreshJobId, setRefreshJobId] = React.useState<string | null>(null)
+  const [refreshWorkflowUrl, setRefreshWorkflowUrl] = React.useState<string | null>(null)
   const [refreshMessage, setRefreshMessage] = React.useState<string | null>(null)
   const trackedJob = React.useMemo(() => {
     const job = latestImportJobs[0] ?? null
@@ -693,7 +697,14 @@ function Commits() {
                 : 'inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
             }
             onClick={async () => {
-              if (refreshBusy) return
+              if (refreshBusy) {
+                const workflowUrl =
+                  (trackedJob?.workflow_url ?? '').trim() || (refreshWorkflowUrl ?? '').trim()
+                if (workflowUrl) {
+                  window.open(workflowUrl, '_blank', 'noopener,noreferrer')
+                }
+                return
+              }
               if (!repoUrl) {
                 setRefreshStatus('error')
                 setRefreshMessage('Repository URL is unavailable.')
@@ -701,6 +712,7 @@ function Commits() {
               }
               setRefreshStatus('loading')
               setRefreshJobId(null)
+              setRefreshWorkflowUrl(null)
               setRefreshMessage(null)
               try {
                 const job = await requestGithubImport({
@@ -710,6 +722,9 @@ function Commits() {
                   branch: branchFilter !== 'all' ? branchFilter : repoDefaultBranch,
                 })
                 setRefreshJobId(job.id ?? null)
+                const workflowUrlRaw = (job as unknown as { workflowUrl?: unknown }).workflowUrl
+                const workflowUrl = typeof workflowUrlRaw === 'string' ? workflowUrlRaw.trim() : ''
+                setRefreshWorkflowUrl(workflowUrl.length > 0 ? workflowUrl : null)
                 const initialStatus = (job.status ?? '').toLowerCase()
                 if (initialStatus === 'error') {
                   setRefreshStatus('error')
@@ -727,9 +742,14 @@ function Commits() {
                 setRefreshMessage(message)
               }
             }}
-            title="Re-run import for this repository"
+            title={
+              refreshBusy
+                ? (trackedJob?.workflow_url ?? '').trim() || (refreshWorkflowUrl ?? '').trim()
+                  ? 'View GitHub Actions run'
+                  : 'Refresh already in progress'
+                : 'Re-run import for this repository'
+            }
             data-testid="commit-refresh"
-            disabled={refreshBusy}
           >
             {refreshBusy ? (
               <>

@@ -428,10 +428,13 @@ function Files() {
           id: j.id,
           status: j.status,
           error: j.error,
+          workflow_url: j.workflow_url,
           updated_at: j.updated_at,
         })),
     [importJobs, orgId, repoId],
-  ) as { data: Array<{ id: string; status: string | null; error: string | null; updated_at: string | null }> }
+  ) as {
+    data: Array<{ id: string; status: string | null; error: string | null; workflow_url: string | null; updated_at: string | null }>
+  }
 
   const orgMenuOptions = React.useMemo(() => {
     const orgs = new Set<string>()
@@ -663,6 +666,7 @@ function Files() {
   const [readyCommits, setReadyCommits] = React.useState<Set<string>>(() => new Set())
   const [refreshStatus, setRefreshStatus] = React.useState<'idle' | 'loading' | 'queued' | 'running' | 'done' | 'error'>('idle')
   const [refreshJobId, setRefreshJobId] = React.useState<string | null>(null)
+  const [refreshWorkflowUrl, setRefreshWorkflowUrl] = React.useState<string | null>(null)
   const [refreshMessage, setRefreshMessage] = React.useState<string | null>(null)
   const trackedJob = React.useMemo(() => {
     const job = latestImportJobs[0] ?? null
@@ -1301,7 +1305,14 @@ function Files() {
               type="button"
               className={refreshButtonClass}
               onClick={async () => {
-                if (refreshBusy) return
+                if (refreshBusy) {
+                  const workflowUrl =
+                    (trackedJob?.workflow_url ?? '').trim() || (refreshWorkflowUrl ?? '').trim()
+                  if (workflowUrl) {
+                    window.open(workflowUrl, '_blank', 'noopener,noreferrer')
+                  }
+                  return
+                }
                 if (!repoUrl) {
                   setRefreshStatus('error')
                   setRefreshMessage('Repository URL is unavailable.')
@@ -1309,6 +1320,7 @@ function Files() {
                 }
                 setRefreshStatus('loading')
                 setRefreshJobId(null)
+                setRefreshWorkflowUrl(null)
                 setRefreshMessage(null)
                 try {
                   const job = await requestGithubImport({
@@ -1318,6 +1330,9 @@ function Files() {
                     branch: selectedBranch?.name ?? repoDefaultBranch ?? null,
                   })
                   setRefreshJobId(job.id ?? null)
+                  const workflowUrlRaw = (job as unknown as { workflowUrl?: unknown }).workflowUrl
+                  const workflowUrl = typeof workflowUrlRaw === 'string' ? workflowUrlRaw.trim() : ''
+                  setRefreshWorkflowUrl(workflowUrl.length > 0 ? workflowUrl : null)
                   const initialStatus = (job.status ?? '').toLowerCase()
                   if (initialStatus === 'error') {
                     setRefreshStatus('error')
@@ -1335,9 +1350,14 @@ function Files() {
                   setRefreshMessage(message)
                 }
               }}
-              title="Re-run import for this repository"
+              title={
+                refreshBusy
+                  ? (trackedJob?.workflow_url ?? '').trim() || (refreshWorkflowUrl ?? '').trim()
+                    ? 'View GitHub Actions run'
+                    : 'Refresh already in progress'
+                  : 'Re-run import for this repository'
+              }
               data-testid="repo-refresh"
-              disabled={refreshBusy}
             >
               {refreshBusy ? (
                 <>
