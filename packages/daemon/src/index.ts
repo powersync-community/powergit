@@ -1034,6 +1034,32 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     },
     pushPack: async ({ orgId, repoId, payload }) => {
       try {
+        if (!writerUsesServiceRole) {
+          const userId = typeof supabaseSession?.user?.id === 'string' ? supabaseSession.user.id.trim() : '';
+          if (!userId) {
+            throw new Error('Supabase authentication required; run `powergit login` and retry.');
+          }
+
+          const { data: membership, error: membershipError } = await supabaseWriterClient
+            .from('org_members')
+            .select('role')
+            .eq('org_id', orgId)
+            .eq('user_id', userId)
+            .maybeSingle();
+
+          if (membershipError) {
+            throw new Error(`Failed to verify org membership: ${membershipError.message}`);
+          }
+
+          const role = (membership as { role?: unknown } | null)?.role;
+          if (role !== 'admin' && role !== 'write') {
+            throw new Error(
+              `Not authorized to push to ${orgId}/${repoId}. ` +
+                'Ask an org admin to add you as a member with write access.',
+            );
+          }
+        }
+
         let resolvedPackOid = sanitizeOid(payload.packOid);
         let storageKey: string | null = null;
         let packSize: number | undefined;
@@ -1081,11 +1107,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
         }
         // Flush Supabase writer so pushes are durable before returning
         if (supabaseWriter) {
-          try {
-            await supabaseWriter.uploadPending();
-          } catch (flushError) {
-            console.warn('[powersync-daemon] Supabase writer flush failed after push', flushError);
-          }
+          await supabaseWriter.uploadPending();
         }
         return result;
       } catch (error) {

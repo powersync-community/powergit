@@ -15,6 +15,9 @@ on:
       repo:
         description: "PowerSync repo id"
         required: true
+      requested_by:
+        description: "Supabase user id that requested the import (optional)"
+        required: false
 
 jobs:
   clone-and-push:
@@ -118,6 +121,7 @@ jobs:
           REPO_ID: ${{ github.event.inputs.repo }}
           REPO_URL: ${{ github.event.inputs.git_url }}
           WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REQUESTED_BY: ${{ github.event.inputs.requested_by }}
         run: |
           node - <<'EOF'
           const { createClient } = require('@supabase/supabase-js')
@@ -127,6 +131,10 @@ jobs:
           }
           const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
           const now = new Date().toISOString()
+          const requestedByRaw = (process.env.REQUESTED_BY ?? '').trim()
+          const requestedBy = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedByRaw)
+            ? requestedByRaw
+            : null
           const payload = {
             id: process.env.JOB_ID,
             org_id: process.env.ORG_ID,
@@ -135,6 +143,7 @@ jobs:
             status: 'running',
             created_at: now,
             updated_at: now,
+            requested_by: requestedBy,
             source: 'actions',
             workflow_url: process.env.WORKFLOW_URL ?? null,
           }

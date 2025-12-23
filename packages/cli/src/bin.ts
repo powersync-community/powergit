@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import yargs from 'yargs'
 import { hideBin } from 'yargs/helpers'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { addPowerSyncRemote, syncPowerSyncRepository, seedDemoRepository } from './index.js'
 import { loginWithDaemonDevice, logout as logoutSession } from './auth/login.js'
 import {
@@ -13,7 +14,9 @@ import {
   type ProfileConfig,
   type ResolvedProfile,
 } from '@powersync-community/powergit-core/profile-manager'
+import { createSupabaseFileStorage } from '@powersync-community/powergit-core'
 import { loadStackEnv } from '@powersync-community/powergit-core/stack-env'
+import { resolveSupabaseSessionPath } from './auth/session.js'
 
 const CLI_NAME = 'powergit'
 const LOG_PREFIX = `[${CLI_NAME}]`
@@ -260,6 +263,34 @@ function delay(ms: number): Promise<void> {
   })
 }
 
+function createSupabaseAuthedClient(options: { sessionPath?: string } = {}): SupabaseClient {
+  const supabaseUrl = firstNonEmpty(process.env.SUPABASE_URL, process.env.POWERGIT_TEST_SUPABASE_URL)
+  const supabaseAnonKey = firstNonEmpty(process.env.SUPABASE_ANON_KEY, process.env.POWERGIT_TEST_SUPABASE_ANON_KEY)
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Supabase is not configured. Ensure the active profile defines SUPABASE_URL and SUPABASE_ANON_KEY.')
+  }
+  const storagePath = resolveSupabaseSessionPath(options.sessionPath)
+  const storage = createSupabaseFileStorage(storagePath)
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      storage,
+      storageKey: 'powergit',
+    },
+  })
+}
+
+async function requireSupabaseLogin(client: SupabaseClient): Promise<void> {
+  const { data, error } = await client.auth.getSession()
+  if (error) {
+    throw new Error(`Failed to read Supabase session: ${error.message}`)
+  }
+  if (!data.session) {
+    throw new Error('Not logged in. Run `powergit login` first.')
+  }
+}
+
 function resolveDefaultRemoteName(): string {
   return process.env.REMOTE_NAME ?? 'powersync'
 }
@@ -502,6 +533,7 @@ function printUsage() {
   console.log(`${CLI_NAME} commands:`)
   console.log(`  ${CLI_NAME} remote add powersync powergit::/<org>/<repo>`)
   console.log(`  ${CLI_NAME} sync [--remote <name>]`)
+  console.log(`  ${CLI_NAME} org list|create|members|add-member|remove-member …`)
   console.log(
     `  ${CLI_NAME} demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]`,
   )
@@ -520,6 +552,7 @@ function buildCli() {
       `${CLI_NAME} commands:\n` +
         `  ${CLI_NAME} remote add powersync powergit::/<org>/<repo>\n` +
         `  ${CLI_NAME} sync [--remote <name>]\n` +
+        `  ${CLI_NAME} org list|create|members …\n` +
         `  ${CLI_NAME} demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]\n` +
         `  ${CLI_NAME} login [--endpoint <url>] [--daemon-url <url>]\n` +
         `  ${CLI_NAME} daemon stop [--daemon-url <url>] [--wait <ms>]\n` +
@@ -763,6 +796,175 @@ function buildCli() {
             },
           )
           .demandCommand(1, 'Specify a profile subcommand.')
+          .strict(),
+    )
+    .command(
+      'org <action>',
+      'Manage orgs and memberships',
+      (orgYargs) =>
+        orgYargs
+          .option('session', {
+            type: 'string',
+            describe: 'Override daemon session path (advanced).',
+          })
+          .command(
+            'list',
+            'List org memberships',
+            (y) =>
+              y.option('json', {
+                type: 'boolean',
+                describe: 'Output JSON instead of human-readable text.',
+                default: false,
+              }),
+            async (argv) => {
+              const client = createSupabaseAuthedClient({ sessionPath: argv.session as string | undefined })
+              await requireSupabaseLogin(client)
+              const { data, error } = await client.rpc('powergit_list_my_orgs')
+              if (error) {
+                throw new Error(error.message)
+              }
+              const rows = Array.isArray(data) ? (data as Array<{ org_id?: string; role?: string; name?: string | null }>) : []
+              if (argv.json) {
+                console.log(JSON.stringify(rows, null, 2))
+                return
+              }
+              if (rows.length === 0) {
+                console.log('No org memberships found.')
+                return
+              }
+              for (const row of rows) {
+                const orgId = row.org_id ?? ''
+                const role = row.role ?? 'read'
+                const label = row.name ? ` (${row.name})` : ''
+                console.log(`${orgId}\t${role}${label}`)
+              }
+            },
+          )
+          .command(
+            'create <orgId>',
+            'Create a new org (you become admin)',
+            (y) =>
+              y
+                .positional('orgId', { type: 'string', describe: 'Org id (slug)', demandOption: true })
+                .option('name', { type: 'string', describe: 'Display name (optional)' })
+                .option('json', { type: 'boolean', describe: 'Output JSON.', default: false }),
+            async (argv) => {
+              const client = createSupabaseAuthedClient({ sessionPath: argv.session as string | undefined })
+              await requireSupabaseLogin(client)
+              const orgId = (argv.orgId as string).trim()
+              const displayName = typeof argv.name === 'string' ? argv.name.trim() : ''
+              const { data, error } = await client.rpc('powergit_create_org', {
+                org_id: orgId,
+                name: displayName || null,
+              })
+              if (error) {
+                throw new Error(error.message)
+              }
+              if (argv.json) {
+                console.log(JSON.stringify(data, null, 2))
+                return
+              }
+              console.log(`Created org "${orgId}".`)
+            },
+          )
+          .command(
+            'members <orgId>',
+            'List org members',
+            (y) =>
+              y
+                .positional('orgId', { type: 'string', describe: 'Org id', demandOption: true })
+                .option('json', { type: 'boolean', describe: 'Output JSON.', default: false }),
+            async (argv) => {
+              const client = createSupabaseAuthedClient({ sessionPath: argv.session as string | undefined })
+              await requireSupabaseLogin(client)
+              const orgId = (argv.orgId as string).trim()
+              const { data, error } = await client.rpc('powergit_list_org_members', { target_org_id: orgId })
+              if (error) {
+                throw new Error(error.message)
+              }
+              const rows = Array.isArray(data)
+                ? (data as Array<{ email?: string | null; user_id?: string; role?: string }>)
+                : []
+              if (argv.json) {
+                console.log(JSON.stringify(rows, null, 2))
+                return
+              }
+              if (rows.length === 0) {
+                console.log('No members found.')
+                return
+              }
+              for (const row of rows) {
+                console.log(`${row.email ?? row.user_id ?? '<unknown>'}\t${row.role ?? 'read'}`)
+              }
+            },
+          )
+          .command(
+            'add-member <orgId> <email>',
+            'Add an org member (admin only)',
+            (y) =>
+              y
+                .positional('orgId', { type: 'string', describe: 'Org id', demandOption: true })
+                .positional('email', { type: 'string', describe: 'User email', demandOption: true })
+                .option('role', { type: 'string', describe: 'Role: admin|write|read', default: 'read' }),
+            async (argv) => {
+              const client = createSupabaseAuthedClient({ sessionPath: argv.session as string | undefined })
+              await requireSupabaseLogin(client)
+              const orgId = (argv.orgId as string).trim()
+              const email = (argv.email as string).trim()
+              const role = typeof argv.role === 'string' ? argv.role.trim() : 'read'
+              const { data, error } = await client.rpc('powergit_add_org_member', {
+                target_org_id: orgId,
+                target_email: email,
+                target_role: role,
+              })
+              if (error) {
+                throw new Error(error.message)
+              }
+              console.log(JSON.stringify(data, null, 2))
+            },
+          )
+          .command(
+            'remove-member <orgId> <emailOrUserId>',
+            'Remove an org member (admin only)',
+            (y) =>
+              y
+                .positional('orgId', { type: 'string', describe: 'Org id', demandOption: true })
+                .positional('emailOrUserId', { type: 'string', describe: 'User email or UUID', demandOption: true }),
+            async (argv) => {
+              const client = createSupabaseAuthedClient({ sessionPath: argv.session as string | undefined })
+              await requireSupabaseLogin(client)
+              const orgId = (argv.orgId as string).trim()
+              const target = (argv.emailOrUserId as string).trim()
+              const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target)
+              let userId = target
+              if (!isUuid) {
+                const { data, error } = await client.rpc('powergit_list_org_members', { target_org_id: orgId })
+                if (error) {
+                  throw new Error(error.message)
+                }
+                const rows = Array.isArray(data)
+                  ? (data as Array<{ email?: string | null; user_id?: string }>)
+                  : []
+                const match = rows.find((row) => (row.email ?? '').toLowerCase() === target.toLowerCase())
+                if (!match?.user_id) {
+                  throw new Error(`No member found for "${target}".`)
+                }
+                userId = match.user_id
+              }
+              const { data, error: removeError } = await client.rpc('powergit_remove_org_member', {
+                target_org_id: orgId,
+                target_user_id: userId,
+              })
+              if (removeError) {
+                throw new Error(removeError.message)
+              }
+              if (data !== true) {
+                throw new Error('Member removal was not acknowledged.')
+              }
+              console.log('Removed.')
+            },
+          )
+          .demandCommand(1, 'Specify an org subcommand.')
           .strict(),
     )
     .command(

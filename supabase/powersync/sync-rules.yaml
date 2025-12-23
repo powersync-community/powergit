@@ -11,6 +11,19 @@ streams:
         AND subscription.parameter('repo_id') IS NOT NULL
         AND org_id = subscription.parameter('org_id')
         AND repo_id = subscription.parameter('repo_id')
+        AND (
+          subscription.parameter('org_id') IN (
+            SELECT org_id
+            FROM org_members
+            WHERE user_id::text = auth.user_id()
+          )
+          OR subscription.parameter('repo_id') IN (
+            SELECT repo_id
+            FROM repositories
+            WHERE org_id = subscription.parameter('org_id')
+              AND visibility = 'public'
+          )
+        )
 
   orgs/{org_id}/repos/{repo_id}/commits:
     auto_subscribe: false
@@ -21,6 +34,19 @@ streams:
         AND subscription.parameter('repo_id') IS NOT NULL
         AND org_id = subscription.parameter('org_id')
         AND repo_id = subscription.parameter('repo_id')
+        AND (
+          subscription.parameter('org_id') IN (
+            SELECT org_id
+            FROM org_members
+            WHERE user_id::text = auth.user_id()
+          )
+          OR subscription.parameter('repo_id') IN (
+            SELECT repo_id
+            FROM repositories
+            WHERE org_id = subscription.parameter('org_id')
+              AND visibility = 'public'
+          )
+        )
 
   orgs/{org_id}/repos/{repo_id}/file_changes:
     auto_subscribe: false
@@ -31,6 +57,19 @@ streams:
         AND subscription.parameter('repo_id') IS NOT NULL
         AND org_id = subscription.parameter('org_id')
         AND repo_id = subscription.parameter('repo_id')
+        AND (
+          subscription.parameter('org_id') IN (
+            SELECT org_id
+            FROM org_members
+            WHERE user_id::text = auth.user_id()
+          )
+          OR subscription.parameter('repo_id') IN (
+            SELECT repo_id
+            FROM repositories
+            WHERE org_id = subscription.parameter('org_id')
+              AND visibility = 'public'
+          )
+        )
 
   orgs/{org_id}/repos/{repo_id}/objects:
     auto_subscribe: false
@@ -41,15 +80,40 @@ streams:
         AND subscription.parameter('repo_id') IS NOT NULL
         AND org_id = subscription.parameter('org_id')
         AND repo_id = subscription.parameter('repo_id')
+        AND (
+          subscription.parameter('org_id') IN (
+            SELECT org_id
+            FROM org_members
+            WHERE user_id::text = auth.user_id()
+          )
+          OR subscription.parameter('repo_id') IN (
+            SELECT repo_id
+            FROM repositories
+            WHERE org_id = subscription.parameter('org_id')
+              AND visibility = 'public'
+          )
+        )
 
   repositories:
     auto_subscribe: true
     query: |
       SELECT id, org_id, repo_id, repo_url, created_at, updated_at, default_branch, last_status, last_import_job_id
       FROM repositories
+      WHERE visibility = 'public'
+         OR org_id IN (
+           SELECT org_id
+           FROM org_members
+           WHERE user_id::text = auth.user_id()
+         )
 
   import_jobs:
     auto_subscribe: true
     query: |
       SELECT id, org_id, repo_id, repo_url, status, created_at, updated_at, branch, default_branch, error, workflow_url, source
       FROM import_jobs
+      WHERE requested_by::text = auth.user_id()
+         OR org_id IN (
+           SELECT org_id
+           FROM org_members
+           WHERE user_id::text = auth.user_id()
+         )

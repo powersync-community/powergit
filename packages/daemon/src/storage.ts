@@ -73,7 +73,7 @@ export class PackStorage {
       throw new Error(
         `Supabase Storage bucket "${this.bucket}" is missing or not accessible with the current credentials (SUPABASE_URL=${this.baseUrl}). ` +
           `If the bucket exists, ensure storage RLS policies allow the authenticated user to read/write it (or provide SUPABASE_SERVICE_ROLE_KEY). ` +
-          `See supabase/migrations/20251208120000_recreate_git_packs.sql.`,
+          `See supabase/migrations/20251222120000_orgs_acl.sql.`,
       )
     })()
 
@@ -123,7 +123,7 @@ export class PackStorage {
     if (message.toLowerCase().includes('row-level security')) {
       return (
         `Supabase Storage ${operation} blocked by RLS for bucket "${this.bucket}". ` +
-        `If you are the stack admin, apply supabase/migrations/20251208120000_recreate_git_packs.sql. ` +
+        `If you are the stack admin, apply supabase/migrations/20251222120000_orgs_acl.sql. ` +
         `If you are an end user, ensure you ran \`powergit login\` and retry. (${message})`
       )
     }

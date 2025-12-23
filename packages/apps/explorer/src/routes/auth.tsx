@@ -22,6 +22,38 @@ export function AuthRoute() {
   const navigate = Route.useNavigate()
   const allowGuest = React.useMemo(() => isAnonymousSignInSupported(), [])
   const location = useLocation()
+  const redirectSpec = React.useMemo(() => {
+    const search = location.search ?? ''
+    if (!search) return null
+    const params = new URLSearchParams(search)
+    const raw = params.get('redirect')
+    if (!raw || !raw.trim()) return null
+    const redirect = raw.trim()
+    if (!redirect.startsWith('/') || redirect.startsWith('//')) return null
+
+    try {
+      const parsed = new URL(redirect, 'http://localhost')
+      const basepath = import.meta.env.BASE_URL !== '/' ? import.meta.env.BASE_URL.replace(/\/$/, '') : ''
+      let pathname = parsed.pathname
+      if (basepath && pathname === basepath) {
+        pathname = '/'
+      } else if (basepath && pathname.startsWith(`${basepath}/`)) {
+        pathname = pathname.slice(basepath.length)
+      }
+
+      if (pathname.startsWith('/auth') || pathname.startsWith('/reset-password')) {
+        return null
+      }
+
+      const searchObject = Object.fromEntries(parsed.searchParams.entries())
+      return {
+        to: pathname,
+        search: Object.keys(searchObject).length > 0 ? searchObject : undefined,
+      }
+    } catch {
+      return null
+    }
+  }, [location.search])
   const deviceFlowActive = React.useMemo(() => {
     const search = location.search ?? ''
     if (!search) return false
@@ -74,12 +106,17 @@ export function AuthRoute() {
     if (!deviceFlowActive && status === 'authenticated') {
       if (!redirectedRef.current) {
         redirectedRef.current = true
-        void navigate({ to: '/', replace: true })
+        const destination = redirectSpec?.to ?? '/'
+        const navigation: Record<string, unknown> = { to: destination, replace: true }
+        if (redirectSpec?.search) {
+          navigation.search = redirectSpec.search
+        }
+        void navigate(navigation as any)
       }
     } else {
       redirectedRef.current = false
     }
-  }, [status, navigate, deviceFlowActive])
+  }, [status, navigate, deviceFlowActive, redirectSpec?.to, redirectSpec?.search])
 
   React.useEffect(() => {
     if (!deviceFlowActive) return

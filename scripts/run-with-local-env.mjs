@@ -48,6 +48,11 @@ if (isProdMode) {
   loadEnvFile(envProdPath, { overwrite: true })
 }
 
+// Ensure we default to the local stack profile when running locally.
+if (!process.env.STACK_PROFILE || process.env.STACK_PROFILE.trim().length === 0) {
+  process.env.STACK_PROFILE = isProdMode ? 'prod' : 'local-dev'
+}
+
 const [command, ...args] = cliArgs
 const child = spawn(command, args, { stdio: 'inherit', env: process.env })
 child.on('exit', (code, signal) => {

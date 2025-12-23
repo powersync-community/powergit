@@ -12,6 +12,7 @@ import { connectWithSchemaRecovery, createPowerSyncDatabase } from '../database.
 import { buildRepoStreamTargets } from '@powersync-community/powergit-core';
 import { startStack, stopStack } from '../../../../scripts/test-stack-hooks.mjs';
 import type { DaemonAuthResponse } from '../server.js';
+import { createClient } from '@supabase/supabase-js';
 
 const WAIT_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_TEST_MAX_WAIT_MS ?? '60000', 10);
 const POLL_INTERVAL_MS = Number.parseInt(process.env.POWERSYNC_TEST_POLL_MS ?? '750', 10);
@@ -35,9 +36,7 @@ const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 
 const betterSqliteProbeScript = `
 try {
-  const { createRequire } = require('module');
-  const requireFromNode = createRequire(require.resolve('@powersync/node/package.json'));
-  const Database = requireFromNode('@powersync/better-sqlite3');
+  const Database = require('better-sqlite3');
   const db = new Database(':memory:');
   db.close();
   process.exit(0);
@@ -67,6 +66,107 @@ const describeIfEnv = hasSupabaseCli && hasDocker && hasBetterSqlite ? describe 
 
 function randomSlug(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
+function extractChallengeId(status: unknown): string | null {
+  if (!status || typeof status !== 'object') return null;
+  const context = (status as { context?: unknown }).context;
+  if (!context || typeof context !== 'object' || Array.isArray(context)) return null;
+  const record = context as Record<string, unknown>;
+  const candidate =
+    typeof record.challengeId === 'string'
+      ? record.challengeId
+      : typeof record.deviceCode === 'string'
+        ? record.deviceCode
+        : typeof record.device_code === 'string'
+          ? record.device_code
+          : null;
+  const trimmed = typeof candidate === 'string' ? candidate.trim() : '';
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+async function authenticateDaemonViaSupabasePassword({
+  daemonUrl,
+  endpoint,
+  supabaseUrl,
+  supabaseAnonKey,
+  email,
+  password,
+}: {
+  daemonUrl: string;
+  endpoint: string;
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+  email: string;
+  password: string;
+}): Promise<DaemonAuthResponse> {
+  const baseUrl = normalizeBaseUrl(daemonUrl);
+
+  const existing = await fetch(`${baseUrl}/auth/status`)
+    .then(async (res) => (res.ok ? ((await res.json().catch(() => null)) as DaemonAuthResponse | null) : null))
+    .catch(() => null);
+  if (existing?.status === 'ready' && typeof existing.token === 'string' && existing.token.length > 0) {
+    return existing;
+  }
+
+  const deviceResponse = await fetch(`${baseUrl}/auth/device`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'device-code', endpoint }),
+  });
+  const devicePayload = (await deviceResponse.json().catch(() => null)) as DaemonAuthResponse | null;
+  if (devicePayload?.status === 'ready' && typeof devicePayload.token === 'string' && devicePayload.token.length > 0) {
+    return devicePayload;
+  }
+  const challengeId = extractChallengeId(devicePayload);
+  if (!challengeId) {
+    const reason = devicePayload && 'reason' in devicePayload ? String((devicePayload as any).reason ?? '') : '';
+    throw new Error(`Daemon did not return a device challenge. ${reason}`.trim());
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    throw new Error(`Supabase password login failed: ${error.message}`);
+  }
+  const session = data?.session ?? (await supabase.auth.getSession()).data.session;
+  if (!session?.access_token || !session?.refresh_token) {
+    throw new Error('Supabase login returned no session tokens.');
+  }
+
+  const completeResponse = await fetch(`${baseUrl}/auth/device`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      challengeId,
+      endpoint,
+      session: {
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        expires_in: typeof session.expires_in === 'number' ? session.expires_in : null,
+        expires_at: typeof session.expires_at === 'number' ? session.expires_at : null,
+      },
+    }),
+  });
+  const completed = (await completeResponse.json().catch(() => null)) as DaemonAuthResponse | null;
+  if (completed?.status === 'ready' && typeof completed.token === 'string' && completed.token.length > 0) {
+    return completed;
+  }
+
+  const final = await fetch(`${baseUrl}/auth/status`)
+    .then(async (res) => (res.ok ? ((await res.json().catch(() => null)) as DaemonAuthResponse | null) : null))
+    .catch(() => null);
+  if (final?.status === 'ready' && typeof final.token === 'string' && final.token.length > 0) {
+    return final;
+  }
+  const finalReason = final && 'reason' in final ? String((final as any).reason ?? '') : '';
+  throw new Error(`Daemon did not become ready after password login. ${finalReason}`.trim());
 }
 
 async function waitForSupabaseHealth(url: string, timeoutMs: number, intervalMs = POLL_INTERVAL_MS): Promise<void> {
@@ -131,6 +231,8 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
   let dbPath: string | null = null;
   let stackEnv: Record<string, string> | null = null;
   let daemonAuth: DaemonAuthResponse | null = null;
+  let powergitHome: string | null = null;
+  let priorEnv: { POWERGIT_HOME?: string; STACK_PROFILE?: string } | null = null;
 
   const orgId = randomSlug('daemon-e2e-org');
   const repoId = randomSlug('daemon-e2e-repo');
@@ -145,12 +247,25 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
   beforeAll(async () => {
     delete process.env.POWERSYNC_DISABLE_SUPABASE_WRITER;
     await stopStack({ force: true }).catch(() => undefined);
+
+    priorEnv = {
+      POWERGIT_HOME: process.env.POWERGIT_HOME,
+      STACK_PROFILE: process.env.STACK_PROFILE,
+    };
+    powergitHome = await mkdtemp(join(tmpdir(), 'powergit-e2e-home-'));
+    process.env.POWERGIT_HOME = powergitHome;
+    process.env.STACK_PROFILE = 'local-dev';
+
     try {
       stackEnv = await startStack({ skipDemoSeed: true });
     } catch (error) {
       await stopStack({ force: true }).catch(() => undefined);
       throw error;
     }
+    const supabaseAnonKey = resolveEnv('SUPABASE_ANON_KEY');
+    const email = resolveEnv('POWERGIT_EMAIL') ?? resolveEnv('SUPABASE_EMAIL');
+    const password = resolveEnv('POWERGIT_PASSWORD') ?? resolveEnv('SUPABASE_PASSWORD');
+    const endpoint = resolveEnv('POWERSYNC_URL');
     const supabaseUrl = resolveEnv('SUPABASE_URL');
     if (supabaseUrl) {
       await waitForSupabaseHealth(supabaseUrl, WAIT_TIMEOUT_MS);
@@ -161,16 +276,21 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
       await waitForSupabaseHealth(databaseUrl, WAIT_TIMEOUT_MS);
       console.info('[daemon-e2e] Supabase database endpoint is reachable');
     }
-    runCliCommand(['login', '--guest'], 'authenticate daemon (guest)');
-    daemonAuth = await waitFor(async () => {
-      const res = await fetch(`${daemonBaseUrl().replace(/\/+$/, '')}/auth/status`).catch(() => null);
-      if (!res || !res.ok) return null;
-      const payload = (await res.json().catch(() => null)) as DaemonAuthResponse | null;
-      if (!payload || payload.status !== 'ready' || typeof payload.token !== 'string' || payload.token.length === 0) {
-        return null;
-      }
-      return payload;
-    }, WAIT_TIMEOUT_MS);
+
+    if (!supabaseUrl || !supabaseAnonKey || !email || !password || !endpoint) {
+      throw new Error(
+        'Local stack env is missing SUPABASE_URL/SUPABASE_ANON_KEY and credentials (POWERGIT_EMAIL/POWERGIT_PASSWORD) plus POWERSYNC_URL.',
+      );
+    }
+
+    daemonAuth = await authenticateDaemonViaSupabasePassword({
+      daemonUrl: daemonBaseUrl(),
+      endpoint,
+      supabaseUrl,
+      supabaseAnonKey,
+      email,
+      password,
+    });
   }, 180_000);
 
   afterAll(async () => {
@@ -183,6 +303,17 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
       dbPath = null;
     }
     await stopStack({ force: true }).catch(() => undefined);
+    if (powergitHome) {
+      await rm(powergitHome, { recursive: true, force: true }).catch(() => undefined);
+      powergitHome = null;
+    }
+    if (priorEnv) {
+      if (priorEnv.POWERGIT_HOME === undefined) delete process.env.POWERGIT_HOME;
+      else process.env.POWERGIT_HOME = priorEnv.POWERGIT_HOME;
+      if (priorEnv.STACK_PROFILE === undefined) delete process.env.STACK_PROFILE;
+      else process.env.STACK_PROFILE = priorEnv.STACK_PROFILE;
+      priorEnv = null;
+    }
   }, 60_000);
 
   it(

@@ -161,8 +161,16 @@ export function normalizeDaemonStatus(payload) {
         context: normalizeContext(payload.context),
       };
     }
-    case 'pending':
-      return { status: 'pending', reason: payload.reason ?? null, context: normalizeContext(payload.context) };
+    case 'pending': {
+      const token = normalizeToken(payload.token);
+      return {
+        status: 'pending',
+        reason: payload.reason ?? null,
+        token,
+        expiresAt: typeof payload.expiresAt === 'string' ? payload.expiresAt : null,
+        context: normalizeContext(payload.context),
+      };
+    }
     case 'auth_required':
       return { status: 'auth_required', reason: payload.reason ?? null, context: normalizeContext(payload.context) };
     case 'error':
@@ -248,7 +256,31 @@ export async function authenticateDaemonWithSupabase({
 
   const challengeId = extractChallengeId(devicePayload);
   if (!challengeId) {
-    log(logger, 'warn', '[dev] Daemon did not issue a device challenge; cannot complete Supabase authentication automatically.');
+    if (initialStatus?.status === 'pending' && initialStatus.token) {
+      log(logger, 'info', '[dev] Daemon already has a PowerSync token; waiting for the daemon to become ready...');
+      const deadline = Date.now() + (timeoutMs ?? DEFAULT_AUTH_TIMEOUT_MS);
+      while (Date.now() < deadline) {
+        const status = await fetchDaemonStatus(baseUrl);
+        if (status?.status === 'ready') {
+          return { status, authenticated: false, challengeId: null };
+        }
+        if (status?.status === 'error') {
+          return { status, authenticated: false, challengeId: null };
+        }
+        await delay(500);
+      }
+      const finalStatus = await fetchDaemonStatus(baseUrl);
+      if (!finalStatus || finalStatus.status !== 'ready') {
+        log(logger, 'warn', '[dev] Timed out waiting for daemon to report ready after startup.');
+      }
+      return { status: finalStatus ?? initialStatus, authenticated: false, challengeId: null, timedOut: true };
+    }
+
+    log(
+      logger,
+      'warn',
+      '[dev] Daemon did not issue a device challenge; cannot complete Supabase authentication automatically.',
+    );
     return { status: initialStatus, authenticated: false, challengeId: null };
   }
 

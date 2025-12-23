@@ -24,6 +24,9 @@ const TCP_RETRY_DELAY_MS = Number.parseInt(process.env.POWERSYNC_STACK_RETRY_DEL
 const STACK_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_STACK_START_TIMEOUT_MS ?? '120000', 10)
 const DEFAULT_WEB_HOST = process.env.HOST ?? 'localhost'
 const DEFAULT_WEB_PORT = process.env.PORT ?? process.env.VITE_PORT ?? '5191'
+const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '60000', 10)
+
+let daemonProc: ReturnType<typeof spawn> | null = null
 
 async function delay(ms: number) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
@@ -80,6 +83,41 @@ async function waitForDaemonReady(baseUrl: string, timeoutMs: number): Promise<v
     await delay(TCP_RETRY_DELAY_MS)
   }
   throw new Error(`Daemon at ${normalized} did not report status=ready within ${timeoutMs}ms`)
+}
+
+function parseHostPort(urlString: string, fallbackPort: number): { host: string; port: number } {
+  try {
+    const url = new URL(urlString)
+    const port = url.port ? Number.parseInt(url.port, 10) : fallbackPort
+    return { host: url.hostname || '127.0.0.1', port: Number.isFinite(port) ? port : fallbackPort }
+  } catch {
+    return { host: '127.0.0.1', port: fallbackPort }
+  }
+}
+
+async function ensureDaemonRunning(profileName: string): Promise<void> {
+  const daemonUrl = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
+  const { host, port } = parseHostPort(daemonUrl, 5030)
+  if (await checkTcpConnectivity(host, port, TCP_TIMEOUT_MS)) {
+    return
+  }
+
+  const args = ['dev:daemon', '--', '--profile', profileName]
+  daemonProc = spawn('pnpm', args, {
+    cwd: repoRoot,
+    env: { ...process.env },
+    stdio: 'inherit',
+  })
+  daemonProc.unref()
+
+  const deadline = Date.now() + DAEMON_START_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (await checkTcpConnectivity(host, port, TCP_TIMEOUT_MS)) {
+      return
+    }
+    await delay(TCP_RETRY_DELAY_MS)
+  }
+  throw new Error(`PowerSync daemon did not start listening on ${host}:${port} within ${DAEMON_START_TIMEOUT_MS}ms`)
 }
 
 function runCommand(command: string, args: string[], label: string): void {
@@ -208,10 +246,16 @@ async function loginDaemonIfNeeded(): Promise<void> {
     'http://127.0.0.1:5030'
   const daemonBase = daemonUrl.replace(/\/+$/, '')
   const status = await fetch(`${daemonBase}/auth/status`)
-    .then(async (res) => (res.ok ? ((await res.json()) as { status?: string; context?: unknown }) : null))
+    .then(async (res) => (res.ok ? ((await res.json()) as { status?: string; token?: unknown; context?: unknown }) : null))
     .catch(() => null)
 
   if (status?.status === 'ready') {
+    return
+  }
+
+  const existingToken = typeof status?.token === 'string' && status.token.trim() ? status.token.trim() : null
+  if (status?.status === 'pending' && existingToken) {
+    await waitForDaemonReady(daemonBase, STACK_START_TIMEOUT_MS)
     return
   }
 
@@ -239,7 +283,13 @@ async function loginDaemonIfNeeded(): Promise<void> {
       const body = await challengeRes.text().catch(() => '')
       throw new Error(`Failed to request daemon device challenge (${challengeRes.status}): ${body}`)
     }
-    const challengePayload = (await challengeRes.json()) as { context?: unknown }
+    const challengePayload = (await challengeRes.json()) as { token?: unknown; context?: unknown }
+    const returnedToken =
+      typeof challengePayload.token === 'string' && challengePayload.token.trim().length > 0 ? challengePayload.token.trim() : null
+    if (returnedToken) {
+      await waitForDaemonReady(daemonBase, STACK_START_TIMEOUT_MS)
+      return
+    }
     const challengeContext =
       challengePayload.context && typeof challengePayload.context === 'object' && !Array.isArray(challengePayload.context)
         ? (challengePayload.context as Record<string, unknown>)
@@ -361,11 +411,10 @@ function shouldManageLocalStack(): boolean {
 }
 
 test.describe('PowerSync dev stack (live)', () => {
-  let startedBySuite = false
-
   test('ensure stack is running', async () => {
     test.setTimeout(STACK_START_TIMEOUT_MS)
     applyProfileEnvironment()
+    await ensureDaemonRunning(process.env.STACK_PROFILE ?? 'local-dev')
     await loginDaemonIfNeeded()
 
     if (!shouldManageLocalStack()) {
@@ -375,12 +424,6 @@ test.describe('PowerSync dev stack (live)', () => {
     if (!(await isStackRunning())) {
       runCommand(START_COMMAND[0]!, START_COMMAND.slice(1), 'start dev stack')
       await waitForStackReady(STACK_START_TIMEOUT_MS)
-      startedBySuite = true
     }
-  })
-
-  test.afterAll(async () => {
-    if (!startedBySuite) return
-    runCommand(STOP_COMMAND[0]!, STOP_COMMAND.slice(1), 'stop dev stack')
   })
 })

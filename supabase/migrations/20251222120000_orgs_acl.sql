@@ -1,235 +1,7 @@
--- PowerSync Git metadata tables managed by Supabase migrations.
--- Dev-only: we drop and recreate the PowerSync tables each run so relic views/tables never collide.
+-- Org ACL + repo visibility for Powergit.
+-- Introduces orgs/org_members, repo visibility, and replaces "allow_all_*" policies with membership-aware RLS.
 
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'refs'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.refs cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.refs cascade';
-  end if;
-end
-$$;
-
-create table if not exists public.refs (
-  id text primary key,
-  org_id text not null,
-  repo_id text not null,
-  name text not null,
-  target_sha text not null,
-  updated_at timestamptz not null default now()
-);
-
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'commits'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.commits cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.commits cascade';
-  end if;
-end
-$$;
-
-create table if not exists public.commits (
-  id text primary key,
-  org_id text not null,
-  repo_id text not null,
-  sha text not null,
-  author_name text not null,
-  author_email text not null,
-  authored_at timestamptz not null,
-  message text not null,
-  tree_sha text not null
-);
-
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'file_changes'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.file_changes cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.file_changes cascade';
-  end if;
-end
-$$;
-
-create table if not exists public.file_changes (
-  id text primary key,
-  org_id text not null,
-  repo_id text not null,
-  commit_sha text not null,
-  path text not null,
-  additions integer not null,
-  deletions integer not null
-);
-
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'objects'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.objects cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.objects cascade';
-  end if;
-end
-$$;
-
-create table if not exists public.objects (
-  id text primary key,
-  org_id text not null,
-  repo_id text not null,
-  pack_oid text not null,
-  storage_key text not null,
-  size_bytes bigint not null,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists refs_org_repo_idx on public.refs (org_id, repo_id);
-create unique index if not exists refs_org_repo_name_idx on public.refs (org_id, repo_id, name);
-
-create index if not exists commits_org_repo_idx on public.commits (org_id, repo_id);
-create unique index if not exists commits_org_repo_sha_idx on public.commits (org_id, repo_id, sha);
-create index if not exists commits_author_idx on public.commits (author_email);
-
-create index if not exists file_changes_org_repo_idx on public.file_changes (org_id, repo_id);
-create index if not exists file_changes_path_idx on public.file_changes (path);
-create unique index if not exists file_changes_commit_path_idx on public.file_changes (org_id, repo_id, commit_sha, path);
-
-create index if not exists objects_recent_idx on public.objects (org_id, repo_id, created_at desc);
-create unique index if not exists objects_oid_idx on public.objects (org_id, repo_id, pack_oid);
-
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'repositories'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.repositories cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.repositories cascade';
-  end if;
-end
-$$;
-
-create table if not exists public.repositories (
-  id text primary key,
-  org_id text not null,
-  repo_id text not null,
-  repo_url text,
-  visibility text not null default 'public',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  default_branch text,
-  last_status text,
-  last_import_job_id text,
-  constraint repositories_visibility_check check (visibility in ('public', 'private'))
-);
-
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'import_jobs'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.import_jobs cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.import_jobs cascade';
-  end if;
-end
-$$;
-
-create table if not exists public.import_jobs (
-  id text primary key,
-  org_id text not null,
-  repo_id text not null,
-  repo_url text not null,
-  status text not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  requested_by uuid,
-  branch text,
-  default_branch text,
-  error text,
-  workflow_url text,
-  source text
-);
-
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'org_members'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.org_members cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.org_members cascade';
-  end if;
-end
-$$;
-
-do $$
-declare relkind char;
-begin
-  select c.relkind
-    into relkind
-  from pg_catalog.pg_class c
-  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname = 'public' and c.relname = 'orgs'
-  limit 1;
-
-  if relkind = 'v' or relkind = 'm' then
-    execute 'drop view if exists public.orgs cascade';
-  elsif relkind = 'r' or relkind = 'p' then
-    execute 'drop table if exists public.orgs cascade';
-  end if;
-end
-$$;
-
+-- Orgs
 create table if not exists public.orgs (
   id text primary key,
   name text,
@@ -238,41 +10,49 @@ create table if not exists public.orgs (
   updated_at timestamptz not null default now()
 );
 
+-- Org members (org-scoped roles)
 create table if not exists public.org_members (
   org_id text not null,
   user_id uuid not null,
   role text not null default 'read',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (org_id, user_id),
-  constraint org_members_role_check check (role in ('admin', 'write', 'read'))
+  primary key (org_id, user_id)
 );
-
-create table if not exists public.org_member_invites (
-  org_id text not null,
-  email text not null,
-  role text not null default 'read',
-  invited_by uuid not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  primary key (org_id, email),
-  constraint org_member_invites_role_check check (role in ('admin', 'write', 'read'))
-);
-
-create unique index if not exists repositories_org_repo_idx on public.repositories (org_id, repo_id);
-create index if not exists repositories_updated_idx on public.repositories (updated_at desc);
-
-create index if not exists import_jobs_org_repo_idx on public.import_jobs (org_id, repo_id);
-create index if not exists import_jobs_status_idx on public.import_jobs (status);
-create index if not exists import_jobs_updated_idx on public.import_jobs (updated_at desc);
 
 create index if not exists org_members_user_idx on public.org_members (user_id);
-create index if not exists org_member_invites_email_idx on public.org_member_invites (email);
 
--- Buckets (dev-only): ensure git-packs exists
-insert into storage.buckets (id, name, public)
-values ('git-packs', 'git-packs', true)
-on conflict (id) do update set public = excluded.public;
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'org_members_role_check'
+  ) then
+    alter table public.org_members
+      add constraint org_members_role_check check (role in ('admin', 'write', 'read'));
+  end if;
+end$$;
+
+-- Repo visibility (public/private)
+alter table public.repositories
+  add column if not exists visibility text not null default 'public';
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'repositories_visibility_check'
+  ) then
+    alter table public.repositories
+      add constraint repositories_visibility_check check (visibility in ('public', 'private'));
+  end if;
+end$$;
+
+-- Import job ownership (used for "queued/running" visibility before repo rows exist)
+alter table public.import_jobs
+  add column if not exists requested_by uuid;
 
 -- Helper functions (used by both RLS policies and PowerSync sync rules)
 create or replace function public.powergit_repo_is_public(org_id text, repo_id text)
@@ -359,19 +139,6 @@ as $$
   end;
 $$;
 
-create or replace function public.powergit_current_user_email()
-returns text
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select lower(u.email::text)
-  from auth.users u
-  where u.id = auth.uid()
-  limit 1;
-$$;
-
 create or replace function public.powergit_storage_org_id(object_name text)
 returns text
 language sql
@@ -388,10 +155,9 @@ as $$
   select nullif(split_part($1, '/', 2), '');
 $$;
 
--- Enable RLS
+-- Enable RLS (idempotent)
 alter table public.orgs enable row level security;
 alter table public.org_members enable row level security;
-alter table public.org_member_invites enable row level security;
 alter table public.repositories enable row level security;
 alter table public.import_jobs enable row level security;
 alter table public.refs enable row level security;
@@ -399,7 +165,7 @@ alter table public.commits enable row level security;
 alter table public.file_changes enable row level security;
 alter table public.objects enable row level security;
 
--- Policies (replace any prior dev-open policies)
+-- Drop legacy open policies
 drop policy if exists allow_all_refs_rw on public.refs;
 drop policy if exists allow_all_commits_rw on public.commits;
 drop policy if exists allow_all_file_changes_rw on public.file_changes;
@@ -407,6 +173,13 @@ drop policy if exists allow_all_objects_rw on public.objects;
 drop policy if exists allow_all_repositories_rw on public.repositories;
 drop policy if exists allow_all_import_jobs_rw on public.import_jobs;
 
+-- Drop legacy storage policies (too permissive)
+drop policy if exists git_packs_auth_read on storage.objects;
+drop policy if exists git_packs_auth_write on storage.objects;
+drop policy if exists git_packs_auth_update on storage.objects;
+drop policy if exists git_packs_auth_delete on storage.objects;
+
+-- Orgs policies
 drop policy if exists powergit_orgs_select_member on public.orgs;
 drop policy if exists powergit_orgs_update_admin on public.orgs;
 drop policy if exists powergit_orgs_delete_admin on public.orgs;
@@ -430,6 +203,7 @@ create policy powergit_orgs_delete_admin
   to authenticated
   using (public.powergit_user_is_org_admin(id, auth.uid()));
 
+-- Org members policies
 drop policy if exists powergit_org_members_select_member on public.org_members;
 drop policy if exists powergit_org_members_admin_insert on public.org_members;
 drop policy if exists powergit_org_members_admin_update on public.org_members;
@@ -467,42 +241,7 @@ create policy powergit_org_members_self_delete
   to authenticated
   using (user_id = auth.uid());
 
-drop policy if exists powergit_org_invites_select on public.org_member_invites;
-drop policy if exists powergit_org_invites_admin_insert on public.org_member_invites;
-drop policy if exists powergit_org_invites_admin_update on public.org_member_invites;
-drop policy if exists powergit_org_invites_delete on public.org_member_invites;
-
-create policy powergit_org_invites_select
-  on public.org_member_invites
-  for select
-  to authenticated
-  using (
-    public.powergit_user_is_org_admin(org_id, auth.uid())
-    or email = public.powergit_current_user_email()
-  );
-
-create policy powergit_org_invites_admin_insert
-  on public.org_member_invites
-  for insert
-  to authenticated
-  with check (public.powergit_user_is_org_admin(org_id, auth.uid()));
-
-create policy powergit_org_invites_admin_update
-  on public.org_member_invites
-  for update
-  to authenticated
-  using (public.powergit_user_is_org_admin(org_id, auth.uid()))
-  with check (public.powergit_user_is_org_admin(org_id, auth.uid()));
-
-create policy powergit_org_invites_delete
-  on public.org_member_invites
-  for delete
-  to authenticated
-  using (
-    public.powergit_user_is_org_admin(org_id, auth.uid())
-    or email = public.powergit_current_user_email()
-  );
-
+-- Repositories policies
 drop policy if exists powergit_repositories_public_read on public.repositories;
 drop policy if exists powergit_repositories_member_read on public.repositories;
 drop policy if exists powergit_repositories_insert_write on public.repositories;
@@ -540,6 +279,7 @@ create policy powergit_repositories_delete_admin
   to authenticated
   using (public.powergit_user_is_org_admin(org_id, auth.uid()));
 
+-- Git metadata policies
 drop policy if exists powergit_refs_read on public.refs;
 drop policy if exists powergit_refs_insert_write on public.refs;
 drop policy if exists powergit_refs_update_write on public.refs;
@@ -660,6 +400,7 @@ create policy powergit_objects_delete_write
   to authenticated
   using (public.powergit_user_can_write_repo(org_id, repo_id, auth.uid()));
 
+-- Import jobs policies
 drop policy if exists powergit_import_jobs_read_requester on public.import_jobs;
 drop policy if exists powergit_import_jobs_read_member on public.import_jobs;
 drop policy if exists powergit_import_jobs_read_public on public.import_jobs;
@@ -705,11 +446,6 @@ create policy powergit_import_jobs_delete_admin
   using (public.powergit_user_is_org_admin(org_id, auth.uid()));
 
 -- Storage policies for git packs (path is "${org}/${repo}/${oid}.pack")
-drop policy if exists git_packs_auth_read on storage.objects;
-drop policy if exists git_packs_auth_write on storage.objects;
-drop policy if exists git_packs_auth_update on storage.objects;
-drop policy if exists git_packs_auth_delete on storage.objects;
-
 drop policy if exists powergit_git_packs_read on storage.objects;
 drop policy if exists powergit_git_packs_insert on storage.objects;
 drop policy if exists powergit_git_packs_update on storage.objects;
@@ -942,238 +678,6 @@ end;
 $$;
 
 grant execute on function public.powergit_add_org_member(text, text, text) to authenticated;
-
-create or replace function public.powergit_invite_org_member(target_org_id text, target_email text, target_role text default 'read')
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  uid uuid;
-  normalized_role text;
-  lookup_email text;
-  target_user uuid;
-  result public.org_members%rowtype;
-begin
-  uid := auth.uid();
-  if uid is null then
-    raise exception 'Not authenticated.' using errcode = '28000';
-  end if;
-
-  if not public.powergit_user_is_org_admin(target_org_id, uid) then
-    raise exception 'Not authorized (admin required).' using errcode = '42501';
-  end if;
-
-  lookup_email := lower(trim(coalesce(target_email, '')));
-  if lookup_email = '' then
-    raise exception 'Email is required.' using errcode = '22023';
-  end if;
-
-  normalized_role := lower(trim(coalesce(target_role, 'read')));
-  if normalized_role not in ('admin', 'write', 'read') then
-    raise exception 'Invalid role "%". Use admin|write|read.', normalized_role using errcode = '22023';
-  end if;
-
-  select u.id into target_user
-    from auth.users u
-   where lower(u.email::text) = lookup_email
-   limit 1;
-
-  if target_user is not null then
-    insert into public.org_members (org_id, user_id, role)
-      values (target_org_id, target_user, normalized_role)
-      on conflict (org_id, user_id) do update
-        set role = excluded.role, updated_at = now()
-      returning * into result;
-
-    delete from public.org_member_invites
-     where org_id = target_org_id
-       and email = lookup_email;
-
-    return jsonb_build_object(
-      'status', 'added',
-      'org_id', target_org_id,
-      'email', lookup_email,
-      'role', result.role,
-      'user_id', result.user_id
-    );
-  end if;
-
-  insert into public.org_member_invites (org_id, email, role, invited_by)
-    values (target_org_id, lookup_email, normalized_role, uid)
-    on conflict (org_id, email) do update
-      set role = excluded.role,
-          invited_by = excluded.invited_by,
-          updated_at = now();
-
-  return jsonb_build_object(
-    'status', 'invited',
-    'org_id', target_org_id,
-    'email', lookup_email,
-    'role', normalized_role
-  );
-end;
-$$;
-
-grant execute on function public.powergit_invite_org_member(text, text, text) to authenticated;
-
-create or replace function public.powergit_list_org_invites(target_org_id text)
-returns table (email text, role text, invited_by uuid, created_at timestamptz, updated_at timestamptz)
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if auth.uid() is null then
-    raise exception 'Not authenticated.' using errcode = '28000';
-  end if;
-
-  if not public.powergit_user_is_org_admin(target_org_id, auth.uid()) then
-    raise exception 'Not authorized (admin required).' using errcode = '42501';
-  end if;
-
-  return query
-    select i.email,
-           i.role,
-           i.invited_by,
-           i.created_at,
-           i.updated_at
-      from public.org_member_invites i
-     where i.org_id = target_org_id
-     order by i.created_at desc, i.email;
-end;
-$$;
-
-grant execute on function public.powergit_list_org_invites(text) to authenticated;
-
-create or replace function public.powergit_list_my_org_invites()
-returns table (org_id text, org_name text, role text, invited_by uuid, created_at timestamptz, updated_at timestamptz)
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  uid uuid;
-  lookup_email text;
-begin
-  uid := auth.uid();
-  if uid is null then
-    raise exception 'Not authenticated.' using errcode = '28000';
-  end if;
-
-  select lower(u.email::text) into lookup_email
-    from auth.users u
-   where u.id = uid
-   limit 1;
-
-  if lookup_email is null or lookup_email = '' then
-    return;
-  end if;
-
-  return query
-    select i.org_id,
-           o.name as org_name,
-           i.role,
-           i.invited_by,
-           i.created_at,
-           i.updated_at
-      from public.org_member_invites i
-      left join public.orgs o on o.id = i.org_id
-     where i.email = lookup_email
-     order by i.created_at desc, i.org_id;
-end;
-$$;
-
-grant execute on function public.powergit_list_my_org_invites() to authenticated;
-
-create or replace function public.powergit_accept_org_invite(target_org_id text)
-returns boolean
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  uid uuid;
-  lookup_email text;
-  invite_role text;
-  deleted_count int;
-begin
-  uid := auth.uid();
-  if uid is null then
-    raise exception 'Not authenticated.' using errcode = '28000';
-  end if;
-
-  select lower(u.email::text) into lookup_email
-    from auth.users u
-   where u.id = uid
-   limit 1;
-
-  if lookup_email is null or lookup_email = '' then
-    raise exception 'User email unavailable.' using errcode = '22023';
-  end if;
-
-  select i.role into invite_role
-    from public.org_member_invites i
-   where i.org_id = target_org_id
-     and i.email = lookup_email
-   limit 1;
-
-  if invite_role is null then
-    raise exception 'No pending invite for org "%".', target_org_id using errcode = '22023';
-  end if;
-
-  insert into public.org_members (org_id, user_id, role)
-    values (target_org_id, uid, invite_role)
-    on conflict (org_id, user_id) do update
-      set role = excluded.role, updated_at = now();
-
-  delete from public.org_member_invites
-   where org_id = target_org_id
-     and email = lookup_email;
-
-  get diagnostics deleted_count = row_count;
-  return deleted_count > 0;
-end;
-$$;
-
-grant execute on function public.powergit_accept_org_invite(text) to authenticated;
-
-create or replace function public.powergit_cancel_org_invite(target_org_id text, target_email text)
-returns boolean
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  uid uuid;
-  lookup_email text;
-  deleted_count int;
-begin
-  uid := auth.uid();
-  if uid is null then
-    raise exception 'Not authenticated.' using errcode = '28000';
-  end if;
-
-  if not public.powergit_user_is_org_admin(target_org_id, uid) then
-    raise exception 'Not authorized (admin required).' using errcode = '42501';
-  end if;
-
-  lookup_email := lower(trim(coalesce(target_email, '')));
-  if lookup_email = '' then
-    raise exception 'Email is required.' using errcode = '22023';
-  end if;
-
-  delete from public.org_member_invites
-   where org_id = target_org_id
-     and email = lookup_email;
-
-  get diagnostics deleted_count = row_count;
-  return deleted_count > 0;
-end;
-$$;
-
-grant execute on function public.powergit_cancel_org_invite(text, text) to authenticated;
 
 create or replace function public.powergit_remove_org_member(target_org_id text, target_user_id uuid)
 returns boolean

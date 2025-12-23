@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
@@ -15,8 +15,25 @@ const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, '..');
 
 async function loadProfile() {
-  const module = await import('@powersync-community/powergit-core/profile-env');
-  return module.loadProfileEnvironment;
+  try {
+    const module = await import('@powersync-community/powergit-core/profile-env');
+    return module.loadProfileEnvironment;
+  } catch (error) {
+    const localPath = resolve(repoRoot, 'packages', 'shared', 'dist', 'profile-env.js');
+    try {
+      const module = await import(pathToFileURL(localPath).href);
+      return module.loadProfileEnvironment;
+    } catch (fallbackError) {
+      const message = error instanceof Error ? error.message : String(error);
+      const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      throw new Error(
+        `Failed to load Powergit profile env helper.\n` +
+          `- package import (@powersync-community/powergit-core/profile-env): ${message}\n` +
+          `- local import (${localPath}): ${fallbackMessage}\n` +
+          `Run "pnpm --filter @powersync-community/powergit-core build" or "pnpm install".`,
+      );
+    }
+  }
 }
 
 function parseArgs(rawArgs) {

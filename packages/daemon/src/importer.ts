@@ -602,7 +602,7 @@ function normalizeGithubRequest(request: GithubImportRequest): NormalizedGithubI
   if (!parsed) {
     throw new ImportValidationError('Invalid GitHub repository URL. Expected format https://github.com/<owner>/<repo>');
   }
-  const orgId = sanitizeSlug(request.orgId ?? parsed.owner);
+  const orgId = sanitizeSlug(request.orgId ?? `gh-${parsed.owner}`);
   const repoId = sanitizeSlug(request.repoId ?? parsed.repo);
   const branch = sanitizeBranch(request.branch);
   return {

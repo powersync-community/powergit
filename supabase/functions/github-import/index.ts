@@ -1,4 +1,5 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.48.1'
 
 type ImportStepStatus = 'pending' | 'active' | 'done' | 'error'
 type ImportStatus = 'queued' | 'running' | 'success' | 'error'
@@ -45,6 +46,28 @@ serve(async (req: Request) => {
     return json({ error: 'Method not allowed' }, 405)
   }
 
+  const authHeader = req.headers.get('Authorization') ?? ''
+  const supabaseToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : ''
+  if (!supabaseToken) {
+    return json({ error: 'Unauthorized: missing Authorization bearer token.' }, 401)
+  }
+
+  const supabaseUrl = env('SUPABASE_URL')
+  const supabaseAnonKey = env('SUPABASE_ANON_KEY')
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return json({ error: 'Supabase function is missing SUPABASE_URL or SUPABASE_ANON_KEY env vars.' }, 500)
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: `Bearer ${supabaseToken}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  const { data: authData, error: authError } = await supabase.auth.getUser()
+  if (authError || !authData?.user?.id) {
+    return json({ error: 'Unauthorized: invalid Supabase session.' }, 401)
+  }
+  const requesterId = authData.user.id
+
   let payload: GithubImportPayload
   try {
     payload = await req.json()
@@ -58,13 +81,36 @@ serve(async (req: Request) => {
   }
 
   const repoUrl = payload.repoUrl!.trim()
-  const orgId = (payload.orgId ?? slugify(parsed.owner)).trim()
-  const repoId = (payload.repoId ?? slugify(parsed.repo)).trim()
+  const defaultOrgId = `gh-${slugify(parsed.owner)}`
+  const explicitOrgId = typeof payload.orgId === 'string' && payload.orgId.trim().length > 0 ? payload.orgId.trim() : ''
+  const orgId = slugify(explicitOrgId || defaultOrgId)
+  const explicitRepoId = typeof payload.repoId === 'string' && payload.repoId.trim().length > 0 ? payload.repoId.trim() : ''
+  const repoId = slugify(explicitRepoId || parsed.repo)
   const branch = payload.branch ?? null
   const edgeBaseUrl = payload.edgeBaseUrl ?? Deno.env.get('POWERSYNC_EDGE_BASE_URL') ?? null
 
   if (!orgId || !repoId) {
     return json({ error: 'Missing org/repo identifiers after normalization.' }, 400)
+  }
+
+  if (explicitOrgId && (orgId.startsWith('gh-') || orgId.startsWith('github-'))) {
+    return json({ error: 'Custom org IDs cannot start with "gh-" or "github-". Omit orgId to use the default import namespace.' }, 400)
+  }
+
+  if (explicitOrgId) {
+    const { data: membership, error: membershipError } = await supabase
+      .from('org_members')
+      .select('role')
+      .eq('org_id', orgId)
+      .eq('user_id', requesterId)
+      .maybeSingle()
+    if (membershipError) {
+      return json({ error: `Failed to verify org membership: ${membershipError.message}` }, 500)
+    }
+    const role = (membership as { role?: unknown } | null)?.role
+    if (role !== 'admin' && role !== 'write') {
+      return json({ error: `Not authorized to import into org "${orgId}". You need admin or write access.` }, 403)
+    }
   }
 
   const token = env('GITHUB_TOKEN') ?? env('TOKEN')
@@ -90,6 +136,7 @@ serve(async (req: Request) => {
       org: orgId,
       repo: repoId,
       job_id: crypto.randomUUID(),
+      requested_by: requesterId,
       ...(edgeBaseUrl ? { edge_base_url: edgeBaseUrl } : {}),
     },
   }

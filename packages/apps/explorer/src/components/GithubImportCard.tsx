@@ -100,7 +100,7 @@ export function GithubImportCard(): React.JSX.Element | null {
 
   const derived = React.useMemo(() => deriveSlugs(repoUrl), [repoUrl])
   const isSubmitting = status === 'submitting'
-  const showSummary = Boolean(job && derived)
+  const showSummary = Boolean(job)
   const resultOrgId = liveJob?.org_id ?? job?.result?.orgId ?? job?.orgId ?? derived?.orgId ?? null
   const resultRepoId = liveJob?.repo_id ?? job?.result?.repoId ?? job?.repoId ?? derived?.repoId ?? null
   const resultDefaultBranch =
@@ -267,10 +267,8 @@ function buildImportPayload(repoUrl: string): DaemonGithubImportRequest | null {
   const url = repoUrl.trim()
   if (!url) return null
   const parsed = parseGithubUrl(url)
-  const orgId = slugify(parsed?.owner ?? slugifyFallback(url))
-  const repoId = slugify(parsed?.repo ?? slugifyFallback(url, 'repo'))
-  if (!orgId || !repoId) return null
-  return { repoUrl: url, orgId, repoId, branch: null }
+  if (!parsed) return null
+  return { repoUrl: url, branch: null }
 }
 
 function parseGithubUrl(value: string): { owner: string; repo: string } | null {
@@ -294,22 +292,13 @@ function slugify(value: string): string {
     .toLowerCase()
 }
 
-function slugifyFallback(url: string, type: 'org' | 'repo' = 'org'): string {
-  try {
-    const { pathname } = new URL(url)
-    const parts = pathname.split('/').filter(Boolean)
-    if (type === 'org') {
-      return slugify(parts[0] ?? 'organisation')
-    }
-    return slugify(parts[1] ?? 'repository')
-  } catch {
-    return slugify(type === 'org' ? 'organisation' : 'repository')
-  }
-}
-
 function deriveSlugs(repoUrl: string): { orgId: string; repoId: string } | null {
-  const payload = buildImportPayload(repoUrl)
-  if (!payload) return null
-  if (!payload.orgId || !payload.repoId) return null
-  return { orgId: payload.orgId, repoId: payload.repoId }
+  const url = repoUrl.trim()
+  if (!url) return null
+  const parsed = parseGithubUrl(url)
+  if (!parsed) return null
+  const orgId = `gh-${slugify(parsed.owner)}`
+  const repoId = slugify(parsed.repo)
+  if (!orgId || !repoId) return null
+  return { orgId, repoId }
 }

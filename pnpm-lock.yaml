@@ -42,6 +42,9 @@ importers:
       '@changesets/cli':
         specifier: ^2.29.8
         version: 2.29.8(@types/node@22.19.0)
+      '@powersync-community/powergit-core':
+        specifier: workspace:*
+        version: link:packages/shared
       '@powersync-community/powergit-remote-helper':
         specifier: workspace:*
         version: link:packages/remote-helper
