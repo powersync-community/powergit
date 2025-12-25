@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Mock } from 'vitest'
 import simpleGit from 'simple-git'
-import { addPowerSyncRemote } from './index.js'
+import { addPowerSyncRemote } from '../index.js'
 
 vi.mock('simple-git', () => ({
   default: vi.fn(),

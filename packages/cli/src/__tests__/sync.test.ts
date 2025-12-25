@@ -20,7 +20,7 @@ vi.mock('@powersync-community/powergit-core', async () => {
 
 import simpleGit from 'simple-git'
 import { PowerSyncRemoteClient } from '@powersync-community/powergit-core'
-import { syncPowerSyncRepository } from './index.js'
+import { syncPowerSyncRepository } from '../index.js'
 
 const simpleGitMock = simpleGit as unknown as Mock
 const PowerSyncRemoteClientMock = PowerSyncRemoteClient as unknown as Mock

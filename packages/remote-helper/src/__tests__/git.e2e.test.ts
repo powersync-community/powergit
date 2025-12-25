@@ -7,7 +7,7 @@ import { execFile, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
-import { startStack, stopStack } from '../../../scripts/test-stack-hooks.mjs'
+import { startStack, stopStack } from '../../../../scripts/test-stack-hooks.mjs'
 import { getServerSupabaseClient, buildRepoStreamTargets, formatStreamKey } from '@powersync-community/powergit-core'
 import { resolvePowergitRemote } from '@powersync-community/powergit-core/node'
 
@@ -107,7 +107,7 @@ const tsxEsmPath = requireForTests.resolve('tsx/esm')
 
 async function createHelperExecutable(dir: string): Promise<string> {
   const helperPath = join(dir, 'git-remote-powergit')
-  const entry = fileURLToPath(new URL('./bin.ts', import.meta.url))
+  const entry = fileURLToPath(new URL('../bin.ts', import.meta.url))
   const script = [
     '#!/usr/bin/env node',
     "const { pathToFileURL } = require('node:url');",
@@ -130,7 +130,7 @@ describeIfSupabase('git push/fetch via PowerSync remote helper', () => {
   let cloneDir: string
   let powersyncEndpoint: string
   let powersyncRemoteUrl: string
-  const workspaceRoot = fileURLToPath(new URL('../../..', import.meta.url))
+  const workspaceRoot = fileURLToPath(new URL('../../../..', import.meta.url))
   let env: NodeJS.ProcessEnv
   let stackEnv: Record<string, string> | null = null
   let org: string

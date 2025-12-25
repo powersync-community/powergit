@@ -10,5 +10,5 @@ out
 .env.local
 repo-explorer.db
 tmp
-**/test-reults/*
+**/test-results/*
 logs/

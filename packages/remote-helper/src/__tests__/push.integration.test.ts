@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { Buffer } from 'node:buffer'
 
-import { __internals } from './index.js'
+import { __internals } from '../index.js'
 
 describe('remote helper push integration (local)', () => {
   it('parses push commands correctly', () => {
     const { parsePush } = __internals
-    
+
     // Test basic push format
     const result1 = parsePush(['push', '0000000000000000000000000000000000000000', 'refs/heads/main'])
     expect(result1).toEqual({
@@ -40,7 +40,7 @@ describe('remote helper push integration (local)', () => {
     const packBuffer = Buffer.from('test-pack-data')
     const encoded = packBuffer.toString('base64')
     const decoded = Buffer.from(encoded, 'base64')
-    
+
     expect(decoded.toString()).toBe('test-pack-data')
     expect(encoded).toBe('dGVzdC1wYWNrLWRhdGE=')
   })
@@ -50,7 +50,7 @@ describe('remote helper push integration (local)', () => {
       { src: '0000000000000000000000000000000000000000', dst: 'refs/heads/main' },
       { src: '0000000000000000000000000000000000000000', dst: 'refs/heads/develop' }
     ]
-    
+
     expect(updates).toHaveLength(2)
     expect(updates[0].dst).toBe('refs/heads/main')
     expect(updates[1].dst).toBe('refs/heads/develop')
@@ -60,7 +60,7 @@ describe('remote helper push integration (local)', () => {
     const initial = Buffer.from('initial')
     const chunks = [Buffer.from('chunk1'), Buffer.from('chunk2')]
     const result = Buffer.concat([initial, ...chunks])
-    
+
     expect(result.toString()).toBe('initialchunk1chunk2')
     expect(result.length).toBe(initial.length + chunks[0].length + chunks[1].length)
   })

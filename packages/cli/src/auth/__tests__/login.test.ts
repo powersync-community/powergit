@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { join } from 'node:path'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { loginWithSupabasePassword, logout } from './login.js'
-import { saveStoredCredentials } from './session.js'
+import { loginWithSupabasePassword, logout } from '../login.js'
+import { saveStoredCredentials } from '../session.js'
 
 const createClientMock = vi.hoisted(() => vi.fn())
 const sharedCoreMock = vi.hoisted(() => ({

@@ -10,17 +10,17 @@ import { createServer } from 'node:net'
 import { promisify } from 'node:util'
 import { PowerSyncRemoteClient, buildRepoStreamTargets, formatStreamKey } from '@powersync-community/powergit-core'
 import { resolvePowergitRemote } from '@powersync-community/powergit-core/node'
-import { startStack, stopStack } from '../../../scripts/test-stack-hooks.mjs'
-import { seedDemoRepository } from './index.js'
-import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials } from './auth/session.js'
-import { loginWithSupabasePassword } from './auth/login.js'
-import { fetchDaemonAuthStatus, resolveDaemonBaseUrl } from './auth/daemon-client.js'
+import { startStack, stopStack } from '../../../../scripts/test-stack-hooks.mjs'
+import { seedDemoRepository } from '../index.js'
+import { clearStoredCredentials, loadStoredCredentials, saveStoredCredentials } from '../auth/session.js'
+import { loginWithSupabasePassword } from '../auth/login.js'
+import { fetchDaemonAuthStatus, resolveDaemonBaseUrl } from '../auth/daemon-client.js'
 
 const execFileAsync = promisify(execFile)
-const binPath = fileURLToPath(new URL('./bin.ts', import.meta.url))
+const binPath = fileURLToPath(new URL('../bin.ts', import.meta.url))
 const require = createRequire(import.meta.url)
 const tsxImport = pathToFileURL(require.resolve('tsx/esm')).href
-const repoRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)), '..')
+const repoRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)), '..')
 const builtBinPath = resolve(repoRoot, 'packages/cli/dist/cli/src/bin.js')
 
 function buildCliArgs(args: string[]): string[] {

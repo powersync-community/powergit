@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import { Buffer } from 'node:buffer'
 
-import { __internals } from './index.js'
+import { __internals } from '../index.js'
 
 const originalFetch = globalThis.fetch
 

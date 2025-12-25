@@ -44,7 +44,7 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock('./daemon-client.js', () => ({
+vi.mock('../daemon-client.js', () => ({
   resolveDaemonBaseUrl: mocks.resolveDaemonBaseUrlMock,
   postDaemonAuthDevice: mocks.postDaemonAuthDeviceMock,
   fetchDaemonAuthStatus: mocks.fetchDaemonAuthStatusMock,
@@ -52,7 +52,7 @@ vi.mock('./daemon-client.js', () => ({
   extractDeviceChallenge: mocks.extractDeviceChallengeMock,
 }))
 
-import { loginWithDaemonDevice, logout } from './login.js'
+import { loginWithDaemonDevice, logout } from '../login.js'
 
 describe('daemon auth helpers', () => {
   beforeEach(() => {
