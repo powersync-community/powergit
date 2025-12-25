@@ -1,132 +1,200 @@
-import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.48.1'
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.48.1";
 
-type ImportStepStatus = 'pending' | 'active' | 'done' | 'error'
-type ImportStatus = 'queued' | 'running' | 'success' | 'error'
-type LogLevel = 'info' | 'warn' | 'error'
+type ImportStepStatus = "pending" | "active" | "done" | "error";
+type ImportStatus = "queued" | "running" | "success" | "error";
+type LogLevel = "info" | "warn" | "error";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  "Access-Control-Allow-Origin": "*",
   // Allow common Supabase/SB-JS headers and fall back to wildcard for safety.
-  'Access-Control-Allow-Headers': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Max-Age': '86400',
-}
+  "Access-Control-Allow-Headers": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Max-Age": "86400",
+};
 
 interface GithubImportPayload {
-  repoUrl?: string
-  orgId?: string | null
-  repoId?: string | null
-  branch?: string | null
-  edgeBaseUrl?: string | null
+  repoUrl?: string;
+  orgId?: string | null;
+  repoId?: string | null;
+  branch?: string | null;
+  edgeBaseUrl?: string | null;
 }
 
 interface PowerSyncImportJob {
-  id: string
-  status: ImportStatus
-  createdAt: string
-  updatedAt: string
-  repoUrl: string
-  orgId: string
-  repoId: string
-  branch?: string | null
-  steps: Array<{ id: string; label: string; status: ImportStepStatus; detail?: string | null }>
-  logs: Array<{ id: string; level: LogLevel; message: string; timestamp: string }>
-  error?: string | null
-  result?: { orgId: string; repoId: string; branch?: string | null; defaultBranch?: string | null } | null
-  workflowUrl?: string
+  id: string;
+  status: ImportStatus;
+  createdAt: string;
+  updatedAt: string;
+  repoUrl: string;
+  orgId: string;
+  repoId: string;
+  branch?: string | null;
+  steps: Array<{
+    id: string;
+    label: string;
+    status: ImportStepStatus;
+    detail?: string | null;
+  }>;
+  logs: Array<{
+    id: string;
+    level: LogLevel;
+    message: string;
+    timestamp: string;
+  }>;
+  error?: string | null;
+  result?: {
+    orgId: string;
+    repoId: string;
+    branch?: string | null;
+    defaultBranch?: string | null;
+  } | null;
+  workflowUrl?: string;
 }
 
 serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
-  if (req.method !== 'POST') {
-    return json({ error: 'Method not allowed' }, 405)
+  if (req.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405);
   }
 
-  const authHeader = req.headers.get('Authorization') ?? ''
-  const supabaseToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : ''
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const supabaseToken = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7).trim()
+    : "";
   if (!supabaseToken) {
-    return json({ error: 'Unauthorized: missing Authorization bearer token.' }, 401)
+    return json(
+      { error: "Unauthorized: missing Authorization bearer token." },
+      401,
+    );
   }
 
-  const supabaseUrl = env('SUPABASE_URL')
-  const supabaseAnonKey = env('SUPABASE_ANON_KEY')
+  const supabaseUrl = env("SUPABASE_URL");
+  const supabaseAnonKey = env("SUPABASE_ANON_KEY");
   if (!supabaseUrl || !supabaseAnonKey) {
-    return json({ error: 'Supabase function is missing SUPABASE_URL or SUPABASE_ANON_KEY env vars.' }, 500)
+    return json(
+      {
+        error:
+          "Supabase function is missing SUPABASE_URL or SUPABASE_ANON_KEY env vars.",
+      },
+      500,
+    );
   }
 
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     global: { headers: { Authorization: `Bearer ${supabaseToken}` } },
     auth: { persistSession: false, autoRefreshToken: false },
-  })
-  const { data: authData, error: authError } = await supabase.auth.getUser()
+  });
+  const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError || !authData?.user?.id) {
-    return json({ error: 'Unauthorized: invalid Supabase session.' }, 401)
+    return json({ error: "Unauthorized: invalid Supabase session." }, 401);
   }
-  const requesterId = authData.user.id
+  const requesterId = authData.user.id;
 
-  let payload: GithubImportPayload
+  let payload: GithubImportPayload;
   try {
-    payload = await req.json()
+    payload = await req.json();
   } catch {
-    return json({ error: 'Invalid JSON body' }, 400)
+    return json({ error: "Invalid JSON body" }, 400);
   }
 
-  const parsed = parseGithubUrl(payload.repoUrl ?? '')
+  const parsed = parseGithubUrl(payload.repoUrl ?? "");
   if (!parsed) {
-    return json({ error: 'Provide a valid GitHub repository URL (e.g. https://github.com/org/repo).' }, 400)
+    return json(
+      {
+        error:
+          "Provide a valid GitHub repository URL (e.g. https://github.com/org/repo).",
+      },
+      400,
+    );
   }
 
-  const repoUrl = payload.repoUrl!.trim()
-  const defaultOrgId = `gh-${slugify(parsed.owner)}`
-  const explicitOrgId = typeof payload.orgId === 'string' && payload.orgId.trim().length > 0 ? payload.orgId.trim() : ''
-  const orgId = slugify(explicitOrgId || defaultOrgId)
-  const explicitRepoId = typeof payload.repoId === 'string' && payload.repoId.trim().length > 0 ? payload.repoId.trim() : ''
-  const repoId = slugify(explicitRepoId || parsed.repo)
-  const branch = payload.branch ?? null
-  const edgeBaseUrl = payload.edgeBaseUrl ?? Deno.env.get('POWERSYNC_EDGE_BASE_URL') ?? null
+  const repoUrl = payload.repoUrl!.trim();
+  const defaultOrgId = slugify(`gh-${parsed.owner}`);
+  const explicitOrgId =
+    typeof payload.orgId === "string" && payload.orgId.trim().length > 0
+      ? payload.orgId.trim()
+      : "";
+  const requestedOrgId = explicitOrgId ? slugify(explicitOrgId) : "";
+  const requestedMatchesDefault = Boolean(
+    requestedOrgId && requestedOrgId === defaultOrgId,
+  );
+  const orgId = requestedMatchesDefault
+    ? defaultOrgId
+    : requestedOrgId || defaultOrgId;
+  const explicitRepoId =
+    typeof payload.repoId === "string" && payload.repoId.trim().length > 0
+      ? payload.repoId.trim()
+      : "";
+  const repoId = slugify(explicitRepoId || parsed.repo);
+  const branch = payload.branch ?? null;
+  const edgeBaseUrl =
+    payload.edgeBaseUrl ?? Deno.env.get("POWERSYNC_EDGE_BASE_URL") ?? null;
 
   if (!orgId || !repoId) {
-    return json({ error: 'Missing org/repo identifiers after normalization.' }, 400)
+    return json(
+      { error: "Missing org/repo identifiers after normalization." },
+      400,
+    );
   }
 
-  if (explicitOrgId && (orgId.startsWith('gh-') || orgId.startsWith('github-'))) {
-    return json({ error: 'Custom org IDs cannot start with "gh-" or "github-". Omit orgId to use the default import namespace.' }, 400)
+  const hasCustomOrgId = Boolean(explicitOrgId && !requestedMatchesDefault);
+  if (
+    hasCustomOrgId &&
+    (orgId.startsWith("gh-") || orgId.startsWith("github-"))
+  ) {
+    return json(
+      {
+        error:
+          'Custom org IDs cannot start with "gh-" or "github-". Omit orgId to use the default import namespace.',
+      },
+      400,
+    );
   }
 
-  if (explicitOrgId) {
+  if (hasCustomOrgId) {
     const { data: membership, error: membershipError } = await supabase
-      .from('org_members')
-      .select('role')
-      .eq('org_id', orgId)
-      .eq('user_id', requesterId)
-      .maybeSingle()
+      .from("org_members")
+      .select("role")
+      .eq("org_id", orgId)
+      .eq("user_id", requesterId)
+      .maybeSingle();
     if (membershipError) {
-      return json({ error: `Failed to verify org membership: ${membershipError.message}` }, 500)
+      return json(
+        {
+          error: `Failed to verify org membership: ${membershipError.message}`,
+        },
+        500,
+      );
     }
-    const role = (membership as { role?: unknown } | null)?.role
-    if (role !== 'admin' && role !== 'write') {
-      return json({ error: `Not authorized to import into org "${orgId}". You need admin or write access.` }, 403)
+    const role = (membership as { role?: unknown } | null)?.role;
+    if (role !== "admin" && role !== "write") {
+      return json(
+        {
+          error: `Not authorized to import into org "${orgId}". You need admin or write access.`,
+        },
+        403,
+      );
     }
   }
 
-  const token = env('GITHUB_TOKEN') ?? env('TOKEN')
-  const owner = env('GITHUB_REPO_OWNER') ?? env('GITHUB_OWNER')
-  const repo = env('GITHUB_REPO_NAME') ?? env('GITHUB_REPO')
-  const workflowFile = env('GITHUB_WORKFLOW_FILE') ?? 'clone-and-push.yml'
-  const workflowRef = env('GITHUB_WORKFLOW_REF') ?? 'main'
+  const token = env("GITHUB_TOKEN") ?? env("TOKEN");
+  const owner = env("GITHUB_REPO_OWNER") ?? env("GITHUB_OWNER");
+  const repo = env("GITHUB_REPO_NAME") ?? env("GITHUB_REPO");
+  const workflowFile = env("GITHUB_WORKFLOW_FILE") ?? "clone-and-push.yml";
+  const workflowRef = env("GITHUB_WORKFLOW_REF") ?? "main";
 
   if (!token || !owner || !repo) {
     return json(
       {
         error:
-          'Missing GitHub configuration. Set GITHUB_TOKEN (or TOKEN), GITHUB_REPO_OWNER, and GITHUB_REPO_NAME in the function environment.',
+          "Missing GitHub configuration. Set GITHUB_TOKEN (or TOKEN), GITHUB_REPO_OWNER, and GITHUB_REPO_NAME in the function environment.",
       },
       500,
-    )
+    );
   }
 
   const dispatchBody: Record<string, unknown> = {
@@ -139,39 +207,40 @@ serve(async (req: Request) => {
       requested_by: requesterId,
       ...(edgeBaseUrl ? { edge_base_url: edgeBaseUrl } : {}),
     },
-  }
+  };
 
   const ghRes = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${encodeURIComponent(workflowFile)}/dispatches`,
     {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'User-Agent': 'powersync-edge-dispatch',
+        "User-Agent": "powersync-edge-dispatch",
         Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(dispatchBody),
     },
-  )
+  );
 
   if (!ghRes.ok) {
-    const details = (await ghRes.text().catch(() => '')).trim()
+    const details = (await ghRes.text().catch(() => "")).trim();
     return json(
       {
         error: `GitHub dispatch failed (${ghRes.status} ${ghRes.statusText}).`,
         details: details ? details.slice(0, 500) : undefined,
       },
       502,
-    )
+    );
   }
 
-  const now = new Date().toISOString()
-  const workflowUrl = buildWorkflowUrl(owner, repo, workflowFile)
-  const dispatchedJobId = (dispatchBody.inputs as { job_id?: string }).job_id ?? crypto.randomUUID()
+  const now = new Date().toISOString();
+  const workflowUrl = buildWorkflowUrl(owner, repo, workflowFile);
+  const dispatchedJobId =
+    (dispatchBody.inputs as { job_id?: string }).job_id ?? crypto.randomUUID();
   const job: PowerSyncImportJob = {
     id: dispatchedJobId,
-    status: 'queued',
+    status: "queued",
     createdAt: now,
     updatedAt: now,
     repoUrl,
@@ -180,28 +249,32 @@ serve(async (req: Request) => {
     branch,
     steps: [
       {
-        id: 'dispatch',
-        label: 'Dispatch GitHub Action',
-        status: 'done',
+        id: "dispatch",
+        label: "Dispatch GitHub Action",
+        status: "done",
         detail: `Queued ${workflowFile} on ${workflowRef}`,
       },
       {
-        id: 'github-run',
-        label: 'GitHub Actions run',
-        status: 'pending',
-        detail: workflowUrl ? `Monitor workflow at ${workflowUrl}` : 'Monitor the GitHub Actions run',
+        id: "github-run",
+        label: "GitHub Actions run",
+        status: "pending",
+        detail: workflowUrl
+          ? `Monitor workflow at ${workflowUrl}`
+          : "Monitor the GitHub Actions run",
       },
       {
-        id: 'powersync',
-        label: 'Push to PowerSync',
-        status: 'pending',
-        detail: edgeBaseUrl ? `Edge base URL: ${edgeBaseUrl}` : 'Using workflow secret edge_base_url',
+        id: "powersync",
+        label: "Push to PowerSync",
+        status: "pending",
+        detail: edgeBaseUrl
+          ? `Edge base URL: ${edgeBaseUrl}`
+          : "Using workflow secret edge_base_url",
       },
     ],
     logs: [
       {
-        id: 'dispatch',
-        level: 'info',
+        id: "dispatch",
+        level: "info",
         message: `workflow_dispatch queued for ${owner}/${repo} (${workflowFile} → ${workflowRef})`,
         timestamp: now,
       },
@@ -214,50 +287,54 @@ serve(async (req: Request) => {
       defaultBranch: null,
     },
     workflowUrl,
-  }
+  };
 
-  return json({ job, workflowUrl }, 202)
-})
+  return json({ job, workflowUrl }, 202);
+});
 
 function env(name: string): string | null {
-  const value = Deno.env.get(name)
-  if (!value) return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
+  const value = Deno.env.get(name);
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...corsHeaders,
     },
-  })
+  });
 }
 
 function parseGithubUrl(value: string): { owner: string; repo: string } | null {
   try {
-    const url = new URL(value.trim())
-    if (!/github\.com$/i.test(url.host)) return null
-    const parts = url.pathname.split('/').filter(Boolean)
-    if (parts.length < 2) return null
-    return { owner: parts[0]!, repo: parts[1]!.replace(/\.git$/i, '') }
+    const url = new URL(value.trim());
+    if (!/github\.com$/i.test(url.host)) return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) return null;
+    return { owner: parts[0]!, repo: parts[1]!.replace(/\.git$/i, "") };
   } catch {
-    return null
+    return null;
   }
 }
 
 function slugify(value: string): string {
   return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
 }
 
-function buildWorkflowUrl(owner: string, repo: string, workflowFile: string): string | null {
-  if (!owner || !repo || !workflowFile) return null
-  return `https://github.com/${owner}/${repo}/actions/workflows/${workflowFile}`
+function buildWorkflowUrl(
+  owner: string,
+  repo: string,
+  workflowFile: string,
+): string | null {
+  if (!owner || !repo || !workflowFile) return null;
+  return `https://github.com/${owner}/${repo}/actions/workflows/${workflowFile}`;
 }

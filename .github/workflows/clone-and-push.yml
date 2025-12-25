@@ -77,6 +77,7 @@ jobs:
           SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET || secrets.POWERSYNC_SUPABASE_JWT_SECRET }}
           POWERGIT_EMAIL: ${{ secrets.POWERGIT_EMAIL }}
           POWERGIT_PASSWORD: ${{ secrets.POWERGIT_PASSWORD }}
+          POWERSYNC_ORG: ${{ github.event.inputs.org }}
           POWERSYNC_DAEMON_PORT: 5030
           POWERSYNC_SUPABASE_ONLY: "true"
         run: |
@@ -85,6 +86,15 @@ jobs:
           if [ -z "$SUPABASE_ANON_KEY" ]; then echo "Missing SUPABASE_ANON_KEY secret" && exit 1; fi
           if [ -z "$POWERGIT_EMAIL" ]; then echo "Missing POWERGIT_EMAIL secret" && exit 1; fi
           if [ -z "$POWERGIT_PASSWORD" ]; then echo "Missing POWERGIT_PASSWORD secret" && exit 1; fi
+          case "${POWERSYNC_ORG:-}" in
+            gh-*|github-*)
+              if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+                echo "Missing SUPABASE_SERVICE_ROLE_KEY secret (required to push to ${POWERSYNC_ORG})."
+                echo "Add SUPABASE_SERVICE_ROLE_KEY (or POWERSYNC_SUPABASE_SERVICE_ROLE_KEY) to GitHub repository secrets and re-run."
+                exit 1
+              fi
+              ;;
+          esac
           nohup pnpm --filter @powersync-community/powergit-daemon start -- --port ${POWERSYNC_DAEMON_PORT:-5030} > daemon.log 2>&1 &
           echo $! > daemon.pid
           for i in $(seq 1 30); do
@@ -110,6 +120,7 @@ jobs:
             fi
             sleep 1
           done
+          echo "Daemon supabase writer mode: $(echo "$STATUS_JSON" | jq -r '.context.supabaseWriterMode // ""')"
 
       - name: Record import job running
         if: ${{ github.event.inputs.job_id != '' }}

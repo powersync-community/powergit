@@ -123,6 +123,20 @@ async function authenticateDaemonViaSupabasePassword({
     return devicePayload;
   }
   const challengeId = extractChallengeId(devicePayload);
+  if (!challengeId && devicePayload?.status === 'pending') {
+    const token = typeof devicePayload.token === 'string' && devicePayload.token.trim() ? devicePayload.token.trim() : null;
+    if (token) {
+      return waitFor(async () => {
+        const status = await fetch(`${baseUrl}/auth/status`)
+          .then(async (res) => (res.ok ? ((await res.json().catch(() => null)) as DaemonAuthResponse | null) : null))
+          .catch(() => null);
+        if (status?.status === 'ready' && typeof status.token === 'string' && status.token.trim()) {
+          return status;
+        }
+        return null;
+      }, WAIT_TIMEOUT_MS);
+    }
+  }
   if (!challengeId) {
     const reason = devicePayload && 'reason' in devicePayload ? String((devicePayload as any).reason ?? '') : '';
     throw new Error(`Daemon did not return a device challenge. ${reason}`.trim());

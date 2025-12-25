@@ -597,6 +597,13 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
     if (authMetadata) {
       Object.assign(context, authMetadata);
     }
+    const hasActiveSession = Boolean(supabaseSession && authToken && !isJwtExpired(authToken, 5_000));
+    context.supabaseWriterMode = writerUsesServiceRole
+      ? 'service-role key'
+      : hasActiveSession
+        ? 'Supabase session'
+        : 'anon/public key';
+    context.supabaseWriterUsesServiceRole = writerUsesServiceRole;
     return Object.keys(context).length > 0 ? context : null;
   };
 
@@ -1053,9 +1060,13 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
 
           const role = (membership as { role?: unknown } | null)?.role;
           if (role !== 'admin' && role !== 'write') {
+            const isReservedImportOrg = orgId.startsWith('gh-') || orgId.startsWith('github-');
             throw new Error(
               `Not authorized to push to ${orgId}/${repoId}. ` +
-                'Ask an org admin to add you as a member with write access.',
+                'Ask an org admin to add you as a member with write access.' +
+                (isReservedImportOrg
+                  ? ' (For GitHub imports into gh-*/github-* orgs, set SUPABASE_SERVICE_ROLE_KEY in CI so the daemon can write.)'
+                  : ''),
             );
           }
         }
