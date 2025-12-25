@@ -6,7 +6,7 @@ import {
   SupabaseFileStorage,
   createSupabaseFileStorage,
   clearSupabaseFileStorage,
-} from './file-storage.js'
+} from '../file-storage.js'
 
 async function createTempFilePath(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'supabase-storage-test-'))

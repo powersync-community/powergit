@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { parsePowerSyncUrl } from './index.js'
-import { PowerSyncRemoteClient } from './node.js'
+import { parsePowerSyncUrl } from '../index.js'
+import { PowerSyncRemoteClient } from '../node.js'
 
 describe('parsePowerSyncUrl', () => {
   it('parses org/repo slugs from a remote URL', () => {

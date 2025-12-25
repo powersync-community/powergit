@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { cloneProfileDefaults, PROFILE_DEFAULTS } from './profile-defaults.js'
+import { cloneProfileDefaults, PROFILE_DEFAULTS } from '../profile-defaults.js'
 
 describe('profile-manager migrations', () => {
   const originalHome = process.env.POWERGIT_HOME
@@ -32,7 +32,7 @@ describe('profile-manager migrations', () => {
     writeFileSync(profilesPath, JSON.stringify(profiles, null, 2))
 
     vi.resetModules()
-    const { resolveProfile } = await import('./profile-manager.js')
+    const { resolveProfile } = await import('../profile-manager.js')
 
     const resolved = resolveProfile({ name: 'prod', updateState: false })
     expect(resolved.config.daemon?.deviceLoginUrl).toBe(PROFILE_DEFAULTS.prod.daemon.deviceLoginUrl)
@@ -41,4 +41,3 @@ describe('profile-manager migrations', () => {
     expect(migrated.prod.daemon.deviceLoginUrl).toBe(PROFILE_DEFAULTS.prod.daemon.deviceLoginUrl)
   })
 })
-

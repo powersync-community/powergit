@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolvePowergitRemote } from './remote-profile.js'
-import { PROFILE_DEFAULTS } from './profile-defaults.js'
+import { resolvePowergitRemote } from '../remote-profile.js'
+import { PROFILE_DEFAULTS } from '../profile-defaults.js'
 
 describe('resolvePowergitRemote', () => {
   const originalHome = process.env.POWERGIT_HOME
