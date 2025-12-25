@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { AuthScreen } from './AuthScreen'
+import { AuthScreen } from '../AuthScreen'
 
 const TEST_EMAIL = 'user@example.com'
 const TEST_PASSWORD = 'hunter2!'
