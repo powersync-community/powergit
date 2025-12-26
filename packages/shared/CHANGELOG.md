@@ -1,5 +1,11 @@
 # @powersync-community/powergit-core
 
+## 1.2.4
+
+### Patch Changes
+
+- Reserved ORGs of gh-_ and github-_ prefixes
+
 ## 1.2.3
 
 ### Patch Changes

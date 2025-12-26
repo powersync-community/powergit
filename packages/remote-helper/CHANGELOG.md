@@ -1,5 +1,13 @@
 # @powersync-community/powergit-remote-helper
 
+## 1.2.4
+
+### Patch Changes
+
+- Reserved ORGs of gh-_ and github-_ prefixes
+- Updated dependencies
+  - @powersync-community/powergit-core@1.2.4
+
 ## 1.2.3
 
 ### Patch Changes
