@@ -6,6 +6,7 @@ import { useCollections } from '@tsdb/collections'
 import { useLiveQuery } from '@tanstack/react-db'
 import type { Database } from '@ps/schema'
 import { useTheme } from '../ui/theme-context'
+import { FaGithub } from 'react-icons/fa'
 
 export const Route = createFileRoute('/org/$orgId/repo/$repoId/' as any)({
   component: RepoOverview,
@@ -15,6 +16,8 @@ function RepoOverview() {
   const { orgId, repoId } = Route.useParams()
   const { theme } = useTheme()
   const isDark = theme === 'dark'
+  const isGithubMirror = orgId.startsWith('gh-') && orgId.length > 3
+  const displayOrgId = isGithubMirror ? orgId.slice(3) : orgId
   useRepoStreams(orgId, repoId)
   const { refs } = useCollections()
 
@@ -48,7 +51,19 @@ function RepoOverview() {
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <h2 className={headingClass}>
-        Repo: {orgId}/{repoId}
+        Repo:{' '}
+        <span className="inline-flex items-center gap-2">
+          {isGithubMirror ? (
+            <FaGithub
+              className={`${isDark ? 'text-slate-300' : 'text-slate-500'} text-[18px]`}
+              title="GitHub mirror"
+              aria-hidden
+            />
+          ) : null}
+          <span>
+            {displayOrgId}/{repoId}
+          </span>
+        </span>
       </h2>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className={cardClass}>

@@ -13,6 +13,7 @@ import {
 } from '@ps/daemon-client'
 import type { Database } from '@ps/schema'
 import { useTheme } from '../ui/theme-context'
+import { FaGithub } from 'react-icons/fa'
 
 export const REPO_IMPORT_EVENT = '__powergit:repo-imported'
 
@@ -110,6 +111,11 @@ export function GithubImportCard(): React.JSX.Element | null {
     job?.result?.branch ??
     job?.branch ??
     null
+
+  const isGithubMirrorTarget =
+    typeof resultOrgId === 'string' && resultOrgId.startsWith('gh-') && resultOrgId.length > 3
+  const displayTargetOrgId =
+    typeof resultOrgId === 'string' ? (isGithubMirrorTarget ? resultOrgId.slice(3) : resultOrgId) : ''
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -249,7 +255,17 @@ export function GithubImportCard(): React.JSX.Element | null {
       {showSummary && resultOrgId && resultRepoId ? (
         <div className={`${summaryContainerClass} mt-3 flex flex-wrap items-center gap-2`} data-testid="import-summary">
           <div className={isDark ? 'font-medium text-slate-100' : 'font-medium text-slate-800'}>
-            Target: <code>{resultOrgId}/{resultRepoId}</code>
+            Target:{' '}
+            <span className="inline-flex items-center gap-1">
+              {isGithubMirrorTarget ? (
+                <FaGithub
+                  className={`${isDark ? 'text-slate-200' : 'text-slate-500'} text-[14px]`}
+                  title="GitHub mirror"
+                  aria-hidden
+                />
+              ) : null}
+              <code>{displayTargetOrgId}/{resultRepoId}</code>
+            </span>
           </div>
           <div className={isDark ? 'text-slate-200' : 'text-slate-600'}>
             Status: <span className="uppercase tracking-wide text-[11px]">{displayStatus}</span>

@@ -9,6 +9,7 @@ import type { Database } from '@ps/schema'
 import { useTheme } from '../ui/theme-context'
 import { deleteDaemonRepo, isDaemonPreferred } from '@ps/daemon-client'
 import { IoTrashOutline } from 'react-icons/io5'
+import { FaGithub } from 'react-icons/fa'
 import { InlineSpinner } from '../components/InlineSpinner'
 
 type HomeSearch = {
@@ -280,6 +281,8 @@ export function Home() {
             {sortedSummaries.map((repo) => {
               const branchCount = Array.from(repo.branches).filter((name) => name && name !== 'HEAD').length
               const importStatus = repo.status?.trim().toLowerCase() ?? null
+              const isGithubMirror = repo.orgId.startsWith('gh-') && repo.orgId.length > 3
+              const displayOrgId = isGithubMirror ? repo.orgId.slice(3) : repo.orgId
               const branchSummary = (() => {
                 if (branchCount > 0) return `${branchCount} branch${branchCount === 1 ? '' : 'es'}`
                 if (importStatus === 'queued') return 'Import queued'
@@ -293,9 +296,20 @@ export function Home() {
                 <li key={repoKey} className={repoCardBase}>
                   <div className="space-y-1">
                     <div className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {repo.orgId}
-                      <span className="text-slate-400">/</span>
-                      {repo.repoId}
+                      <span className="inline-flex items-center gap-2">
+                        {isGithubMirror ? (
+                          <FaGithub
+                            className={`${isDark ? 'text-slate-300' : 'text-slate-500'} text-[16px]`}
+                            title="GitHub mirror"
+                            aria-hidden
+                          />
+                        ) : null}
+                        <span>
+                          {displayOrgId}
+                          <span className="text-slate-400">/</span>
+                          {repo.repoId}
+                        </span>
+                      </span>
                     </div>
                     <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                       {branchSummary} · Updated {formatTimestamp(repo.updatedAt)}
