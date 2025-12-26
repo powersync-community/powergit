@@ -371,6 +371,15 @@ export interface DaemonGithubImportRequest {
 }
 
 export async function requestGithubImport(payload: DaemonGithubImportRequest): Promise<PowerSyncImportJob> {
+  const importMode = getImportMode()
+
+  if (importMode === 'actions') {
+    if (!actionsImportEnabled) {
+      throw new Error('GitHub Actions import is disabled in this environment.')
+    }
+    return dispatchGithubImport(payload as GithubActionsImportRequest)
+  }
+
   if (daemonEnabled) {
     const { status, data } = await fetchDaemonJson<{ job?: PowerSyncImportJob; error?: string }>('/repos/import', {
       method: 'POST',

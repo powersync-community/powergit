@@ -5,6 +5,13 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { addPowerSyncRemote, syncPowerSyncRepository, seedDemoRepository } from './index.js'
 import { loginWithDaemonDevice, logout as logoutSession } from './auth/login.js'
 import {
+  completeDaemonDeviceLogin,
+  extractDeviceChallenge,
+  fetchDaemonAuthStatus,
+  postDaemonAuthDevice,
+  resolveDaemonBaseUrl,
+} from './auth/daemon-client.js'
+import {
   resolveProfile,
   listProfiles,
   getProfile,
@@ -25,6 +32,10 @@ interface LoginCommandArgs {
   endpoint?: string
   session?: string
   daemonUrl?: string
+  supabaseEmail?: string
+  supabasePassword?: string
+  supabaseUrl?: string
+  supabaseAnonKey?: string
 }
 
 interface DemoSeedCommandArgs {
@@ -132,6 +143,10 @@ function firstNonEmpty(...candidates: Array<string | null | undefined>): string 
     }
   }
   return undefined
+}
+
+function hasText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
 }
 
 function parseKeyPath(input: string): string[] {
@@ -343,8 +358,127 @@ async function runDemoSeedCommand(args: DemoSeedCommandArgs) {
 }
 
 async function runLoginCommand(args: LoginCommandArgs) {
-  if (args.session) {
+  const wantsSupabasePasswordLogin =
+    hasText(args.supabaseEmail) ||
+    hasText(args.supabasePassword) ||
+    hasText(args.supabaseUrl) ||
+    hasText(args.supabaseAnonKey)
+
+  if (args.session && !wantsSupabasePasswordLogin) {
     console.warn(`${LOG_PREFIX} Ignoring legacy --session option; Supabase session persistence is automatic.`)
+  }
+
+  if (wantsSupabasePasswordLogin) {
+    const daemonBaseUrl = await resolveDaemonBaseUrl({ daemonUrl: args.daemonUrl })
+    const status = await fetchDaemonAuthStatus(daemonBaseUrl)
+
+    if (status?.status === 'ready') {
+      persistDaemonCredentials('', status.expiresAt ?? null, status.context ?? null)
+      console.log('✅ PowerSync daemon already authenticated via Supabase.')
+      if (status.expiresAt) {
+        console.log(`   Expires: ${status.expiresAt}`)
+      }
+      return
+    }
+
+    const supabaseUrl = firstNonEmpty(
+      args.supabaseUrl,
+      process.env.SUPABASE_URL,
+      process.env.POWERGIT_TEST_SUPABASE_URL,
+    )
+    const supabaseAnonKey = firstNonEmpty(
+      args.supabaseAnonKey,
+      process.env.SUPABASE_ANON_KEY,
+      process.env.POWERGIT_TEST_SUPABASE_ANON_KEY,
+    )
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error('Supabase URL and anon key are required. Configure SUPABASE_URL and SUPABASE_ANON_KEY.')
+    }
+
+    const email = firstNonEmpty(args.supabaseEmail, process.env.SUPABASE_EMAIL, process.env.POWERGIT_TEST_SUPABASE_EMAIL)
+    const password = firstNonEmpty(
+      args.supabasePassword,
+      process.env.SUPABASE_PASSWORD,
+      process.env.POWERGIT_TEST_SUPABASE_PASSWORD,
+    )
+    if (!email || !password) {
+      throw new Error('Supabase email and password are required. Use --supabase-email/--supabase-password.')
+    }
+
+    const authStoragePath = resolveSupabaseSessionPath(args.session)
+    const supabaseStorage = createSupabaseFileStorage(authStoragePath)
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        storage: supabaseStorage,
+        storageKey: 'powergit',
+      },
+    })
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      throw new Error(`Supabase login failed (${error.name ?? 'AuthError'}): ${error.message}`)
+    }
+    const session = data?.session ?? (await supabase.auth.getSession()).data.session
+    const accessToken = session?.access_token?.trim?.() ?? ''
+    const refreshToken = session?.refresh_token?.trim?.() ?? ''
+    if (!accessToken || !refreshToken) {
+      throw new Error('Supabase login response did not include an access_token and refresh_token.')
+    }
+
+    const existingChallenge = extractDeviceChallenge(status)?.challengeId ?? null
+    const pendingStatus = existingChallenge
+      ? status
+      : await postDaemonAuthDevice(daemonBaseUrl, {
+          endpoint: args.endpoint,
+        })
+    if (pendingStatus?.status === 'ready') {
+      persistDaemonCredentials('', pendingStatus.expiresAt ?? null, pendingStatus.context ?? null)
+      console.log('✅ PowerSync daemon authenticated via Supabase.')
+      if (pendingStatus.expiresAt) {
+        console.log(`   Expires: ${pendingStatus.expiresAt}`)
+      }
+      return
+    }
+    const challengeId = existingChallenge ?? extractDeviceChallenge(pendingStatus)?.challengeId ?? null
+    if (!challengeId) {
+      throw new Error('Daemon did not provide a device code for login.')
+    }
+
+    const final = await completeDaemonDeviceLogin(daemonBaseUrl, {
+      challengeId,
+      endpoint: args.endpoint ?? null,
+      session: {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: session?.expires_in ?? null,
+        expires_at: session?.expires_at ?? null,
+      },
+      metadata: null,
+    })
+
+    if (!final || final.status !== 'ready') {
+      const refreshed = await fetchDaemonAuthStatus(daemonBaseUrl)
+      const resolved = refreshed ?? final
+      if (resolved?.status === 'ready') {
+        persistDaemonCredentials('', resolved.expiresAt ?? null, resolved.context ?? null)
+        console.log('✅ PowerSync daemon authenticated via Supabase.')
+        if (resolved.expiresAt) {
+          console.log(`   Expires: ${resolved.expiresAt}`)
+        }
+        return
+      }
+      const reason = resolved?.reason ? ` (${resolved.reason})` : ''
+      throw new Error(`Daemon login did not complete successfully${reason}.`)
+    }
+
+    persistDaemonCredentials('', final.expiresAt ?? null, final.context ?? null)
+    console.log('✅ PowerSync daemon authenticated via Supabase.')
+    if (final.expiresAt) {
+      console.log(`   Expires: ${final.expiresAt}`)
+    }
+    return
   }
 
   let observedChallenge: {
@@ -537,7 +671,7 @@ function printUsage() {
   console.log(
     `  ${CLI_NAME} demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]`,
   )
-  console.log(`  ${CLI_NAME} login [--endpoint <url>] [--daemon-url <url>]`)
+  console.log(`  ${CLI_NAME} login [--endpoint <url>] [--daemon-url <url>] [--supabase-email <email>] [--supabase-password <password>]`)
   console.log(`  ${CLI_NAME} daemon stop [--daemon-url <url>] [--wait <ms>]`)
   console.log(`  ${CLI_NAME} logout [--daemon-url <url>]`)
   console.log(`  ${CLI_NAME} profile list|show|set|use …`)
@@ -554,7 +688,7 @@ function buildCli() {
         `  ${CLI_NAME} sync [--remote <name>]\n` +
         `  ${CLI_NAME} org list|create|members …\n` +
         `  ${CLI_NAME} demo-seed [--remote-url <url>] [--remote <name>] [--branch <branch>] [--skip-sync] [--keep-repo] [--template-url <url>] [--no-template]\n` +
-        `  ${CLI_NAME} login [--endpoint <url>] [--daemon-url <url>]\n` +
+        `  ${CLI_NAME} login [--endpoint <url>] [--daemon-url <url>] [--supabase-email <email>] [--supabase-password <password>]\n` +
         `  ${CLI_NAME} daemon stop [--daemon-url <url>] [--wait <ms>]\n` +
         `  ${CLI_NAME} logout [--daemon-url <url>]\n`,
     )
@@ -1067,6 +1201,22 @@ function buildCli() {
             type: 'string',
             describe: 'Legacy credential cache path',
           })
+          .option('supabase-email', {
+            type: 'string',
+            describe: 'Supabase login email (non-interactive).',
+          })
+          .option('supabase-password', {
+            type: 'string',
+            describe: 'Supabase login password (non-interactive).',
+          })
+          .option('supabase-url', {
+            type: 'string',
+            describe: 'Supabase URL override for password login (optional).',
+          })
+          .option('supabase-anon-key', {
+            type: 'string',
+            describe: 'Supabase anon key override for password login (optional).',
+          })
           .option('daemon-url', {
             type: 'string',
             describe: 'PowerSync daemon base URL',
@@ -1076,6 +1226,10 @@ function buildCli() {
           endpoint: argv.endpoint as string | undefined,
           session: argv.session as string | undefined,
           daemonUrl: argv['daemon-url'] as string | undefined,
+          supabaseEmail: argv['supabase-email'] as string | undefined,
+          supabasePassword: argv['supabase-password'] as string | undefined,
+          supabaseUrl: argv['supabase-url'] as string | undefined,
+          supabaseAnonKey: argv['supabase-anon-key'] as string | undefined,
         })
       },
     )
