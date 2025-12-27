@@ -1,6 +1,6 @@
 {
   "name": "@powersync-community/powergit-daemon",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"

@@ -1,5 +1,15 @@
 # @powersync-community/powergit
 
+## 1.2.5
+
+### Patch Changes
+
+- Refactoring
+- Updated dependencies
+  - @powersync-community/powergit-daemon@1.2.5
+  - @powersync-community/powergit-remote-helper@1.2.5
+  - @powersync-community/powergit-core@1.2.5
+
 ## 1.2.4
 
 ### Patch Changes

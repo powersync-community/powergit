@@ -1,5 +1,11 @@
 # @powersync-community/powergit-core
 
+## 1.2.5
+
+### Patch Changes
+
+- Refactoring
+
 ## 1.2.4
 
 ### Patch Changes
