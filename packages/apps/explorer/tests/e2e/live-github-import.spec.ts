@@ -30,18 +30,33 @@ function slugify(value: string): string {
     .toLowerCase()
 }
 
+function normalizeGithubImportOrgId(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return 'gh-organisation'
+  const lower = trimmed.toLowerCase()
+  if (lower.startsWith('gh-') || lower.startsWith('github-')) {
+    return slugify(trimmed)
+  }
+  return `gh-${slugify(trimmed)}`
+}
+
 function buildImportPayload(repoUrl: string): { orgId: string; repoId: string } | null {
   const url = repoUrl.trim()
   if (!url) return null
   const parsed = parseGithubUrl(url)
-  const orgId = slugify(parsed?.owner ?? 'organisation')
+  const orgId = `gh-${slugify(parsed?.owner ?? 'organisation')}`
   const repoId = slugify(parsed?.repo ?? 'repository')
   if (!orgId || !repoId) return null
   return { orgId, repoId }
 }
 
 const derivedSlugs = buildImportPayload(GITHUB_REPO_URL)
-const POWERSYNC_ORG = slugify(process.env.POWERSYNC_E2E_ORG ?? derivedSlugs?.orgId ?? 'octocat')
+const POWERSYNC_ORG = normalizeGithubImportOrgId(process.env.POWERSYNC_E2E_ORG ?? derivedSlugs?.orgId ?? 'gh-octocat')
+const DISPLAY_ORG = POWERSYNC_ORG.startsWith('gh-')
+  ? POWERSYNC_ORG.slice(3)
+  : POWERSYNC_ORG.startsWith('github-')
+    ? POWERSYNC_ORG.slice('github-'.length)
+    : POWERSYNC_ORG
 const POWERSYNC_REPO = slugify(process.env.POWERSYNC_E2E_REPO ?? derivedSlugs?.repoId ?? 'hello-world')
 
 const REQUIRED_ENV_VARS = [
@@ -183,7 +198,7 @@ describeLive('Explorer GitHub import (live PowerSync)', () => {
 
     await waitForRepoSeed(daemonBaseUrl, POWERSYNC_ORG, POWERSYNC_REPO, liveTimeoutMs)
 
-    const repoItem = page.locator('li').filter({ hasText: POWERSYNC_ORG }).filter({ hasText: POWERSYNC_REPO })
+    const repoItem = page.locator('li').filter({ hasText: DISPLAY_ORG }).filter({ hasText: POWERSYNC_REPO })
     await expect(repoItem).toBeVisible({ timeout: liveTimeoutMs })
 
     const expectedHref = `/org/${encodeURIComponent(POWERSYNC_ORG)}/repo/${encodeURIComponent(POWERSYNC_REPO)}/files`

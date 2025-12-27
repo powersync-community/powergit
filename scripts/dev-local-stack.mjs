@@ -356,6 +356,30 @@ async function runCommand(cmd, args, options = {}) {
   })
 }
 
+async function ensureSupabaseStarted() {
+  const maxAttempts = Number.parseInt(process.env.SUPABASE_START_MAX_ATTEMPTS ?? '5', 10)
+  let lastError = null
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await runCommand(SUPABASE_BIN, [...SUPABASE_WORKDIR_ARGS, 'start', '--ignore-health-check'])
+      return
+    } catch (error) {
+      lastError = error
+      const statusEnv = await supabaseStatusEnv()
+      if (statusEnv && (statusEnv.API_URL || statusEnv.SUPABASE_URL)) {
+        warnLog('[dev:stack] Supabase start returned a non-zero exit code, but Supabase status is available; continuing.')
+        return
+      }
+      if (attempt < maxAttempts) {
+        const waitMs = Math.min(1000 * attempt, 5000)
+        warnLog(`[dev:stack] Supabase not ready yet (attempt ${attempt}/${maxAttempts}). Retrying in ${waitMs}ms...`)
+        await delay(waitMs)
+      }
+    }
+  }
+  throw lastError ?? new Error('Supabase failed to start.')
+}
+
 async function stopDaemonViaCli() {
   const daemonUrl = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
   const args = [
@@ -633,6 +657,16 @@ async function ensureSupabaseAuthUser(env) {
       } else {
         infoLog(`[dev:stack] Created Supabase auth user ${email}`)
       }
+    } else {
+      const { error: updateError } = await supabase.auth.admin.updateUserById(existing.id, {
+        password,
+        email_confirm: true,
+      })
+      if (updateError) {
+        warnLog('[dev:stack] Failed to update Supabase auth user password', updateError.message ?? updateError)
+      } else {
+        infoLog(`[dev:stack] Updated Supabase auth user password for ${email}`)
+      }
     }
 
     return { email, password }
@@ -816,7 +850,7 @@ async function applySupabaseSchema(env) {
 }
 
 async function startStack() {
-  await runCommand(SUPABASE_BIN, [...SUPABASE_WORKDIR_ARGS, 'start', '--ignore-health-check'])
+  await ensureSupabaseStarted()
   const statusEnv = await supabaseStatusEnv()
   const env = buildStackEnv(statusEnv)
 

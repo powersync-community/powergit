@@ -370,7 +370,8 @@ function applyProfileEnvironment(): void {
     strict: Boolean(profileOverride),
   })
   for (const [key, value] of Object.entries(profileResult.combinedEnv)) {
-    if (!(key in process.env)) {
+    const current = process.env[key]
+    if (!current || current.trim().length === 0) {
       process.env[key] = value
     }
   }
@@ -414,16 +415,13 @@ test.describe('PowerSync dev stack (live)', () => {
   test('ensure stack is running', async () => {
     test.setTimeout(STACK_START_TIMEOUT_MS)
     applyProfileEnvironment()
-    await ensureDaemonRunning(process.env.STACK_PROFILE ?? 'local-dev')
-    await loginDaemonIfNeeded()
 
-    if (!shouldManageLocalStack()) {
-      return
-    }
-
-    if (!(await isStackRunning())) {
+    if (shouldManageLocalStack() && !(await isStackRunning())) {
       runCommand(START_COMMAND[0]!, START_COMMAND.slice(1), 'start dev stack')
       await waitForStackReady(STACK_START_TIMEOUT_MS)
     }
+
+    await ensureDaemonRunning(process.env.STACK_PROFILE ?? 'local-dev')
+    await loginDaemonIfNeeded()
   })
 })

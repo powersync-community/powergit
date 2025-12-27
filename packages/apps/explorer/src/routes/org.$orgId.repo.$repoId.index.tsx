@@ -13,7 +13,7 @@ export const Route = createFileRoute('/org/$orgId/repo/$repoId/' as any)({
 })
 
 function RepoOverview() {
-  const { orgId, repoId } = Route.useParams()
+  const { orgId, repoId } = Route.useParams() as { orgId: string; repoId: string }
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const isGithubMirror = orgId.startsWith('gh-') && orgId.length > 3

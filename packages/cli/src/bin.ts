@@ -1171,12 +1171,14 @@ function buildCli() {
             type: 'string',
             describe: 'Git URL to clone as demo seed content (defaults to the PowerSync chat example)',
           })
-          .option('no-template', {
+          .option('template', {
             type: 'boolean',
-            describe: 'Skip cloning the default template and generate a minimal sample repository instead',
-            default: false,
+            describe: 'Clone the default template repository (use --no-template to generate a minimal repo instead).',
+            default: true,
           }),
       async (argv) => {
+        const wantsTemplate =
+          typeof argv.template === 'boolean' ? argv.template : true
         await runDemoSeedCommand({
           remoteUrl: (argv['remote-url'] as string | undefined) ?? (argv.url as string | undefined) ?? null,
           remoteName: (argv.remote as string | undefined) ?? null,
@@ -1184,7 +1186,7 @@ function buildCli() {
           skipSync: argv['skip-sync'] as boolean | undefined,
           keepRepo: argv['keep-repo'] as boolean | undefined,
           repoDir: (argv['repo-dir'] as string | undefined) ?? null,
-          templateRepoUrl: argv['no-template'] ? null : ((argv['template-url'] as string | undefined) ?? undefined),
+          templateRepoUrl: wantsTemplate ? ((argv['template-url'] as string | undefined) ?? undefined) : null,
         })
       },
     )

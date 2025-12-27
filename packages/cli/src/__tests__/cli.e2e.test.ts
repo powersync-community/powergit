@@ -30,6 +30,25 @@ function buildCliArgs(args: string[]): string[] {
   return ['--import', tsxImport, binPath, ...args]
 }
 
+let powergitHomeDir: string | null = null
+const priorPowergitHome = process.env.POWERGIT_HOME
+
+beforeAll(async () => {
+  powergitHomeDir = await mkdtemp(join(tmpdir(), 'powergit-test-home-'))
+  process.env.POWERGIT_HOME = powergitHomeDir
+})
+
+afterAll(async () => {
+  if (powergitHomeDir) {
+    await rm(powergitHomeDir, { recursive: true, force: true }).catch(() => undefined)
+  }
+  if (priorPowergitHome === undefined) {
+    delete process.env.POWERGIT_HOME
+  } else {
+    process.env.POWERGIT_HOME = priorPowergitHome
+  }
+})
+
 const requiredEnvVars = [
   'POWERGIT_TEST_REMOTE_URL',
   'POWERGIT_TEST_SUPABASE_URL',
@@ -109,6 +128,9 @@ type LiveStackConfig = {
 let liveStackConfig!: LiveStackConfig
 let startedLocalStack = false
 let skipLiveSuite = false
+let priorLiveEnv:
+  | { STACK_PROFILE?: string; POWERSYNC_TEST_SKIP_DAEMON?: string; POWERSYNC_DAEMON_START_COMMAND?: string }
+  | null = null
 
 async function runScript(scriptRelativePath: string, extraEnv: NodeJS.ProcessEnv = {}) {
   const scriptPath = resolve(repoRoot, scriptRelativePath)
@@ -206,10 +228,6 @@ describe('powergit CLI e2e', () => {
 
   afterAll(async () => {
     await clearStoredCredentials().catch(() => undefined)
-    if (startedLocalStack) {
-      await stopStack({ force: true }).catch(() => undefined)
-      startedLocalStack = false
-    }
   })
 
   async function runCli(args: string[], env: NodeJS.ProcessEnv = {}) {
@@ -293,6 +311,15 @@ describeLive('powergit sync against live PowerSync stack', () => {
     }
 
     if (shouldAttemptLocalStack) {
+      priorLiveEnv = {
+        STACK_PROFILE: process.env.STACK_PROFILE,
+        POWERSYNC_TEST_SKIP_DAEMON: process.env.POWERSYNC_TEST_SKIP_DAEMON,
+        POWERSYNC_DAEMON_START_COMMAND: process.env.POWERSYNC_DAEMON_START_COMMAND,
+      }
+      process.env.STACK_PROFILE = 'local-dev'
+      process.env.POWERSYNC_TEST_SKIP_DAEMON = '1'
+      process.env.POWERSYNC_DAEMON_START_COMMAND =
+        process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm --filter @powersync-community/powergit-daemon start'
       await startStack({ skipDemoSeed: true })
       startedLocalStack = true
     }
@@ -410,6 +437,7 @@ describeLive('powergit sync against live PowerSync stack', () => {
           cwd: repoRoot,
           env: {
             ...process.env,
+            ...(startedLocalStack ? { STACK_PROFILE: 'local-dev' } : {}),
             SUPABASE_URL: liveStackConfig.supabaseUrl,
             SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
             SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
@@ -440,6 +468,19 @@ describeLive('powergit sync against live PowerSync stack', () => {
 
   afterAll(async () => {
     await clearStoredCredentials().catch(() => undefined)
+    if (startedLocalStack) {
+      await stopStack({ force: true }).catch(() => undefined)
+      startedLocalStack = false
+    }
+    if (priorLiveEnv) {
+      if (priorLiveEnv.STACK_PROFILE === undefined) delete process.env.STACK_PROFILE
+      else process.env.STACK_PROFILE = priorLiveEnv.STACK_PROFILE
+      if (priorLiveEnv.POWERSYNC_TEST_SKIP_DAEMON === undefined) delete process.env.POWERSYNC_TEST_SKIP_DAEMON
+      else process.env.POWERSYNC_TEST_SKIP_DAEMON = priorLiveEnv.POWERSYNC_TEST_SKIP_DAEMON
+      if (priorLiveEnv.POWERSYNC_DAEMON_START_COMMAND === undefined) delete process.env.POWERSYNC_DAEMON_START_COMMAND
+      else process.env.POWERSYNC_DAEMON_START_COMMAND = priorLiveEnv.POWERSYNC_DAEMON_START_COMMAND
+      priorLiveEnv = null
+    }
   })
 
   async function runCli(args: string[], env: NodeJS.ProcessEnv = {}) {
@@ -450,6 +491,7 @@ describeLive('powergit sync against live PowerSync stack', () => {
         cwd: repoDir,
         env: {
           ...process.env,
+          ...(startedLocalStack ? { STACK_PROFILE: 'local-dev' } : {}),
           SUPABASE_URL: liveStackConfig.supabaseUrl,
           SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
           SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
@@ -531,6 +573,7 @@ describeLive('powergit sync against live PowerSync stack', () => {
         cwd: targetDir,
         env: {
           ...process.env,
+          ...(startedLocalStack ? { STACK_PROFILE: 'local-dev' } : {}),
           SUPABASE_URL: liveStackConfig.supabaseUrl,
           SUPABASE_EMAIL: liveStackConfig.supabaseEmail,
           SUPABASE_PASSWORD: liveStackConfig.supabasePassword,
@@ -579,7 +622,32 @@ describeLive('powergit sync against live PowerSync stack', () => {
     if (!payload || !Array.isArray(payload.streams)) {
       return []
     }
-    return payload.streams.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    const result: string[] = []
+    for (const entry of payload.streams) {
+      if (typeof entry === 'string') {
+        const trimmed = entry.trim()
+        if (trimmed) {
+          result.push(trimmed)
+        }
+        continue
+      }
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        continue
+      }
+      const candidate = entry as { id?: unknown; stream?: unknown; parameters?: unknown; params?: unknown }
+      const idSource = typeof candidate.id === 'string' ? candidate.id : typeof candidate.stream === 'string' ? candidate.stream : ''
+      const id = idSource.trim()
+      if (!id) continue
+      const parametersSource = candidate.parameters ?? candidate.params ?? null
+      const parameters =
+        parametersSource && typeof parametersSource === 'object' && !Array.isArray(parametersSource)
+          ? Object.fromEntries(
+              Object.entries(parametersSource as Record<string, unknown>).map(([key, value]) => [key, String(value ?? '')]),
+            )
+          : {}
+      result.push(formatStreamKey({ id, parameters }))
+    }
+    return result
   }
 
   it('hydrates refs, commits, and file changes into SQLite', async () => {

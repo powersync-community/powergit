@@ -27,7 +27,29 @@ const REMOTE_HELPER_FILENAMES = process.platform === 'win32'
 const REMOTE_HELPER_NODE = process.env.POWERSYNC_REMOTE_HELPER_NODE ?? process.execPath;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const WORKSPACE_ROOT = resolve(__dirname, '../../..');
+
+function resolveWorkspaceRoot(startDir: string): string {
+  const explicit = process.env.PNPM_WORKSPACE_DIR;
+  if (explicit && explicit.trim().length > 0) {
+    return resolve(explicit.trim());
+  }
+
+  let cursor = startDir;
+  while (true) {
+    if (existsSync(join(cursor, 'pnpm-workspace.yaml'))) {
+      return cursor;
+    }
+    const parent = dirname(cursor);
+    if (parent === cursor) {
+      break;
+    }
+    cursor = parent;
+  }
+
+  return resolve(startDir, '../../..');
+}
+
+const WORKSPACE_ROOT = resolveWorkspaceRoot(__dirname);
 const WORKSPACE_BIN_DIR = resolve(WORKSPACE_ROOT, 'node_modules', '.bin');
 const SHARED_CORE_DIST_ENTRY = resolve(WORKSPACE_ROOT, 'packages', 'shared', 'dist', 'index.js');
 const REMOTE_HELPER_DIST_ENTRY = resolve(

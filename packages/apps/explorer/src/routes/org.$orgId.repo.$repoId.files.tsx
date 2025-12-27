@@ -1672,7 +1672,7 @@ function DesktopView({ treeProps, viewerProps, isDark }: ExplorerViewProps) {
         onPointerDown={beginResize}
         onKeyDown={handleSeparatorKeyDown}
         onDoubleClick={() => setTreeWidth(DESKTOP_TREE_DEFAULT_WIDTH)}
-        className={`group flex w-3 shrink-0 cursor-col-resize items-center justify-center self-stretch rounded-full border transition focus-visible:outline-none ${separatorButtonClass}`}
+        className={`group flex w-3 shrink-0 !cursor-col-resize items-center justify-center self-stretch rounded-full border transition focus-visible:outline-none ${separatorButtonClass}`}
       >
         <span aria-hidden="true" className={`h-24 w-1 rounded-full transition-all ${separatorIndicatorClass}`} />
       </button>

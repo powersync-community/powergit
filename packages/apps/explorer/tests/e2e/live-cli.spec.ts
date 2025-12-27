@@ -271,7 +271,7 @@ describeLive('CLI-seeded repo (live PowerSync)', () => {
 
     await waitForDaemonReady(daemonBaseUrl, WAIT_TIMEOUT_MS)
 
-    runCliCommand(['demo-seed'], 'seed demo repository')
+    runCliCommand(['demo-seed', '--no-template'], 'seed demo repository')
     await waitForRepoSeed(daemonBaseUrl, orgId, repoId, WAIT_TIMEOUT_MS)
 
     expectedBranches = await fetchDaemonBranches(daemonBaseUrl, orgId, repoId)
