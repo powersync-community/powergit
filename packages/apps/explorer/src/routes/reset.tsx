@@ -29,27 +29,41 @@ export function ResetPasswordRoute() {
 
   if (status === 'loading') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100 text-slate-500">
-        <span className="text-sm font-medium">Preparing reset form…</span>
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-50 text-slate-900">
+        <div className="mx-auto flex min-h-screen w-full items-center justify-center px-4 py-12 sm:px-6">
+          <section className="w-full max-w-md">
+            <div className="rounded-3xl bg-white/90 px-8 py-10 text-center shadow-2xl shadow-slate-900/10 ring-1 ring-slate-200/70 backdrop-blur">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Powergit</p>
+              <p className="mt-4 text-sm text-slate-500">Preparing reset form…</p>
+            </div>
+          </section>
+        </div>
       </div>
     )
   }
 
   if (!completed && status === 'unauthenticated') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 text-center">
-        <div className="max-w-md space-y-3 rounded-2xl border border-slate-200 bg-white px-6 py-8 shadow">
-          <h2 className="text-lg font-semibold text-slate-900">Password reset link expired</h2>
-          <p className="text-sm text-slate-600">Request a new reset email before trying again.</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-50 text-slate-900">
+        <div className="mx-auto flex min-h-screen w-full items-center justify-center px-4 py-12 sm:px-6">
+          <section className="w-full max-w-md">
+            <div className="rounded-3xl bg-white/90 px-8 py-10 text-center shadow-2xl shadow-slate-900/10 ring-1 ring-slate-200/70 backdrop-blur">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Powergit</p>
+              <h2 className="mt-4 text-lg font-semibold text-slate-900">Password reset link expired</h2>
+              <p className="mt-2 text-sm text-slate-500">Request a new reset email before trying again.</p>
+              <div className="mt-6">
           <button
             type="button"
-            className="btn w-full"
+            className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm shadow-emerald-600/25 transition hover:bg-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-200/60"
             onClick={() => {
               void navigate({ to: '/auth' })
             }}
           >
             Return to sign in
           </button>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     )
