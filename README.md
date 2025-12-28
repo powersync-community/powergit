@@ -19,43 +19,33 @@ pnpm dev:prod
 
 > `pnpm dev:prod` uses `.env.prod` (remote Supabase/PowerSync). Use `pnpm dev:stack` if you want a local Docker-backed stack.
 
-## Docs
-
-- Supabase + PowerSync setup: `docs/supabase.md`
-- Profiles (local-dev / prod / staging): `docs/profiles/remote.example.md`
-
-## Daemonless GitHub Actions flow (prod-mode)
-
-If you want to trigger the GitHub Actions workflow instead of the local daemon:
-
-1. Create `supabase/.env` (gitignored) and set `TOKEN`, `GITHUB_REPO_OWNER`, and `GITHUB_REPO_NAME` (you can start from `.env.github.example`).
-2. Start the local stack: `pnpm dev:stack:up` (Edge Functions are available at `http://127.0.0.1:55431/functions/v1`).
-3. Run the explorer in prod mode: `pnpm dev:prod` (uses the Edge Function dispatcher, not the daemon).
-4. Paste a GitHub repo URL in the UI; this calls the `github-import` Edge Function, which dispatches the `clone-and-push.yml` workflow with your token. Watch the run in GitHub Actions to confirm it fired.
-
 ## Demos
 
 ### Create a repo from the CLI
 
-![create-repo-console-short.mp4](create-repo-console-short.mp4)
+https://github.com/user-attachments/assets/e05f20bb-78f5-4a7b-acc9-f662a9ac8a66
+
 
 Create a repo and push to it using the `powergit::` remote from your terminal.
 
 ### Observe the created repo in Explorer
 
-![observing-created-repo.mp4](observing-created-repo.mp4)
+https://github.com/user-attachments/assets/67746738-34cc-4275-b0ae-39985af9b907
 
 Browse branches, files, and history once the repo has been mirrored into PowerSync.
 
-### Clone serde
+### Explore a Github repository
 
-![clone-serde-short.mp4](https://raw.githubusercontent.com/powersync-community/powergit/main/clone-serde-short.mp4)
+https://github.com/user-attachments/assets/5052ef0e-14f6-4428-b621-286e7e28bbd1
+
 
 Clone a repository via `git clone powergit::/org/repo` and let the helper stream packs locally.
 
 ### Create an org
 
-![creating-org.mp4](creating-org.mp4)
+
+https://github.com/user-attachments/assets/a11c560a-fd57-4a54-b6c6-3b51c5e1206b
+
 
 Create organizations (and later manage members/repos) directly from the Explorer UI.
 
