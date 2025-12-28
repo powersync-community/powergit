@@ -37,7 +37,7 @@ If you want to trigger the GitHub Actions workflow instead of the local daemon:
 
 ### Create a repo from the CLI
 
-create-repo-console-short.mp4
+![create-repo-console-short.mp4](create-repo-console-short.mp4)
 
 Create a repo and push to it using the `powergit::` remote from your terminal.
 
@@ -49,7 +49,7 @@ Browse branches, files, and history once the repo has been mirrored into PowerSy
 
 ### Clone serde
 
-![clone-serde-short.mp4](clone-serde-short.mp4)
+![clone-serde-short.mp4](https://github.com/powersync-community/powergit/blob/07756767587b326c08b4c50c75639cdeb8f08fee/clone-serde-short.mp4)
 
 Clone a repository via `git clone powergit::/org/repo` and let the helper stream packs locally.
 
