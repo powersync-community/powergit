@@ -1,72 +1,85 @@
 # Powergit
 
-Powergit is a local-first Git explorer that mirrors repositories into PowerSync so you can browse branches, files, and commit history through a fast, reactive UI—no external network calls required once synced.
+Powergit is a local-first Git explorer that mirrors repositories into Supabase (Postgres + Storage) and streams metadata to the UI via PowerSync, so you can browse branches, files, and commit history from a fast local replica.
 
-## Run Locally
+## Quick start (local dev)
 
 ```bash
 pnpm install
-pnpm dev:stack:up
+pnpm dev:stack
+```
+
+In another terminal:
+
+```bash
 pnpm dev
 ```
 
-## Run prod locally
+## Quick start (prod-like)
 
 ```bash
 pnpm install
-pnpm dev:prod   
+pnpm dev:prod
 ```
 
-> `pnpm dev:prod` uses `.env.prod` (remote Supabase/PowerSync). Use `pnpm dev:stack` if you want a local Docker-backed stack.
+> `pnpm dev:prod` uses `.env.prod` (remote Supabase/PowerSync). Use `pnpm dev` + `pnpm dev:stack` for a local Docker-backed stack.
 
 ## Demos
 
-### Create a repo from the CLI
+### 1) Create a repo from the CLI
 
 https://github.com/user-attachments/assets/e05f20bb-78f5-4a7b-acc9-f662a9ac8a66
 
-
 Create a repo and push to it using the `powergit::` remote from your terminal.
 
-### Observe the created repo in Explorer
+### 2) Observe the created repo in Explorer
 
 https://github.com/user-attachments/assets/67746738-34cc-4275-b0ae-39985af9b907
 
 Browse branches, files, and history once the repo has been mirrored into PowerSync.
 
-### Explore a Github repository
+### 3) Clone a GitHub repo (mirror into PowerSync)
 
 https://github.com/user-attachments/assets/5052ef0e-14f6-4428-b621-286e7e28bbd1
 
-
 Clone a repository via `git clone powergit::/org/repo` and let the helper stream packs locally.
 
-### Create an org
-
+### 4) Create an org
 
 https://github.com/user-attachments/assets/a11c560a-fd57-4a54-b6c6-3b51c5e1206b
-
 
 Create organizations (and later manage members/repos) directly from the Explorer UI.
 
 ## How it works
-In this repo we have built a custom git remote protocol that allows us to push git data into a Supabase database. We can later use PowerSync to see the data in the frontend. We use the powersync-tanstack-db package to query the database and show it reactively using the `@tanstack/powersync-db-collection` package.
+Powergit has two parts:
+
+- A Git remote helper (`git-remote-powergit`) that streams Git packs + metadata into Supabase when you push to a `powergit::...` remote.
+- An Explorer UI that subscribes to PowerSync streams and queries the local replica with TanStack DB (fast + offline after the first sync).
+
+### Import / clone flows
+
+#### Local daemon (dev/offline)
+
+1. Explorer calls your local daemon (`VITE_POWERSYNC_USE_DAEMON=true`) with a GitHub URL.
+2. The daemon clones from GitHub, then pushes to `powergit::/<org>/<repo>` (the helper uploads packs to Storage and writes metadata to Postgres).
+3. PowerSync replicates the tables to the browser; the UI becomes fully local for browsing.
+
+#### Supabase Edge Function → GitHub Actions (hosted/prod)
+
+1. Explorer calls the Supabase Edge Function (`VITE_POWERSYNC_ACTIONS_IMPORT=true`).
+2. The function dispatches `.github/workflows/clone-and-push.yml`.
+3. GitHub Actions runs the Powergit daemon on the runner, clones the target repo, and pushes to `powergit::/<org>/<repo>`.
+4. Explorer follows progress via `import_jobs` (replicated by PowerSync) and can link to the Actions run.
 
 ## Why PowerSync instead of TanStack DB alone
-TanStack DB gives us a great query layer, but it does not include a sync engine or durable storage. PowerSync is the replicated store that keeps the Git metadata and pack metadata in step across the daemon and the explorer.
+TanStack DB is the query layer. PowerSync is the sync engine + durable local replica (SQLite/IndexedDB) that makes the Explorer fast and usable offline.
 
-- Offline-first persistence: PowerSync streams `refs`, `commits`, `file_changes`, and `objects` into SQLite (daemon) and IndexedDB (browser), so TanStack DB queries stay fast and continue to work without network access.
-- Delta sync, not re-downloads: after the initial push of a large repo, only new refs/commits are streamed; the UI never has to resync the full history on each launch.
-- Shared cache across surfaces: the daemon, CLI, and browser all query the same replicated tables via `@tanstack/powersync-db-collection`, avoiding bespoke cache plumbing while honoring the Supabase/PowerSync auth model.
-- Pack handling: pack bytes stay in Supabase Storage while PowerSync ships the lightweight metadata we query. The explorer pulls packs lazily and indexes them locally, keeping PowerSync focused on the syncable metadata layer.
+- PowerSync handles incremental replication of Git metadata (`refs`, `commits`, `file_changes`, `objects`).
+- The Explorer queries the same replica across sessions (no refetching full history on each load).
+- Pack bytes live in Supabase Storage and are downloaded/indexed lazily for file viewing.
 
-## Architecture Overview
-At a high level the happy path looks like this:
+## Docs
 
-1. **Import request (UI → daemon).** A user pastes a GitHub URL into the explorer. The frontend posts that payload to the local daemon. The daemon clones the repo, configures the custom `powergit::` remote, fetches every ref, and pushes the data into Supabase via our remote-helper.
-2. **Persist metadata + packs.** During `git push --mirror`, the daemon writes refs/commits/file_changes rows into Supabase tables and uploads each pack file to the Supabase Storage bucket (`git-packs`). Only metadata lands in `public.objects`; the raw pack bytes live in storage.
-3. **PowerSync replication.** The PowerSync service streams those tables down to every connected explorer instance. The browser uses `@powersync/web` + TanStack DB collections to reactively query refs, commits, file changes, and the lightweight pack metadata.
-4. **File tree & viewer.** When the explorer receives the first pack row for a repo, `gitStore.indexPacks` downloads the pack via the daemon’s signed URL endpoint, indexes it inside the browser’s virtual FS, and marks the referenced commit as “ready.” The file tree then renders real Git entries while the viewer can read blobs directly from the locally indexed pack.
-5. **Commit explorer.** The commit view queries the replicated commits/refs table via `@tanstack/powersync-db-collection` and renders filters, diffs, and history without any additional backend calls.
-
-This flow means that after the initial clone/push, all navigation (branch switching, file viewing, commit diffing) happens entirely locally with the data mirrored inside PowerSync.
+- `docs/supabase.md` – local stack, Edge Function + Actions import, production checklist.
+- `docs/profiles/remote.example.md` – profile setup and remote URL conventions.
+- `packages/cli/README.md` – CLI usage (`powergit login`, `powergit remote add`, etc.).

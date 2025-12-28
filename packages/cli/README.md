@@ -1,6 +1,6 @@
 # Powergit CLI (`powergit`)
 
-`powergit` ships the `git-remote-powergit` remote helper. Once a `powergit::...` remote is added, you use normal Git commands (`git push`, `git fetch`) and the helper streams data to PowerSync. The `powergit` CLI itself is only needed for setup (login/profile management) and optional diagnostics like `powergit sync`.
+`powergit` ships `git-remote-powergit` (a Git remote helper) plus a small CLI for login/profile management. Once a `powergit::...` remote is configured, you use normal Git commands (`git push`, `git fetch`) and the helper streams data into Powergit’s Supabase/PowerSync stack.
 
 ## Quick start (hosted PowerSync)
 
@@ -9,6 +9,12 @@
    ```bash
    npm install -g @powersync-community/powergit
    ```
+
+   This provides:
+
+   - `powergit`
+   - `powergit-daemon`
+   - `git-remote-powergit` (Git remote helper)
 
 2. From your Git repo, add a PowerSync remote (Git-first flow):
 
@@ -31,22 +37,7 @@
    git fetch powersync
    ```
 
-## Install
-
-Grab the published package from npm (replace `npm` with `pnpm` or `yarn` if you prefer another package manager):
-
-```bash
-npm install -g @powersync-community/powergit
-```
-
-This global install provides:
-
-- `powergit`
-- `powergit-daemon`
-- `git-remote-powergit` (Git remote helper)
-
-> **Heads up**
-> For `git push`/`git fetch` to work with `powergit::...` remotes, Git must find `git-remote-powergit` on your `PATH` (global install, or local install with `node_modules/.bin` on your `PATH`). The `powergit` CLI is optional after that point.
+> For `git push`/`git fetch` to work with `powergit::...` remotes, Git must find `git-remote-powergit` on your `PATH` (global install, or local install with `node_modules/.bin` on your `PATH`).
 
 ## Point a repo at PowerSync
 
@@ -109,7 +100,7 @@ powergit login
 
 By default the daemon serves the device-login page locally at `http://127.0.0.1:5030/ui/auth`.
 
-If you don’t see an `Open:` URL, set `daemon.deviceLoginUrl` in your profile or export `POWERSYNC_DAEMON_DEVICE_URL` (useful when the daemon runs somewhere other than localhost).
+If you don’t see an `Open:` URL, set `daemon.deviceLoginUrl` in your profile or export `POWERGIT_DAEMON_DEVICE_URL` (fallback `POWERSYNC_DAEMON_DEVICE_URL`) — useful when the daemon runs somewhere other than localhost.
 
 If the browser can’t POST back to your local daemon (e.g. `net::ERR_BLOCKED_BY_CLIENT`), try an incognito window or disable ad blockers/privacy shields for the device login page.
 
@@ -156,4 +147,4 @@ Helpful scripts:
 - `pnpm --filter @powersync-community/powergit test` – Vitest suite (unit + e2e)
 - `pnpm --filter @powersync-community/powergit run build` – transpile to `dist/` and ensure the binary stays executable
 
-Whenever you expand the CLI with new commands, remember to document them here and add coverage under `packages/cli/tests/`.
+Whenever you expand the CLI with new commands, remember to document them here and add coverage under `packages/cli/src/__tests__/`.
