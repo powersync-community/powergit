@@ -1,5 +1,11 @@
 # @powersync-community/powergit-core
 
+## 1.2.6
+
+### Patch Changes
+
+- Documentation and variable updates from Powersync to Powergit
+
 ## 1.2.5
 
 ### Patch Changes

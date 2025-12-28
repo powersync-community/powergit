@@ -1,5 +1,15 @@
 # @powersync-community/powergit
 
+## 1.2.6
+
+### Patch Changes
+
+- Documentation and variable updates from Powersync to Powergit
+- Updated dependencies
+  - @powersync-community/powergit-daemon@1.2.6
+  - @powersync-community/powergit-remote-helper@1.2.6
+  - @powersync-community/powergit-core@1.2.6
+
 ## 1.2.5
 
 ### Patch Changes
