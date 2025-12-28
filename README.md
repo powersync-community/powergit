@@ -49,7 +49,7 @@ Browse branches, files, and history once the repo has been mirrored into PowerSy
 
 ### Clone serde
 
-![clone-serde-short.mp4](https://github.com/powersync-community/powergit/blob/07756767587b326c08b4c50c75639cdeb8f08fee/clone-serde-short.mp4)
+![clone-serde-short.mp4](https://raw.githubusercontent.com/powersync-community/powergit/main/clone-serde-short.mp4)
 
 Clone a repository via `git clone powergit::/org/repo` and let the helper stream packs locally.
 
