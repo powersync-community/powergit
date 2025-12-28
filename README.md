@@ -37,7 +37,7 @@ If you want to trigger the GitHub Actions workflow instead of the local daemon:
 
 ### Create a repo from the CLI
 
-![create-repo-console-short.mp4](create-repo-console-short.mp4)
+create-repo-console-short.mp4
 
 Create a repo and push to it using the `powergit::` remote from your terminal.
 
