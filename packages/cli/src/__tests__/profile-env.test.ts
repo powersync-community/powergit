@@ -88,6 +88,7 @@ describe('loadProfileEnvironment', () => {
     expect(result.stackEnvPath).toBe(stackEnvFile)
     expect(result.profileEnv).toMatchObject({
       POWERSYNC_URL: 'https://powersync.example.com',
+      POWERGIT_DAEMON_URL: 'https://daemon.example.com',
       POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
       SUPABASE_URL: 'https://supabase.example.com',
     })
@@ -97,6 +98,7 @@ describe('loadProfileEnvironment', () => {
     })
     expect(result.combinedEnv).toMatchObject({
       POWERSYNC_URL: 'https://powersync.example.com',
+      POWERGIT_DAEMON_URL: 'https://daemon.example.com',
       POWERSYNC_DAEMON_URL: 'https://daemon.example.com',
       SUPABASE_URL: 'https://supabase.example.com',
       SUPABASE_ANON_KEY: 'anon-key-staging',

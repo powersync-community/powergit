@@ -256,7 +256,8 @@ describeIfEnv('PowerSync daemon streaming (no UI)', () => {
     return process.env[key] ?? stackEnv?.[key];
   };
 
-  const daemonBaseUrl = () => resolveEnv('POWERSYNC_DAEMON_URL') ?? 'http://127.0.0.1:5030';
+  const daemonBaseUrl = () =>
+    resolveEnv('POWERGIT_DAEMON_URL') ?? resolveEnv('POWERSYNC_DAEMON_URL') ?? 'http://127.0.0.1:5030';
 
   beforeAll(async () => {
     delete process.env.POWERSYNC_DISABLE_SUPABASE_WRITER;

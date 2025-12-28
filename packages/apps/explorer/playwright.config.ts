@@ -77,6 +77,15 @@ const ensureLocalStackEnv = () => {
     }
   }
   applyCombinedEnv(profileEnv.combinedEnv)
+  if (isPlaceholder(process.env.POWERGIT_DAEMON_URL) && !isPlaceholder(process.env.POWERSYNC_DAEMON_URL)) {
+    process.env.POWERGIT_DAEMON_URL = process.env.POWERSYNC_DAEMON_URL
+  }
+  if (
+    isPlaceholder(process.env.POWERGIT_DAEMON_DEVICE_URL) &&
+    !isPlaceholder(process.env.POWERSYNC_DAEMON_DEVICE_URL)
+  ) {
+    process.env.POWERGIT_DAEMON_DEVICE_URL = process.env.POWERSYNC_DAEMON_DEVICE_URL
+  }
 
   const requiredLiveEnv = [
     'SUPABASE_URL',
@@ -85,7 +94,7 @@ const ensureLocalStackEnv = () => {
     'SUPABASE_EMAIL',
     'SUPABASE_PASSWORD',
     'POWERSYNC_URL',
-    'POWERSYNC_DAEMON_URL',
+    'POWERGIT_DAEMON_URL',
     'POWERGIT_TEST_REMOTE_URL',
   ]
   const missingLive = requiredLiveEnv.filter((name) => isPlaceholder(process.env[name]))

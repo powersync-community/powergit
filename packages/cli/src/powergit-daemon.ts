@@ -82,15 +82,19 @@ function hydrateDaemonStateEnv() {
   const profileName = resolveProfileNameFromEnv()
   const profileKey = sanitizeProfileKey(profileName)
   const baseDir = resolvePath(resolvePowergitHome(), 'daemon', profileKey)
-  if (!process.env.POWERSYNC_DAEMON_DB_PATH || process.env.POWERSYNC_DAEMON_DB_PATH.trim().length === 0) {
-    process.env.POWERSYNC_DAEMON_DB_PATH = resolvePath(baseDir, 'powersync-daemon.db')
-  }
-  if (
-    !process.env.POWERSYNC_DAEMON_SESSION_PATH ||
-    process.env.POWERSYNC_DAEMON_SESSION_PATH.trim().length === 0
-  ) {
-    process.env.POWERSYNC_DAEMON_SESSION_PATH = resolvePath(baseDir, 'session.json')
-  }
+  const dbPath =
+    process.env.POWERGIT_DAEMON_DB_PATH?.trim() ||
+    process.env.POWERSYNC_DAEMON_DB_PATH?.trim() ||
+    resolvePath(baseDir, 'powersync-daemon.db')
+  process.env.POWERGIT_DAEMON_DB_PATH = dbPath
+  process.env.POWERSYNC_DAEMON_DB_PATH = dbPath
+
+  const sessionPath =
+    process.env.POWERGIT_DAEMON_SESSION_PATH?.trim() ||
+    process.env.POWERSYNC_DAEMON_SESSION_PATH?.trim() ||
+    resolvePath(baseDir, 'session.json')
+  process.env.POWERGIT_DAEMON_SESSION_PATH = sessionPath
+  process.env.POWERSYNC_DAEMON_SESSION_PATH = sessionPath
 }
 
 main().catch((error) => {

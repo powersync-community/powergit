@@ -9,10 +9,20 @@ const __dirname = dirname(__filename)
 const repoRoot = resolve(__dirname, '..')
 const stackManagerScript = resolve(repoRoot, 'scripts', 'dev-local-stack.mjs')
 
-const DEFAULT_DAEMON_URL = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
-const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? 'pnpm --filter @powersync-community/powergit-daemon start'
-const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000', 10)
-const DAEMON_SHUTDOWN_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_SHUTDOWN_TIMEOUT_MS ?? '3000', 10)
+const DEFAULT_DAEMON_URL =
+  process.env.POWERGIT_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
+const DAEMON_START_COMMAND =
+  process.env.POWERGIT_DAEMON_START_COMMAND ??
+  process.env.POWERSYNC_DAEMON_START_COMMAND ??
+  'pnpm --filter @powersync-community/powergit-daemon start'
+const DAEMON_START_TIMEOUT_MS = Number.parseInt(
+  process.env.POWERGIT_DAEMON_START_TIMEOUT_MS ?? process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000',
+  10,
+)
+const DAEMON_SHUTDOWN_TIMEOUT_MS = Number.parseInt(
+  process.env.POWERGIT_DAEMON_SHUTDOWN_TIMEOUT_MS ?? process.env.POWERSYNC_DAEMON_SHUTDOWN_TIMEOUT_MS ?? '3000',
+  10,
+)
 
 let stackStarted = false
 /** @type {import('node:child_process').ChildProcess | null} */
@@ -51,7 +61,7 @@ export async function startStack(options = {}) {
     process.env[key] = value
   }
 
-  daemonUrl = process.env.POWERSYNC_DAEMON_URL ?? DEFAULT_DAEMON_URL
+  daemonUrl = process.env.POWERGIT_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_URL ?? DEFAULT_DAEMON_URL
   const skipDaemon = process.env.POWERSYNC_TEST_SKIP_DAEMON === '1'
   if (!skipDaemon) {
     await ensureDaemonRunning()
@@ -198,8 +208,11 @@ function parseExportedEnv(output) {
     }
   }
 
+  if (!env.POWERGIT_DAEMON_URL) {
+    env.POWERGIT_DAEMON_URL = env.POWERSYNC_DAEMON_URL ?? DEFAULT_DAEMON_URL
+  }
   if (!env.POWERSYNC_DAEMON_URL) {
-    env.POWERSYNC_DAEMON_URL = DEFAULT_DAEMON_URL
+    env.POWERSYNC_DAEMON_URL = env.POWERGIT_DAEMON_URL ?? DEFAULT_DAEMON_URL
   }
 
   return env

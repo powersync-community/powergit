@@ -170,6 +170,7 @@ export class GithubImportManager {
         const daemonBaseUrl = normalizeBaseUrl(this.options.daemonBaseUrl);
         await pushAllReferences(repoDir!, {
           ...process.env,
+          POWERGIT_DAEMON_URL: daemonBaseUrl,
           POWERSYNC_DAEMON_URL: daemonBaseUrl,
         });
         return 'Pushed all branches and tags to PowerSync';

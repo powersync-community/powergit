@@ -492,21 +492,24 @@ async function runLoginCommand(args: LoginCommandArgs) {
     const challenge = override ?? observedChallenge
     if (!challenge || !challenge.challengeId) return
     console.log(prefix)
-    const openUrl = (() => {
-      if (challenge.verificationUrl) {
-        return challenge.verificationUrl
-      }
-      const fallbackUrl = process.env.POWERSYNC_DAEMON_DEVICE_URL ?? process.env.POWERSYNC_EXPLORER_URL
-      if (!fallbackUrl) return null
-      const separator = fallbackUrl.includes('?') ? '&' : '?'
-      return `${fallbackUrl}${separator}device_code=${challenge.challengeId}`
-    })()
+      const openUrl = (() => {
+        if (challenge.verificationUrl) {
+          return challenge.verificationUrl
+        }
+        const fallbackUrl =
+          process.env.POWERGIT_DAEMON_DEVICE_URL ??
+          process.env.POWERSYNC_DAEMON_DEVICE_URL ??
+          process.env.POWERSYNC_EXPLORER_URL
+        if (!fallbackUrl) return null
+        const separator = fallbackUrl.includes('?') ? '&' : '?'
+        return `${fallbackUrl}${separator}device_code=${challenge.challengeId}`
+      })()
     if (openUrl) {
       console.log('   Open:')
       console.log(`   ${openUrl}`)
     } else {
       console.log('   No device login URL configured.')
-      console.log('   Set daemon.deviceLoginUrl in your profile or export POWERSYNC_DAEMON_DEVICE_URL.')
+      console.log('   Set daemon.deviceLoginUrl in your profile or export POWERGIT_DAEMON_DEVICE_URL.')
     }
     console.log('   If the page can’t reach your local daemon (e.g. net::ERR_BLOCKED_BY_CLIENT), try incognito or disable ad blockers/privacy shields.')
     console.log(`   Device code: ${challenge.challengeId}`)
@@ -616,7 +619,8 @@ async function runLogoutCommand(args: LogoutCommandArgs) {
 }
 
 async function runDaemonStopCommand(args: DaemonStopCommandArgs) {
-  const defaultDaemonUrl = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
+  const defaultDaemonUrl =
+    process.env.POWERGIT_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
   const baseUrl = normalizeDaemonBaseUrl(args.daemonUrl ?? defaultDaemonUrl)
   const responsive = await isDaemonResponsiveLocal(baseUrl)
   if (!responsive) {

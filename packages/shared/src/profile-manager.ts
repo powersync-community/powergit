@@ -188,6 +188,7 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
 
   const daemonEndpoint = profile.daemon?.endpoint ?? profile.powersync?.daemonUrl ?? undefined
   if (daemonEndpoint) {
+    result.POWERGIT_DAEMON_URL = daemonEndpoint
     result.POWERSYNC_DAEMON_URL = daemonEndpoint
   }
 
@@ -198,6 +199,7 @@ export function buildEnvFromProfile(profile: ProfileConfig): { env: Record<strin
     profile.powersync?.deviceUrl ??
     undefined
   if (daemonDeviceLoginUrl) {
+    result.POWERGIT_DAEMON_DEVICE_URL = daemonDeviceLoginUrl
     result.POWERSYNC_DAEMON_DEVICE_URL = daemonDeviceLoginUrl
     result.POWERSYNC_EXPLORER_URL = daemonDeviceLoginUrl
   }

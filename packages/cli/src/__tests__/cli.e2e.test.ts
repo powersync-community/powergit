@@ -481,7 +481,7 @@ describeLive('powergit sync against live PowerSync stack', () => {
       else process.env.POWERSYNC_DAEMON_START_COMMAND = priorLiveEnv.POWERSYNC_DAEMON_START_COMMAND
       priorLiveEnv = null
     }
-  })
+  }, 240_000)
 
   async function runCli(args: string[], env: NodeJS.ProcessEnv = {}) {
     return execFileAsync(
@@ -684,7 +684,8 @@ describeLive('powergit sync against live PowerSync stack', () => {
 
     const remoteUrl = liveStackConfig.remoteUrl
     const remoteName = liveStackConfig.remoteName
-    const daemonBaseUrl = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
+    const daemonBaseUrl =
+      process.env.POWERGIT_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
     const branchName = `cli-stream-${Date.now().toString(36)}`
     const { org, repo } = resolvePowergitRemote(remoteUrl)
     const streamTargets = buildRepoStreamTargets(org, repo)

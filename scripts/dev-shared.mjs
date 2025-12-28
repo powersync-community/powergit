@@ -114,7 +114,9 @@ export function normalizeBaseUrl(value) {
 
 export function resolveDaemonBaseUrl(env) {
   return (
+    env?.POWERGIT_DAEMON_URL ??
     env?.POWERSYNC_DAEMON_URL ??
+    process.env.POWERGIT_DAEMON_URL ??
     process.env.POWERSYNC_DAEMON_URL ??
     DEFAULT_DAEMON_URL
   );

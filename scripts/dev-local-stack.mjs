@@ -27,7 +27,8 @@ const DEFAULT_LOCAL_DB_URL = 'postgresql://postgres:postgres@127.0.0.1:55432/pos
 const DEFAULT_SUPABASE_URL = `http://127.0.0.1:${SUPABASE_PORT}`
 const DEFAULT_SUPABASE_EMAIL = process.env.POWERSYNC_STACK_SUPABASE_USER_EMAIL ?? 'powergit-service@example.com'
 const DEFAULT_SUPABASE_PASSWORD = process.env.POWERSYNC_STACK_SUPABASE_USER_PASSWORD ?? 'powergit-service-password'
-const DEFAULT_DAEMON_DEVICE_URL = process.env.POWERSYNC_DAEMON_DEVICE_URL ?? 'http://localhost:5783/auth'
+const DEFAULT_DAEMON_DEVICE_URL =
+  process.env.POWERGIT_DAEMON_DEVICE_URL ?? process.env.POWERSYNC_DAEMON_DEVICE_URL ?? 'http://localhost:5783/auth'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -381,7 +382,8 @@ async function ensureSupabaseStarted() {
 }
 
 async function stopDaemonViaCli() {
-  const daemonUrl = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
+  const daemonUrl =
+    process.env.POWERGIT_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
   const args = [
     '--filter',
     '@powersync-community/powergit',
@@ -592,11 +594,15 @@ function buildStackEnv(statusEnv) {
   const remoteUrl = `powergit::local-dev/${DEFAULT_ORG}/${DEFAULT_REPO}`
   const databaseUrl = resolvedDatabaseUrl
   const daemonDeviceLoginUrl =
+    process.env.POWERGIT_DAEMON_DEVICE_URL ??
     process.env.POWERSYNC_DAEMON_DEVICE_URL ??
+    statusEnv.POWERGIT_DAEMON_DEVICE_URL ??
     statusEnv.POWERSYNC_DAEMON_DEVICE_URL ??
     DEFAULT_DAEMON_DEVICE_URL
   const daemonEndpoint =
+    process.env.POWERGIT_DAEMON_URL ??
     process.env.POWERSYNC_DAEMON_URL ??
+    statusEnv.POWERGIT_DAEMON_URL ??
     statusEnv.POWERSYNC_DAEMON_URL ??
     'http://127.0.0.1:5030'
 
@@ -707,7 +713,9 @@ function buildExportLines(env, authUser) {
     `export POWERSYNC_DATABASE_URL=${JSON.stringify(env.powersyncDatabaseUrl)}`,
     `export POWERSYNC_STORAGE_URI=${JSON.stringify(env.powersyncStorageUri)}`,
     `export POWERSYNC_PORT=${JSON.stringify(env.powersyncPort)}`,
+    `export POWERGIT_DAEMON_URL=${JSON.stringify(env.daemonEndpoint)}`,
     `export POWERSYNC_DAEMON_URL=${JSON.stringify(env.daemonEndpoint)}`,
+    `export POWERGIT_DAEMON_DEVICE_URL=${JSON.stringify(env.daemonDeviceLoginUrl)}`,
     `export POWERSYNC_DAEMON_DEVICE_URL=${JSON.stringify(env.daemonDeviceLoginUrl)}`,
     `export POWERSYNC_DAEMON_ENDPOINT=${JSON.stringify(env.powersyncEndpoint)}`,
     `export PS_DATABASE_URL=${JSON.stringify(env.psDatabaseUrl)}`,
@@ -858,6 +866,7 @@ async function startStack() {
     POWERSYNC_DATABASE_URL: env.powersyncDatabaseUrl,
     POWERSYNC_STORAGE_URI: env.powersyncStorageUri,
     POWERSYNC_PORT: env.powersyncPort,
+    POWERGIT_DAEMON_URL: env.daemonEndpoint,
     POWERSYNC_DAEMON_URL: env.daemonEndpoint,
     POWERSYNC_DAEMON_ENDPOINT: env.powersyncEndpoint,
     SUPABASE_URL: env.supabaseUrl,
@@ -869,6 +878,7 @@ async function startStack() {
     PS_PORT: env.psPort,
     SUPABASE_JWT_SECRET: env.jwtSecret,
     SUPABASE_JWT_SECRET_B64: env.jwtSecretBase64,
+    POWERGIT_DAEMON_DEVICE_URL: env.daemonDeviceLoginUrl,
     POWERSYNC_DAEMON_DEVICE_URL: env.daemonDeviceLoginUrl,
     SUPABASE_BIN,
     DOCKER_BIN,

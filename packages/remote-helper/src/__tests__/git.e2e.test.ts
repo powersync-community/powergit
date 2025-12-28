@@ -138,7 +138,8 @@ describeIfSupabase('git push/fetch via PowerSync remote helper', () => {
 
   beforeAll(async () => {
     stackEnv = await startStack({ skipDemoSeed: true })
-    powersyncEndpoint = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
+    powersyncEndpoint =
+      process.env.POWERGIT_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
     const remoteUrl =
       process.env.POWERGIT_TEST_REMOTE_URL ??
       stackEnv?.POWERGIT_TEST_REMOTE_URL ??
@@ -155,6 +156,7 @@ describeIfSupabase('git push/fetch via PowerSync remote helper', () => {
     env = {
       ...process.env,
       PATH: `${helperDir}:${process.env.PATH ?? ''}`,
+      POWERGIT_DAEMON_URL: powersyncEndpoint,
       POWERSYNC_DAEMON_URL: powersyncEndpoint,
       NODE_PATH: [join(workspaceRoot, 'node_modules'), process.env.NODE_PATH].filter(Boolean).join(':'),
       POWERSYNC_HELPER_DEBUG_LOG: debugLogPath,
@@ -185,7 +187,7 @@ describeIfSupabase('git push/fetch via PowerSync remote helper', () => {
     await stopStack().catch(() => undefined)
     if (repoDir) await rm(repoDir, { recursive: true, force: true })
     if (cloneDir) await rm(cloneDir, { recursive: true, force: true })
-  }, 30_000)
+  }, 120_000)
 
   it('pushes commits and fetches them into a fresh repo', async () => {
     const commitSha = (await runGit(['rev-parse', 'HEAD'], repoDir, env)).stdout.trim()
@@ -227,6 +229,21 @@ describeIfSupabase('git push/fetch via PowerSync remote helper', () => {
         })
         .filter((value): value is string => Boolean(value))
     }
+
+    const unsubscribeStreams = async () => {
+      const res = await fetch(`${powersyncEndpoint}/streams`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ streams: streamTargets }),
+      }).catch(() => null)
+      return res?.ok ?? false
+    }
+
+    await unsubscribeStreams()
+    await waitFor(async () => {
+      const current = await listStreams()
+      return streamKeys.every((key) => !current.includes(key)) ? current : null
+    })
 
     const initialStreams = await listStreams()
     for (const key of streamKeys) {

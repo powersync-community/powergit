@@ -151,7 +151,7 @@ async function assertPortAvailable(host: string, port: number): Promise<void> {
     socket.setTimeout(300);
     socket.once('connect', () => {
       const friendly = new Error(
-        `[powersync-daemon] port ${port} on ${host} is already in use. Stop the existing daemon or set POWERSYNC_DAEMON_PORT to a free port.`,
+        `[powersync-daemon] port ${port} on ${host} is already in use. Stop the existing daemon or set POWERGIT_DAEMON_PORT to a free port.`,
       ) as NodeJS.ErrnoException;
       friendly.code = 'EADDRINUSE';
       fail(friendly);
@@ -294,6 +294,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   let authMetadata: Record<string, unknown> | null = null;
 
   const sessionPathOverrideCandidates = [
+    process.env.POWERGIT_DAEMON_SESSION_PATH,
     process.env.POWERSYNC_DAEMON_SESSION_PATH,
     process.env.POWERSYNC_SESSION_PATH,
   ];
@@ -374,7 +375,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   let supabaseWriter: SupabaseWriter | null = null;
 
   const deviceChallengeTtlMs = Number.parseInt(
-    process.env.POWERSYNC_DAEMON_DEVICE_CHALLENGE_TTL_MS ?? '300000',
+    process.env.POWERGIT_DAEMON_DEVICE_CHALLENGE_TTL_MS ?? process.env.POWERSYNC_DAEMON_DEVICE_CHALLENGE_TTL_MS ?? '300000',
     10,
   );
   type DeviceChallengeRecord = {
@@ -387,11 +388,14 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
   const deviceChallenges = new Map<string, DeviceChallengeRecord>();
 
   const resolveVerificationBaseUrl = () => {
-    const configured = process.env.POWERSYNC_DAEMON_DEVICE_URL ?? process.env.POWERSYNC_EXPLORER_URL;
+    const configured =
+      process.env.POWERGIT_DAEMON_DEVICE_URL ??
+      process.env.POWERSYNC_DAEMON_DEVICE_URL ??
+      process.env.POWERSYNC_EXPLORER_URL;
     if (configured && configured.trim().length > 0) {
       return configured.trim();
     }
-    // Default to the daemon-hosted device login UI. For remote daemons, set POWERSYNC_DAEMON_DEVICE_URL explicitly.
+    // Default to the daemon-hosted device login UI. For remote daemons, set POWERGIT_DAEMON_DEVICE_URL explicitly.
     return `http://127.0.0.1:${config.port}/ui/auth`;
   };
 
@@ -827,7 +831,7 @@ export async function startDaemon(options: ResolveDaemonConfigOptions = {}): Pro
       streamCount: subscriptionManager.getActiveCount(),
     }),
     authUi: {
-      enabled: (process.env.POWERSYNC_DAEMON_AUTH_UI ?? '').trim().toLowerCase() !== 'false',
+      enabled: (process.env.POWERGIT_DAEMON_AUTH_UI ?? process.env.POWERSYNC_DAEMON_AUTH_UI ?? '').trim().toLowerCase() !== 'false',
       supabaseUrl,
       supabaseAnonKey,
       title: 'Powergit Login',

@@ -13,20 +13,38 @@ import {
 } from '@powersync-community/powergit-core/node'
 
 const ZERO_SHA = '0000000000000000000000000000000000000000'
-const MAX_COMMITS_PER_UPDATE = Number.parseInt(process.env.POWERSYNC_MAX_PUSH_COMMITS ?? '256', 10)
-const DEFAULT_DAEMON_URL = process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
+const LOG_PREFIX = '[powergit]'
+const MAX_COMMITS_PER_UPDATE = Number.parseInt(
+  process.env.POWERGIT_MAX_PUSH_COMMITS ?? process.env.POWERSYNC_MAX_PUSH_COMMITS ?? '256',
+  10,
+)
+const DEFAULT_DAEMON_URL = process.env.POWERGIT_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
 const DEFAULT_DAEMON_START_COMMAND = process.env.PNPM_WORKSPACE_DIR
   ? 'pnpm dev:daemon'
   : 'powergit-daemon'
-const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? DEFAULT_DAEMON_START_COMMAND
-const DAEMON_AUTOSTART_DISABLED = (process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
-const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000', 10)
-const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000', 10)
-const DAEMON_AUTH_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_AUTH_TIMEOUT_MS ?? '15000', 10)
-const CLI_LOGIN_HINT = process.env.POWERSYNC_LOGIN_COMMAND ?? 'powergit login'
-const AUTH_STATUS_POLL_INTERVAL_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_AUTH_POLL_MS ?? '500', 10)
+const DAEMON_START_COMMAND =
+  process.env.POWERGIT_DAEMON_START_COMMAND ?? process.env.POWERSYNC_DAEMON_START_COMMAND ?? DEFAULT_DAEMON_START_COMMAND
+const DAEMON_AUTOSTART_DISABLED =
+  (process.env.POWERGIT_DAEMON_AUTOSTART ?? process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
+const DAEMON_START_TIMEOUT_MS = Number.parseInt(
+  process.env.POWERGIT_DAEMON_START_TIMEOUT_MS ?? process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000',
+  10,
+)
+const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(
+  process.env.POWERGIT_DAEMON_CHECK_TIMEOUT_MS ?? process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000',
+  10,
+)
+const DAEMON_AUTH_TIMEOUT_MS = Number.parseInt(
+  process.env.POWERGIT_DAEMON_AUTH_TIMEOUT_MS ?? process.env.POWERSYNC_DAEMON_AUTH_TIMEOUT_MS ?? '15000',
+  10,
+)
+const CLI_LOGIN_HINT = process.env.POWERGIT_LOGIN_COMMAND ?? process.env.POWERSYNC_LOGIN_COMMAND ?? 'powergit login'
+const AUTH_STATUS_POLL_INTERVAL_MS = Number.parseInt(
+  process.env.POWERGIT_DAEMON_AUTH_POLL_MS ?? process.env.POWERSYNC_DAEMON_AUTH_POLL_MS ?? '500',
+  10,
+)
 const DAEMON_START_HINT =
-  'PowerSync daemon unreachable — start it with "powergit-daemon" or point POWERSYNC_DAEMON_URL at a running instance.'
+  'PowerSync daemon unreachable — start it with "powergit-daemon" or point POWERGIT_DAEMON_URL at a running instance.'
 const DAEMON_WORKSPACE_DIR = process.env.PNPM_WORKSPACE_DIR ?? process.cwd()
 
 interface FetchRequest { sha: string; name: string }
@@ -40,8 +58,11 @@ let daemonEndpointOverride: string | null = null
 let fetchBatch: FetchRequest[] = []
 let pushBatch: PushRequest[] = []
 let cachedSourceRepoUrl: string | null | undefined
+let helperProgress: boolean | undefined
+let helperVerbosity: number | undefined
+let lastLoggedErrorMessage: string | null = null
 
-const debugLogFile = process.env.POWERSYNC_HELPER_DEBUG_LOG
+const debugLogFile = process.env.POWERGIT_HELPER_DEBUG_LOG ?? process.env.POWERSYNC_HELPER_DEBUG_LOG
 
 function debugLog(message: string) {
   if (!debugLogFile) return
@@ -54,6 +75,48 @@ function debugLog(message: string) {
 
 function println(s: string = '') {
   process.stdout.write(s + '\n')
+}
+
+function logError(message: string) {
+  const normalized = String(message ?? '').replace(/\r\n/g, '\n').trimEnd()
+  if (!normalized) return
+  if (lastLoggedErrorMessage === normalized) return
+  lastLoggedErrorMessage = normalized
+
+  const lines = normalized.split('\n')
+  for (const line of lines) {
+    if (line.length === 0) {
+      console.error('')
+    } else {
+      console.error(`${LOG_PREFIX} ${line}`)
+    }
+  }
+}
+
+function handleOption(parts: string[]) {
+  const name = parts[0]
+  if (!name) return
+
+  if (name === 'progress') {
+    const raw = (parts[1] ?? '').toLowerCase()
+    if (raw === 'true') helperProgress = true
+    else if (raw === 'false') helperProgress = false
+    return
+  }
+
+  if (name === 'verbosity') {
+    const parsed = Number.parseInt(parts[1] ?? '', 10)
+    if (Number.isFinite(parsed)) helperVerbosity = parsed
+  }
+}
+
+function shouldReportStatus(): boolean {
+  const env = (process.env.POWERGIT_HELPER_STATUS ?? process.env.POWERSYNC_HELPER_STATUS ?? '').toLowerCase()
+  if (env === '0' || env === 'false') return false
+  if (helperProgress === false) return false
+  if (helperVerbosity !== undefined && helperVerbosity <= 0) return false
+  if (env === '1' || env === 'true') return true
+  return Boolean(process.stderr.isTTY)
 }
 
 export async function runHelper() {
@@ -92,6 +155,7 @@ export async function runHelper() {
     }
 
     if (cmd === 'option') {
+      handleOption(parts.slice(1))
       println('ok')
       continue
     }
@@ -139,8 +203,8 @@ async function handleList() {
     println('')
   } catch (error) {
     const friendly = formatDaemonError('list refs', error)
-    if (friendly) console.error(`[powersync] ${friendly}`)
-    else console.error(`[powersync] failed to list refs: ${(error as Error).message}`)
+    if (friendly) console.error(`${LOG_PREFIX} ${friendly}`)
+    else console.error(`${LOG_PREFIX} failed to list refs: ${(error as Error).message}`)
     println(`${ZERO_SHA} refs/heads/main`)
     println('')
   }
@@ -173,8 +237,8 @@ async function flushFetchBatch() {
     println('')
   } catch (error) {
     const friendly = formatDaemonError('fetch packs', error)
-    if (friendly) console.error(`[powersync] ${friendly}`)
-    else console.error(`[powersync] fetch failed: ${(error as Error).message}`)
+    if (friendly) console.error(`${LOG_PREFIX} ${friendly}`)
+    else console.error(`${LOG_PREFIX} fetch failed: ${(error as Error).message}`)
     println('')
   } finally {
     fetchBatch = []
@@ -184,14 +248,35 @@ async function flushFetchBatch() {
 async function writePackToGit(result: FetchPackResult) {
   const stream = result.stream
   await new Promise<void>((resolve, reject) => {
-    const child = spawn('git', ['index-pack', '--stdin', '--fix-thin'], { stdio: ['pipe', 'inherit', 'inherit'] })
+    let indexPackStdout = ''
+    // index-pack prints "pack\t<oid>" to stdout on success; capture it and report via stderr instead.
+    const child = spawn('git', ['index-pack', '--stdin', '--fix-thin'], { stdio: ['pipe', 'pipe', 'inherit'] })
+    child.stdout?.setEncoding('utf8')
+    child.stdout?.on('data', chunk => {
+      indexPackStdout += String(chunk)
+    })
     stream.pipe(child.stdin!)
     child.stdin!.on('error', reject)
     stream.on('error', reject)
     child.on('error', reject)
     child.on('close', code => {
-      if (code === 0) resolve()
-      else reject(new Error(`git index-pack exited with code ${code}`))
+      if (code !== 0) {
+        reject(new Error(`git index-pack exited with code ${code}`))
+        return
+      }
+
+      if (shouldReportStatus()) {
+        const lines = indexPackStdout.trim().split(/\r?\n/)
+        const lastLine = lines[lines.length - 1] ?? ''
+        const match = lastLine.match(/^pack\t([0-9a-f]{40})$/i)
+        const packOid = match?.[1] ?? null
+        const target = parsed ? `${parsed.org}/${parsed.repo}` : null
+        const label = target ? ` (${target})` : ''
+        const packShort = packOid ? ` [pack ${packOid.slice(0, 12)}]` : ''
+        console.error(`${LOG_PREFIX} fetch complete${label}${packShort}`)
+      }
+
+      resolve()
     })
   })
 }
@@ -214,12 +299,12 @@ async function ensureClient(): Promise<PowerSyncRemoteClient | null> {
     await ensureDaemonReady()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    console.error(`[powersync] ${message}`)
+    logError(message)
     return null
   }
   if (!daemonClient) {
     if (typeof globalThis.fetch !== 'function') {
-      console.error('[powersync] fetch API unavailable; requires Node 18+')
+      console.error(`${LOG_PREFIX} fetch API unavailable; requires Node 18+`)
       return null
     }
     daemonBaseUrl = normalizeBaseUrl(DEFAULT_DAEMON_URL)
@@ -259,14 +344,14 @@ async function ensureDaemonSubscribed(): Promise<void> {
         | undefined
       if (payload && Array.isArray(payload.queued) && payload.queued.length > 0) {
         console.warn(
-          `[powersync] daemon deferred stream subscriptions for ${payload.queued.length} target(s); retrying later may be necessary.`,
+          `${LOG_PREFIX} daemon deferred stream subscriptions for ${payload.queued.length} target(s); retrying later may be necessary.`,
         )
       }
     } else if (res.status !== 503) {
-      console.warn(`[powersync] daemon stream subscription returned ${res.status} ${res.statusText}`)
+      console.warn(`${LOG_PREFIX} daemon stream subscription returned ${res.status} ${res.statusText}`)
     }
   } catch (error) {
-    console.warn('[powersync] failed to subscribe daemon streams', error instanceof Error ? error.message : error)
+    console.warn(`${LOG_PREFIX} failed to subscribe daemon streams`, error instanceof Error ? error.message : error)
   }
 }
 
@@ -313,7 +398,7 @@ function extractDaemonEndpoint(context: Record<string, unknown> | null | undefin
 }
 
 function resolveLoginHint(): string {
-  const override = process.env.POWERSYNC_LOGIN_COMMAND
+  const override = process.env.POWERGIT_LOGIN_COMMAND ?? process.env.POWERSYNC_LOGIN_COMMAND
   if (override && override.trim().length > 0) return override.trim()
   if (daemonProfileName && daemonProfileName.trim().length > 0 && daemonProfileName !== 'prod') {
     return `STACK_PROFILE=${daemonProfileName} powergit login`
@@ -331,7 +416,7 @@ async function ensureDaemonReady(): Promise<void> {
 
     if (!daemonStartInFlight) {
       daemonStartInFlight = true
-      debugLog(`[powersync] attempting to start daemon via: ${DAEMON_START_COMMAND}`)
+      debugLog(`${LOG_PREFIX} attempting to start daemon via: ${DAEMON_START_COMMAND}`)
       try {
         launchDaemon()
       } catch (error) {
@@ -396,7 +481,7 @@ async function ensureDaemonMatchesRemote(): Promise<void> {
   }
 
   debugLog(
-    `[powersync] restarting daemon (profileMismatch=${profileMismatch}, endpointMismatch=${endpointMismatch})`,
+    `${LOG_PREFIX} restarting daemon (profileMismatch=${profileMismatch}, endpointMismatch=${endpointMismatch})`,
   )
 
   await requestDaemonShutdown()
@@ -437,10 +522,13 @@ async function waitForDaemonExit(timeoutMs = 5000): Promise<void> {
 }
 
 type NormalizedAuthStatus =
-  | { status: 'ready'; reason?: string | null; context?: Record<string, unknown> | null }
-  | { status: 'pending'; reason?: string | null; context?: Record<string, unknown> | null }
-  | { status: 'auth_required'; reason?: string | null; context?: Record<string, unknown> | null }
-  | { status: 'error'; reason?: string | null; context?: Record<string, unknown> | null }
+  | {
+      status: 'ready' | 'pending' | 'auth_required' | 'error'
+      reason: string | null
+      context: Record<string, unknown> | null
+      token: string | null
+      expiresAt: string | null
+    }
 
 function normalizeAuthContext(raw: unknown): Record<string, unknown> | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
@@ -449,14 +537,17 @@ function normalizeAuthContext(raw: unknown): Record<string, unknown> | null {
 
 function normalizeAuthStatus(payload: unknown): NormalizedAuthStatus | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
-  const record = payload as { status?: unknown; reason?: unknown; context?: unknown }
+  const record = payload as { status?: unknown; reason?: unknown; context?: unknown; token?: unknown; expiresAt?: unknown }
   const statusValue = typeof record.status === 'string' ? record.status.toLowerCase() : ''
   if (statusValue !== 'ready' && statusValue !== 'pending' && statusValue !== 'auth_required' && statusValue !== 'error') {
     return null
   }
   const reason = typeof record.reason === 'string' ? record.reason : null
   const context = normalizeAuthContext((record.context ?? null) as unknown)
-  return { status: statusValue as NormalizedAuthStatus['status'], reason, context }
+  const token = typeof record.token === 'string' && record.token.trim().length > 0 ? record.token : null
+  const expiresAt =
+    typeof record.expiresAt === 'string' && record.expiresAt.trim().length > 0 ? record.expiresAt : null
+  return { status: statusValue as NormalizedAuthStatus['status'], reason, context, token, expiresAt }
 }
 
 async function fetchDaemonAuthStatus(): Promise<NormalizedAuthStatus | null> {
@@ -470,25 +561,70 @@ async function fetchDaemonAuthStatus(): Promise<NormalizedAuthStatus | null> {
   }
 }
 
-function formatDeviceInstructions(context: Record<string, unknown> | null | undefined): string | null {
+type DeviceChallenge = { challengeId: string; verificationUrl: string | null; expiresAt: string | null }
+
+function extractDeviceChallenge(context: Record<string, unknown> | null | undefined): DeviceChallenge | null {
   if (!context) return null
-  const verificationUrl =
-    typeof context.verificationUrl === 'string' && context.verificationUrl.trim().length > 0
-      ? context.verificationUrl.trim()
-      : null
   const challengeId =
-    typeof context.challengeId === 'string' && context.challengeId.trim().length > 0
-      ? context.challengeId.trim()
-      : null
-  if (verificationUrl) {
-    return challengeId
-      ? `Open ${verificationUrl} (device code ${challengeId})`
-      : `Open ${verificationUrl} to finish login`
+    (typeof context.challengeId === 'string' ? context.challengeId : null) ??
+    (typeof context.deviceCode === 'string' ? context.deviceCode : null) ??
+    (typeof (context as { device_code?: unknown }).device_code === 'string' ? (context as { device_code?: string }).device_code : null)
+
+  const verificationUrl =
+    typeof context.verificationUrl === 'string'
+      ? context.verificationUrl
+      : typeof (context as { verification_url?: unknown }).verification_url === 'string'
+        ? (context as { verification_url?: string }).verification_url
+        : null
+
+  const expiresAt =
+    typeof context.expiresAt === 'string'
+      ? context.expiresAt
+      : typeof (context as { expires_at?: unknown }).expires_at === 'string'
+        ? (context as { expires_at?: string }).expires_at
+        : null
+
+  const trimmedId = challengeId?.trim() ?? ''
+  if (!trimmedId) return null
+  return {
+    challengeId: trimmedId,
+    verificationUrl: verificationUrl?.trim() ? verificationUrl.trim() : null,
+    expiresAt: expiresAt?.trim() ? expiresAt.trim() : null,
   }
-  if (challengeId) {
-    return `Complete daemon login with device code ${challengeId}`
+}
+
+function resolveDeviceLoginUrl(challenge: DeviceChallenge): string | null {
+  if (challenge.verificationUrl) return challenge.verificationUrl
+  const fallbackBase =
+    process.env.POWERGIT_DAEMON_DEVICE_URL ??
+    process.env.POWERSYNC_DAEMON_DEVICE_URL ??
+    process.env.POWERSYNC_EXPLORER_URL ??
+    `${daemonBaseUrl}/ui/auth`
+  const base = (fallbackBase ?? '').trim()
+  if (!base) return null
+  const separator = base.includes('?') ? '&' : '?'
+  return `${base}${separator}device_code=${encodeURIComponent(challenge.challengeId)}`
+}
+
+function formatDeviceChallengePrompt(title: string, challenge: DeviceChallenge | null): string {
+  if (!challenge) return title
+  const lines: string[] = [title]
+  const openUrl = resolveDeviceLoginUrl(challenge)
+  if (openUrl) {
+    lines.push('   Open:')
+    lines.push(`   ${openUrl}`)
+  } else {
+    lines.push('   No device login URL configured.')
+    lines.push('   Set POWERGIT_DAEMON_DEVICE_URL (or POWERSYNC_DAEMON_DEVICE_URL).')
   }
-  return null
+  lines.push(
+    '   If the page can’t reach your local daemon (e.g. net::ERR_BLOCKED_BY_CLIENT), try incognito or disable ad blockers/privacy shields.',
+  )
+  lines.push(`   Device code: ${challenge.challengeId}`)
+  if (challenge.expiresAt) {
+    lines.push(`   Expires: ${challenge.expiresAt}`)
+  }
+  return lines.join('\n')
 }
 
 async function ensureDaemonAuthenticated(): Promise<void> {
@@ -505,23 +641,50 @@ async function ensureDaemonAuthenticated(): Promise<void> {
       return
     }
     if (lastStatus.status === 'pending') {
+      const challenge = extractDeviceChallenge(lastStatus.context)
+
+      if (!lastStatus.token && !challenge) {
+        const loginHint = resolveLoginHint()
+        const lines = [
+          'Daemon requested interactive login.',
+          formatDeviceChallengePrompt('To finish authentication:', null),
+          `   Run: ${loginHint}`,
+          '   This prints a browser URL and device code.',
+          '   Open the URL to complete authentication, then retry your git command.',
+          lastStatus.reason ? `Reason: ${lastStatus.reason}` : null,
+        ].filter((value): value is string => Boolean(value && value.trim().length > 0))
+        throw new Error(lines.join('\n'))
+      }
+
       if (!pendingNotified) {
-        const instructions = formatDeviceInstructions(lastStatus.context)
-        console.error(
-          `[powersync] Waiting for PowerSync daemon login to complete.${instructions ? ` ${instructions}.` : ''}`,
-        )
+        if (challenge) {
+          logError(
+            [
+              'Daemon requested interactive login.',
+              formatDeviceChallengePrompt('To finish authentication:', challenge),
+              'Waiting for daemon authentication to complete...',
+            ].join('\n'),
+          )
+        } else {
+          const reason = lastStatus.reason ? ` (${lastStatus.reason})` : ''
+          logError(`Waiting for PowerSync daemon to become ready${reason}.`)
+        }
         pendingNotified = true
       }
       await delay(AUTH_STATUS_POLL_INTERVAL_MS)
       continue
     }
     if (lastStatus.status === 'auth_required') {
-      const instructions = formatDeviceInstructions(lastStatus.context)
-      throw new Error(
-        `PowerSync daemon is not authenticated. Run "${resolveLoginHint()}" to sign in via Supabase.${
-          instructions ? ` ${instructions}.` : ''
-        }`,
-      )
+      const loginHint = resolveLoginHint()
+      const challenge = extractDeviceChallenge(lastStatus.context)
+      const lines = [
+        'PowerSync daemon is not authenticated.',
+        formatDeviceChallengePrompt('To finish authentication:', challenge),
+        `   Run: ${loginHint}`,
+        challenge ? null : '   Open the printed URL to complete authentication, then retry your git command.',
+        lastStatus.reason ? `Reason: ${lastStatus.reason}` : null,
+      ].filter((value): value is string => Boolean(value && value.trim().length > 0))
+      throw new Error(lines.join('\n'))
     }
     if (lastStatus.status === 'error') {
       const reason = lastStatus.reason ? ` (${lastStatus.reason})` : ''
@@ -530,10 +693,29 @@ async function ensureDaemonAuthenticated(): Promise<void> {
   }
 
   if (lastStatus?.status === 'pending') {
-    const instructions = formatDeviceInstructions(lastStatus.context)
-    throw new Error(
-      `PowerSync daemon login is still pending. ${instructions ?? 'Complete the Supabase device flow'} and retry.`,
-    )
+    const challenge = extractDeviceChallenge(lastStatus.context)
+    const reason = lastStatus.reason ? `Reason: ${lastStatus.reason}` : null
+    if (!lastStatus.token && !challenge) {
+      const loginHint = resolveLoginHint()
+      const lines = [
+        'Daemon requested interactive login.',
+        formatDeviceChallengePrompt('To finish authentication:', null),
+        `   Run: ${loginHint}`,
+        '   This prints a browser URL and device code.',
+        '   Open the URL to complete authentication, then retry your git command.',
+        reason,
+      ].filter((value): value is string => Boolean(value && value.trim().length > 0))
+      throw new Error(lines.join('\n'))
+    }
+    if (challenge) {
+      const lines = [
+        'Authentication is still pending; complete the flow in your browser and retry.',
+        formatDeviceChallengePrompt('Pending device challenge:', challenge),
+        reason,
+      ].filter((value): value is string => Boolean(value && value.trim().length > 0))
+      throw new Error(lines.join('\n'))
+    }
+    throw new Error(`PowerSync daemon is still starting. ${reason ?? 'Retry shortly.'}`)
   }
 
   throw new Error(`PowerSync daemon did not report an authenticated session. Run "${CLI_LOGIN_HINT}" and retry.`)
@@ -596,12 +778,13 @@ function buildDaemonEnv(): NodeJS.ProcessEnv {
 
   const stateProfileName = daemonProfileName ?? env.STACK_PROFILE ?? env.POWERGIT_PROFILE ?? env.POWERGIT_ACTIVE_PROFILE ?? null
   const statePaths = resolveDaemonStatePaths(stateProfileName)
-  if (!env.POWERSYNC_DAEMON_DB_PATH) {
-    env.POWERSYNC_DAEMON_DB_PATH = statePaths.dbPath
-  }
-  if (!env.POWERSYNC_DAEMON_SESSION_PATH) {
-    env.POWERSYNC_DAEMON_SESSION_PATH = statePaths.sessionPath
-  }
+  const daemonDbPath = env.POWERGIT_DAEMON_DB_PATH ?? env.POWERSYNC_DAEMON_DB_PATH ?? statePaths.dbPath
+  env.POWERGIT_DAEMON_DB_PATH = daemonDbPath
+  env.POWERSYNC_DAEMON_DB_PATH = daemonDbPath
+
+  const daemonSessionPath = env.POWERGIT_DAEMON_SESSION_PATH ?? env.POWERSYNC_DAEMON_SESSION_PATH ?? statePaths.sessionPath
+  env.POWERGIT_DAEMON_SESSION_PATH = daemonSessionPath
+  env.POWERSYNC_DAEMON_SESSION_PATH = daemonSessionPath
 
   return env
 }
@@ -647,7 +830,7 @@ function tryParseRemote(candidate?: string): boolean {
     return true
   } catch (error) {
     if (candidate.includes('::') || candidate.includes('://')) {
-      console.error(`[powersync] failed to parse remote URL: ${(error as Error).message}`)
+      console.error(`${LOG_PREFIX} failed to parse remote URL: ${(error as Error).message}`)
     }
     return false
   }
@@ -703,7 +886,7 @@ async function handlePush(updates: PushRequest[]) {
     try {
       summary = await collectPushSummary(resolvedUpdates)
     } catch (error) {
-      console.warn('[powersync] failed to collect push summary', error)
+      console.warn(`${LOG_PREFIX} failed to collect push summary`, error)
       summary = undefined
     }
     const packData = await generatePackForPush(resolvedUpdates)
@@ -728,8 +911,8 @@ async function handlePush(updates: PushRequest[]) {
   } catch (error) {
     const friendly = formatDaemonError('push', error)
     const message = friendly ?? (error as Error).message ?? 'push failed'
-    if (friendly) console.error(`[powersync] ${friendly}`)
-    else console.error(`[powersync] push failed: ${message}`)
+    if (friendly) console.error(`${LOG_PREFIX} ${friendly}`)
+    else console.error(`${LOG_PREFIX} push failed: ${message}`)
     for (const update of updates) println(`error ${update.dst} ${message}`)
     println('')
   }
@@ -833,7 +1016,12 @@ async function resolveGitRef(ref: string): Promise<string> {
 async function resolveSourceRepoUrl(): Promise<string | null> {
   if (cachedSourceRepoUrl !== undefined) return cachedSourceRepoUrl
 
-  const envUrl = [process.env.POWERSYNC_REPO_URL, process.env.POWERSYNC_SOURCE_REPO_URL]
+  const envUrl = [
+    process.env.POWERGIT_REPO_URL,
+    process.env.POWERGIT_SOURCE_REPO_URL,
+    process.env.POWERSYNC_REPO_URL,
+    process.env.POWERSYNC_SOURCE_REPO_URL,
+  ]
     .map((value) => (value ?? '').trim())
     .find((value) => value.length > 0)
   if (envUrl) {
@@ -928,7 +1116,7 @@ async function collectPushSummary(updates: PushRequest[]): Promise<GitPushSummar
     try {
       commitSummaries.push(await readCommitSummary(sha))
     } catch (error) {
-      console.warn('[powersync] failed to read commit summary', sha, error)
+      console.warn(`${LOG_PREFIX} failed to read commit summary`, sha, error)
     }
   }
 
@@ -949,7 +1137,7 @@ async function collectPushSummary(updates: PushRequest[]): Promise<GitPushSummar
   }
 
   const localRefs = await listLocalRefs().catch((error) => {
-    console.warn('[powersync] failed to enumerate local refs', error)
+    console.warn(`${LOG_PREFIX} failed to enumerate local refs`, error)
     return [] as Array<{ name: string; target: string }>
   })
   for (const ref of localRefs) {
@@ -974,7 +1162,7 @@ async function collectPushSummary(updates: PushRequest[]): Promise<GitPushSummar
 async function listCommitsForRef(ref: string): Promise<string[]> {
   const args = ['rev-list', '--max-count', String(MAX_COMMITS_PER_UPDATE), ref]
   const output = await execGit(args).catch((error) => {
-    console.warn('[powersync] failed to list commits for ref', ref, error)
+    console.warn(`${LOG_PREFIX} failed to list commits for ref`, ref, error)
     return ''
   })
   return output
@@ -1007,7 +1195,7 @@ async function readCommitSummary(sha: string): Promise<GitPushSummary['commits']
 async function readCommitFileChanges(sha: string): Promise<GitPushSummary['commits'][number]['files']> {
   // --root includes changes for root commits (otherwise initial commit shows no files)
   const output = await execGit(['diff-tree', '--root', '--no-commit-id', '--numstat', '-r', sha]).catch((error) => {
-    console.warn('[powersync] failed to read commit file changes', sha, error)
+    console.warn(`${LOG_PREFIX} failed to read commit file changes`, sha, error)
     return ''
   })
 
@@ -1037,7 +1225,7 @@ function parseGitStat(value: string): number {
 
 async function listLocalRefs(): Promise<Array<{ name: string; target: string }>> {
   const output = await execGit(['show-ref']).catch((error) => {
-    console.warn('[powersync] git show-ref failed', error)
+    console.warn(`${LOG_PREFIX} git show-ref failed`, error)
     return ''
   })
   if (!output) return []

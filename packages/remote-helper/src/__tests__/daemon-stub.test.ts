@@ -46,6 +46,15 @@ describe('ensureDaemonReady authentication handling', () => {
 
     await expect(readyPromise).resolves.toBeUndefined()
   })
+
+  it('fails fast when daemon is pending but unauthenticated', async () => {
+    const stub = await createDaemonStub()
+    stubs.push(stub)
+    stub.setAuthStatus({ status: 'pending', reason: 'Awaiting Supabase authentication; run `powergit login` to continue.' })
+    __setDaemonBaseUrlForTests(stub.baseUrl)
+
+    await expect(ensureDaemonReady()).rejects.toThrow(/powergit login/)
+  })
 })
 
 describe('daemon stub harness', () => {

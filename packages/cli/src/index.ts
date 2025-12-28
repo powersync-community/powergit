@@ -47,14 +47,22 @@ async function subscribeRepoStreams(baseUrl: string, streams: StreamSubscription
 }
 
 export const DEFAULT_DAEMON_URL =
-  process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
+  process.env.POWERGIT_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_URL ?? 'http://127.0.0.1:5030'
 const DEFAULT_DAEMON_START_COMMAND = process.env.PNPM_WORKSPACE_DIR ? 'pnpm dev:daemon' : 'powergit-daemon'
-const DAEMON_START_COMMAND = process.env.POWERSYNC_DAEMON_START_COMMAND ?? DEFAULT_DAEMON_START_COMMAND
-const DAEMON_AUTOSTART_DISABLED = (process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
-const DAEMON_START_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000', 10)
-const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000', 10)
+const DAEMON_START_COMMAND =
+  process.env.POWERGIT_DAEMON_START_COMMAND ?? process.env.POWERSYNC_DAEMON_START_COMMAND ?? DEFAULT_DAEMON_START_COMMAND
+const DAEMON_AUTOSTART_DISABLED =
+  (process.env.POWERGIT_DAEMON_AUTOSTART ?? process.env.POWERSYNC_DAEMON_AUTOSTART ?? 'true').toLowerCase() === 'false'
+const DAEMON_START_TIMEOUT_MS = Number.parseInt(
+  process.env.POWERGIT_DAEMON_START_TIMEOUT_MS ?? process.env.POWERSYNC_DAEMON_START_TIMEOUT_MS ?? '7000',
+  10,
+)
+const DAEMON_CHECK_TIMEOUT_MS = Number.parseInt(
+  process.env.POWERGIT_DAEMON_CHECK_TIMEOUT_MS ?? process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000',
+  10,
+)
 const DAEMON_START_HINT =
-  'PowerSync daemon unreachable — start it with "powergit-daemon" or point POWERSYNC_DAEMON_URL at a running instance.'
+  'PowerSync daemon unreachable — start it with "powergit-daemon" or point POWERGIT_DAEMON_URL at a running instance.'
 const DAEMON_WORKSPACE_DIR = process.env.PNPM_WORKSPACE_DIR ?? process.cwd()
 
 export interface SeedDemoOptions {
@@ -238,7 +246,9 @@ export async function syncPowerSyncRepository(dir: string, options: SyncCommandO
     throw new Error('Missing PowerSync endpoint. Configure a profile with powersync.url or set POWERSYNC_URL.')
   }
 
-  const daemonBaseUrl = normalizeBaseUrl(options.daemonUrl ?? process.env.POWERSYNC_DAEMON_URL ?? DEFAULT_DAEMON_URL)
+  const daemonBaseUrl = normalizeBaseUrl(
+    options.daemonUrl ?? process.env.POWERGIT_DAEMON_URL ?? process.env.POWERSYNC_DAEMON_URL ?? DEFAULT_DAEMON_URL,
+  )
   await ensureDaemonReady(daemonBaseUrl, { profileName: resolvedRemote.profileName ?? undefined, endpoint })
   const authStatus = await fetchDaemonAuthStatus(daemonBaseUrl)
   if (!authStatus || authStatus.status !== 'ready') {
@@ -486,12 +496,13 @@ function buildDaemonEnv(options: { profileName?: string | null; endpoint?: strin
 
   const stateProfile = desiredProfileName ?? currentProfileName ?? 'prod'
   const statePaths = resolveDaemonStatePaths(stateProfile)
-  if (!env.POWERSYNC_DAEMON_DB_PATH) {
-    env.POWERSYNC_DAEMON_DB_PATH = statePaths.dbPath
-  }
-  if (!env.POWERSYNC_DAEMON_SESSION_PATH) {
-    env.POWERSYNC_DAEMON_SESSION_PATH = statePaths.sessionPath
-  }
+  const daemonDbPath = env.POWERGIT_DAEMON_DB_PATH ?? env.POWERSYNC_DAEMON_DB_PATH ?? statePaths.dbPath
+  env.POWERGIT_DAEMON_DB_PATH = daemonDbPath
+  env.POWERSYNC_DAEMON_DB_PATH = daemonDbPath
+
+  const daemonSessionPath = env.POWERGIT_DAEMON_SESSION_PATH ?? env.POWERSYNC_DAEMON_SESSION_PATH ?? statePaths.sessionPath
+  env.POWERGIT_DAEMON_SESSION_PATH = daemonSessionPath
+  env.POWERSYNC_DAEMON_SESSION_PATH = daemonSessionPath
 
   if (desiredEndpoint) {
     env.POWERSYNC_URL = desiredEndpoint
@@ -516,7 +527,10 @@ function delay(ms: number): Promise<void> {
 async function fetchDaemonAuthStatus(baseUrl: string): Promise<DaemonAuthStatusCheck> {
   try {
     const controller = new AbortController()
-    const timeoutMs = Number.parseInt(process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000', 10)
+    const timeoutMs = Number.parseInt(
+      process.env.POWERGIT_DAEMON_CHECK_TIMEOUT_MS ?? process.env.POWERSYNC_DAEMON_CHECK_TIMEOUT_MS ?? '2000',
+      10,
+    )
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
     const response = await fetch(`${baseUrl}/auth/status`, { signal: controller.signal })
     clearTimeout(timeout)

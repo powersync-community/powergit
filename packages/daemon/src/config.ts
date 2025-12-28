@@ -64,15 +64,23 @@ async function ensureDirectoryExists(targetPath: string): Promise<void> {
 }
 
 export async function resolveDaemonConfig(options: ResolveDaemonConfigOptions = {}): Promise<DaemonConfig> {
-  const dbPath = resolve(options.dbPath ?? process.env.POWERSYNC_DAEMON_DB_PATH ?? resolveDefaultDbPath());
+  const dbPath = resolve(
+    options.dbPath ??
+      process.env.POWERGIT_DAEMON_DB_PATH ??
+      process.env.POWERSYNC_DAEMON_DB_PATH ??
+      resolveDefaultDbPath(),
+  );
   await ensureDirectoryExists(dirname(dbPath));
 
   const endpoint = options.endpoint ?? process.env.POWERSYNC_DAEMON_ENDPOINT ?? process.env.POWERSYNC_URL ?? undefined;
 
-  const explicitStreams = options.initialStreams ?? resolveEnvList(process.env.POWERSYNC_DAEMON_STREAMS);
+  const explicitStreams = options.initialStreams ?? resolveEnvList(process.env.POWERGIT_DAEMON_STREAMS ?? process.env.POWERSYNC_DAEMON_STREAMS);
 
-  const host = options.host ?? process.env.POWERSYNC_DAEMON_HOST ?? DEFAULT_HOST;
-  const rawPort = options.port ?? (process.env.POWERSYNC_DAEMON_PORT ? Number(process.env.POWERSYNC_DAEMON_PORT) : undefined);
+  const host = options.host ?? process.env.POWERGIT_DAEMON_HOST ?? process.env.POWERSYNC_DAEMON_HOST ?? DEFAULT_HOST;
+  const rawPort =
+    options.port ??
+    (process.env.POWERGIT_DAEMON_PORT ? Number(process.env.POWERGIT_DAEMON_PORT) : undefined) ??
+    (process.env.POWERSYNC_DAEMON_PORT ? Number(process.env.POWERSYNC_DAEMON_PORT) : undefined);
   const port = Number.isFinite(rawPort) && rawPort! > 0 ? Number(rawPort) : DEFAULT_PORT;
 
   return {
