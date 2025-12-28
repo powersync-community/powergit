@@ -37,25 +37,25 @@ If you want to trigger the GitHub Actions workflow instead of the local daemon:
 
 ### Create a repo from the CLI
 
-<video src="create-repo-console-short.mp4" controls muted playsinline></video>
+[create-repo-console-short.mp4](create-repo-console-short.mp4)
 
 Create a repo and push to it using the `powergit::` remote from your terminal.
 
 ### Observe the created repo in Explorer
 
-<video src="observing-created-repo.mp4" controls muted playsinline></video>
+[observing-created-repo.mp4](observing-created-repo.mp4)
 
 Browse branches, files, and history once the repo has been mirrored into PowerSync.
 
 ### Clone serde
 
-<video src="clone-serde-short.mp4" controls muted playsinline></video>
+[clone-serde-short.mp4](clone-serde-short.mp4)
 
-With the explorer we explore existing repos on GitHub
+Clone a repository via `git clone powergit::/org/repo` and let the helper stream packs locally.
 
 ### Create an org
 
-<video src="creating-org.mp4" controls muted playsinline></video>
+[creating-org.mp4](creating-org.mp4)
 
 Create organizations (and later manage members/repos) directly from the Explorer UI.
 
