@@ -33,15 +33,31 @@ If you want to trigger the GitHub Actions workflow instead of the local daemon:
 3. Run the explorer in prod mode: `pnpm dev:prod` (uses the Edge Function dispatcher, not the daemon).
 4. Paste a GitHub repo URL in the UI; this calls the `github-import` Edge Function, which dispatches the `clone-and-push.yml` workflow with your token. Watch the run in GitHub Actions to confirm it fired.
 
-## Screenshots
+## Demos
 
-![Powergit screenshot 1](s1.png)
-View files and branches.
+### Create a repo from the CLI
 
-![Powergit screenshot 2](s2.png)
-Uses Tanstack DB integration to handle queries for the commit explorer.
-![Powergit screenshot 3](s3.png)
-You can view diffs.
+<video src="create-repo-console-short.mp4" controls muted playsinline></video>
+
+Create a repo and push to it using the `powergit::` remote from your terminal.
+
+### Observe the created repo in Explorer
+
+<video src="observing-created-repo.mp4" controls muted playsinline></video>
+
+Browse branches, files, and history once the repo has been mirrored into PowerSync.
+
+### Clone serde
+
+<video src="clone-serde-short.mp4" controls muted playsinline></video>
+
+With the explorer we explore existing repos on GitHub
+
+### Create an org
+
+<video src="creating-org.mp4" controls muted playsinline></video>
+
+Create organizations (and later manage members/repos) directly from the Explorer UI.
 
 ## How it works
 In this repo we have built a custom git remote protocol that allows us to push git data into a Supabase database. We can later use PowerSync to see the data in the frontend. We use the powersync-tanstack-db package to query the database and show it reactively using the `@tanstack/powersync-db-collection` package.
