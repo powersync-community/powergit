@@ -2,6 +2,8 @@
 
 Powergit is a local-first Git explorer that mirrors repositories into Supabase (Postgres + Storage) and streams metadata to the UI via PowerSync, so you can browse branches, files, and commit history from a fast local replica.
 
+The explorer is live [here](https://powersync-community.github.io/powergit/).
+
 ## Quick start (local dev)
 
 ```bash
@@ -25,6 +27,7 @@ pnpm dev:prod
 > `pnpm dev:prod` uses `.env.prod` (remote Supabase/PowerSync). Use `pnpm dev` + `pnpm dev:stack` for a local Docker-backed stack.
 
 ## Demos
+
 
 ### 1) Create a repo from the CLI
 
