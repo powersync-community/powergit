@@ -90,6 +90,9 @@ function RepoOverview() {
             <Link className={linkClass} to="/org/$orgId/repo/$repoId/branches" params={{ orgId, repoId }}>
               Branches
             </Link>
+            <Link className={linkClass} to="/org/$orgId/repo/$repoId/analytics" params={{ orgId, repoId }}>
+              Analytics
+            </Link>
           </div>
         </div>
       </div>

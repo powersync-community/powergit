@@ -1290,6 +1290,14 @@ function Files() {
             ]}
           />
           <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+            <Link
+              to="/org/$orgId/repo/$repoId/analytics"
+              params={{ orgId, repoId }}
+              className={commitButtonClass}
+              data-testid="view-analytics-button"
+            >
+              Analytics
+            </Link>
             {headCommitLabel ? (
               <Link
                 to="/org/$orgId/repo/$repoId/commits"

@@ -12,6 +12,7 @@ import { RepoOverviewComponent } from './routes/org.$orgId.repo.$repoId.index'
 import { BranchesComponent } from './routes/org.$orgId.repo.$repoId.branches'
 import { CommitsComponent } from './routes/org.$orgId.repo.$repoId.commits'
 import { FilesComponent } from './routes/org.$orgId.repo.$repoId.files'
+import { AnalyticsComponent } from './routes/org.$orgId.repo.$repoId.analytics'
 import { ResetPasswordRouteComponent } from './routes/reset'
 
 const rootRoute = createRootRoute({ component: Root.Route })
@@ -24,6 +25,7 @@ const repoIndex = createRoute({ getParentRoute: () => rootRoute, path: 'org/$org
 const repoBranches = createRoute({ getParentRoute: () => rootRoute, path: 'org/$orgId/repo/$repoId/branches', component: BranchesComponent })
 const repoCommits = createRoute({ getParentRoute: () => rootRoute, path: 'org/$orgId/repo/$repoId/commits', component: CommitsComponent })
 const repoFiles = createRoute({ getParentRoute: () => rootRoute, path: 'org/$orgId/repo/$repoId/files', component: FilesComponent })
+const repoAnalytics = createRoute({ getParentRoute: () => rootRoute, path: 'org/$orgId/repo/$repoId/analytics', component: AnalyticsComponent })
 const resetPasswordRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'reset-password',
@@ -40,5 +42,6 @@ export const routeTree = rootRoute.addChildren([
   repoBranches,
   repoCommits,
   repoFiles,
+  repoAnalytics,
   resetPasswordRoute,
 ])
