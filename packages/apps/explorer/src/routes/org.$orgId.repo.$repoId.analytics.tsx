@@ -13,7 +13,7 @@ export const Route = createFileRoute('/org/$orgId/repo/$repoId/analytics' as any
   component: Analytics,
 })
 
-type CommitRow = Pick<Database['commits'], 'sha' | 'author_name' | 'author_email' | 'authored_at'>
+type CommitRow = Pick<Database['commits'], 'sha' | 'author_name' | 'author_email' | 'authored_at' | 'message'>
 type FileChangeRow = Pick<Database['file_changes'], 'commit_sha' | 'path' | 'additions' | 'deletions'>
 type ContributorStat = {
   author_name: string | null
@@ -60,6 +60,7 @@ function Analytics() {
           author_name: c.author_name,
           author_email: c.author_email,
           authored_at: c.authored_at,
+          message: c.message,
         })),
     [commitsCollection, orgId, repoId],
   ) as { data: Array<CommitRow> }
@@ -85,6 +86,27 @@ function Analytics() {
   // File hotspot ignore patterns - demonstrates reactive filtering
   const defaultIgnorePatterns = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'CHANGELOG.md', 'CHANGELOG']
   const [ignoredPatterns, setIgnoredPatterns] = React.useState<string[]>(defaultIgnorePatterns)
+
+  // === ADVANCED FEATURES STATE ===
+  // Active tab for advanced features
+  const [activeTab, setActiveTab] = React.useState<'overview' | 'blame-timeline' | 'commit-search'>('overview')
+
+  // Blame Timeline state
+  const [selectedFilePath, setSelectedFilePath] = React.useState<string | null>(null)
+  const [fileSearchQuery, setFileSearchQuery] = React.useState('')
+
+  // Commit Search state
+  const [searchFilters, setSearchFilters] = React.useState({
+    author: '',
+    message: '',
+    filePath: '',
+    dateFrom: '',
+    dateTo: '',
+    minAdditions: '',
+    maxAdditions: '',
+    minDeletions: '',
+    maxDeletions: '',
+  })
 
   const contributorStats = React.useMemo<ContributorStat[]>(() => {
     const statsMap = new Map<string, ContributorStat>()
@@ -182,6 +204,152 @@ function Analytics() {
   const totalDeletions = fileChanges.reduce((sum, fc) => sum + (fc.deletions ?? 0), 0)
   const maxDailyCommits = Math.max(...dailyActivity.map((d) => d.commit_count), 1)
 
+  // === FILE IMPACT EXPLORER ===
+  // Get unique file paths for autocomplete
+  const uniqueFilePaths = React.useMemo(() => {
+    const paths = new Set<string>()
+    for (const fc of fileChanges) {
+      if (fc.path) paths.add(fc.path)
+    }
+    return Array.from(paths).sort()
+  }, [fileChanges])
+
+  // Filter file paths based on search query and ignore patterns
+  const filteredFilePaths = React.useMemo(() => {
+    const isIgnored = (path: string) => {
+      const filename = path.split('/').pop() ?? path
+      return ignoredPatterns.some((pattern) => {
+        if (pattern.startsWith('*')) {
+          return filename.endsWith(pattern.slice(1))
+        }
+        if (pattern.endsWith('*')) {
+          return filename.startsWith(pattern.slice(0, -1))
+        }
+        return filename === pattern || path === pattern
+      })
+    }
+    const filtered = uniqueFilePaths.filter((p) => !isIgnored(p))
+    if (!fileSearchQuery.trim()) return filtered.slice(0, 50)
+    const query = fileSearchQuery.toLowerCase()
+    return filtered.filter((p) => p.toLowerCase().includes(query)).slice(0, 50)
+  }, [uniqueFilePaths, fileSearchQuery, ignoredPatterns])
+
+  // Get commits that touched the selected file
+  const fileImpactData = React.useMemo(() => {
+    if (!selectedFilePath) return null
+    const commitShas = new Set<string>()
+    const changesByCommit = new Map<string, FileChangeRow>()
+    for (const fc of fileChanges) {
+      if (fc.path === selectedFilePath && fc.commit_sha) {
+        commitShas.add(fc.commit_sha)
+        changesByCommit.set(fc.commit_sha, fc)
+      }
+    }
+    const relevantCommits = commits
+      .filter((c) => c.sha && commitShas.has(c.sha))
+      .sort((a, b) => (b.authored_at ?? '').localeCompare(a.authored_at ?? ''))
+    
+    // Compute blame timeline - who changed this file over time
+    const authorChanges = new Map<string, { count: number; additions: number; deletions: number; lastChange: string }>()
+    for (const commit of relevantCommits) {
+      const author = commit.author_email ?? 'unknown'
+      const change = changesByCommit.get(commit.sha ?? '')
+      const existing = authorChanges.get(author) ?? { count: 0, additions: 0, deletions: 0, lastChange: '' }
+      existing.count += 1
+      existing.additions += change?.additions ?? 0
+      existing.deletions += change?.deletions ?? 0
+      if (!existing.lastChange || (commit.authored_at ?? '') > existing.lastChange) {
+        existing.lastChange = commit.authored_at ?? ''
+      }
+      authorChanges.set(author, existing)
+    }
+
+    return {
+      commits: relevantCommits,
+      changesByCommit,
+      authorChanges: Array.from(authorChanges.entries())
+        .map(([email, data]) => ({
+          email,
+          name: relevantCommits.find((c) => c.author_email === email)?.author_name ?? email,
+          ...data,
+        }))
+        .sort((a, b) => b.count - a.count),
+      totalChanges: relevantCommits.length,
+    }
+  }, [selectedFilePath, commits, fileChanges])
+
+  // === COMMIT SEARCH WITH COMPLEX FILTERS ===
+  // Build a map of commit SHA -> aggregated file changes for filtering
+  const commitAggregates = React.useMemo(() => {
+    const map = new Map<string, { additions: number; deletions: number; files: string[] }>()
+    for (const fc of fileChanges) {
+      if (!fc.commit_sha) continue
+      const existing = map.get(fc.commit_sha) ?? { additions: 0, deletions: 0, files: [] }
+      existing.additions += fc.additions ?? 0
+      existing.deletions += fc.deletions ?? 0
+      if (fc.path) existing.files.push(fc.path)
+      map.set(fc.commit_sha, existing)
+    }
+    return map
+  }, [fileChanges])
+
+  // Apply all search filters
+  const searchResults = React.useMemo(() => {
+    const { author, message, filePath, dateFrom, dateTo, minAdditions, maxAdditions, minDeletions, maxDeletions } = searchFilters
+    const hasAnyFilter = author || message || filePath || dateFrom || dateTo || minAdditions || maxAdditions || minDeletions || maxDeletions
+    if (!hasAnyFilter) return null
+
+    return commits.filter((commit) => {
+      // Author filter (case-insensitive partial match on name or email)
+      if (author) {
+        const authorLower = author.toLowerCase()
+        const nameMatch = (commit.author_name ?? '').toLowerCase().includes(authorLower)
+        const emailMatch = (commit.author_email ?? '').toLowerCase().includes(authorLower)
+        if (!nameMatch && !emailMatch) return false
+      }
+
+      // Message filter (case-insensitive partial match)
+      if (message) {
+        if (!(commit.message ?? '').toLowerCase().includes(message.toLowerCase())) return false
+      }
+
+      // Date range filters
+      if (dateFrom && commit.authored_at && commit.authored_at < dateFrom) return false
+      if (dateTo && commit.authored_at && commit.authored_at > dateTo + 'T23:59:59') return false
+
+      // Get aggregated data for this commit
+      const agg = commitAggregates.get(commit.sha ?? '')
+
+      // File path filter
+      if (filePath) {
+        const pathLower = filePath.toLowerCase()
+        const hasMatchingFile = agg?.files.some((f) => f.toLowerCase().includes(pathLower))
+        if (!hasMatchingFile) return false
+      }
+
+      // Additions/deletions filters
+      const additions = agg?.additions ?? 0
+      const deletions = agg?.deletions ?? 0
+      if (minAdditions && additions < parseInt(minAdditions, 10)) return false
+      if (maxAdditions && additions > parseInt(maxAdditions, 10)) return false
+      if (minDeletions && deletions < parseInt(minDeletions, 10)) return false
+      if (maxDeletions && deletions > parseInt(maxDeletions, 10)) return false
+
+      return true
+    }).sort((a, b) => (b.authored_at ?? '').localeCompare(a.authored_at ?? ''))
+  }, [commits, searchFilters, commitAggregates])
+
+  // Get unique authors for autocomplete
+  const uniqueAuthors = React.useMemo(() => {
+    const authors = new Map<string, string>()
+    for (const commit of commits) {
+      if (commit.author_email && !authors.has(commit.author_email)) {
+        authors.set(commit.author_email, commit.author_name ?? commit.author_email)
+      }
+    }
+    return Array.from(authors.entries()).map(([email, name]) => ({ email, name }))
+  }, [commits])
+
   const headingClass = isDark ? 'text-lg font-semibold text-slate-100' : 'text-lg font-semibold text-slate-900'
   const subheadingClass = isDark ? 'text-base font-medium text-slate-200' : 'text-base font-medium text-slate-800'
   const cardClass = isDark
@@ -224,6 +392,38 @@ function Analytics() {
         </span>
       </div>
 
+      {/* Tab Navigation */}
+      <div className="flex flex-wrap gap-1">
+        {(['overview', 'blame-timeline', 'commit-search'] as const).map((tab) => {
+          const labels = {
+            overview: 'Overview',
+            'blame-timeline': 'Blame Timeline',
+            'commit-search': 'Commit Search',
+          }
+          const isActive = activeTab === tab
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={
+                isActive
+                  ? isDark
+                    ? 'rounded-lg bg-emerald-500/20 px-4 py-2 text-sm font-medium text-emerald-300 transition'
+                    : 'rounded-lg bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition'
+                  : isDark
+                    ? 'rounded-lg px-4 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800 hover:text-slate-200'
+                    : 'rounded-lg px-4 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700'
+              }
+            >
+              {labels[tab]}
+            </button>
+          )
+        })}
+      </div>
+
+      {activeTab === 'overview' && (
+        <>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
         <div className={statCardClass}>
           <div className={statValueClass}>{totalCommits.toLocaleString()}</div>
@@ -256,22 +456,25 @@ function Analytics() {
           <div className={emptyClass}>No commit activity data available</div>
         ) : (
           <div className="flex h-32 items-end gap-px overflow-x-auto">
-            {dailyActivity.map((day) => (
-              <div
-                key={day.date}
-                className="group relative flex-shrink-0"
-                style={{ width: Math.max(4, Math.floor(800 / dailyActivity.length)) }}
-              >
+            {dailyActivity.map((day) => {
+              const heightPx = Math.max(2, Math.round((day.commit_count / maxDailyCommits) * 128))
+              return (
                 <div
-                  className={`${barClass} w-full rounded-t transition-all hover:opacity-80`}
-                  style={{ height: `${(day.commit_count / maxDailyCommits) * 100}%`, minHeight: 2 }}
-                  title={`${day.date}: ${day.commit_count} commit${day.commit_count === 1 ? '' : 's'}`}
-                />
-                <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-xs text-white group-hover:block">
-                  {day.date}: {day.commit_count}
+                  key={day.date}
+                  className="group relative flex-shrink-0"
+                  style={{ width: Math.max(4, Math.floor(800 / dailyActivity.length)) }}
+                >
+                  <div
+                    className={`${barClass} w-full rounded-t transition-all hover:opacity-80`}
+                    style={{ height: heightPx }}
+                    title={`${day.date}: ${day.commit_count} commit${day.commit_count === 1 ? '' : 's'}`}
+                  />
+                  <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-xs text-white group-hover:block">
+                    {day.date}: {day.commit_count}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -394,7 +597,19 @@ function Analytics() {
                     return (
                       <tr key={hotspot.path ?? index}>
                         <td className={`${tableCellClass} max-w-xs truncate font-mono text-xs`} title={hotspot.path ?? ''}>
-                          {hotspot.path ?? 'unknown'}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedFilePath(hotspot.path)
+                              setActiveTab('blame-timeline')
+                            }}
+                            className={isDark
+                              ? 'text-left text-emerald-400 hover:text-emerald-300 hover:underline'
+                              : 'text-left text-emerald-600 hover:text-emerald-500 hover:underline'
+                            }
+                          >
+                            {hotspot.path ?? 'unknown'}
+                          </button>
                         </td>
                         <td className={tableCellClass}>{hotspot.change_count.toLocaleString()}</td>
                         <td className={tableCellClass}>
@@ -442,6 +657,370 @@ function Analytics() {
         On GitHub, rendering this would require paginating through the entire commit history via multiple API requests.
         As new commits sync from the backend, TanStack DB differential dataflow updates these aggregations incrementally.
       </div>
+        </>
+      )}
+
+      {/* BLAME TIMELINE */}
+      {activeTab === 'blame-timeline' && (
+        <div className="space-y-4">
+          <div className={cardClass}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 className={subheadingClass}>Blame Timeline</h4>
+                <p className={isDark ? 'text-xs text-slate-400' : 'text-xs text-slate-500'}>
+                  See who changed a file over time with full commit history
+                </p>
+              </div>
+              {selectedFilePath && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedFilePath(null)}
+                  className={isDark
+                    ? 'text-xs text-slate-500 hover:text-slate-300'
+                    : 'text-xs text-slate-400 hover:text-slate-600'
+                  }
+                >
+                  Clear selection
+                </button>
+              )}
+            </div>
+
+            {!selectedFilePath ? (
+              <div>
+                <p className={emptyClass + ' mb-4'}>Select a file to view its blame timeline</p>
+                <input
+                  type="text"
+                  value={fileSearchQuery}
+                  onChange={(e) => setFileSearchQuery(e.target.value)}
+                  placeholder="Search files..."
+                  className={isDark
+                    ? 'w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none'
+                    : 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none'
+                  }
+                />
+                <div className="mt-2 flex flex-wrap gap-1 max-h-40 overflow-auto">
+                  {filteredFilePaths.slice(0, 30).map((path) => (
+                    <button
+                      key={path}
+                      type="button"
+                      onClick={() => setSelectedFilePath(path)}
+                      className={isDark
+                        ? 'rounded-lg bg-slate-800 px-2 py-1 text-xs font-mono text-slate-300 transition hover:bg-slate-700 truncate max-w-xs'
+                        : 'rounded-lg bg-slate-100 px-2 py-1 text-xs font-mono text-slate-600 transition hover:bg-slate-200 truncate max-w-xs'
+                      }
+                      title={path}
+                    >
+                      {path}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className={isDark
+                  ? 'mb-4 rounded-lg bg-slate-800 px-3 py-2 font-mono text-sm text-emerald-300'
+                  : 'mb-4 rounded-lg bg-slate-100 px-3 py-2 font-mono text-sm text-emerald-700'
+                }>
+                  {selectedFilePath}
+                </div>
+
+                {fileImpactData && (
+                  <>
+                    <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+                      <div className={statCardClass}>
+                        <div className={statValueClass}>{fileImpactData.totalChanges}</div>
+                        <div className={statLabelClass}>Total Changes</div>
+                      </div>
+                      <div className={statCardClass}>
+                        <div className={statValueClass}>{fileImpactData.authorChanges.length}</div>
+                        <div className={statLabelClass}>Contributors</div>
+                      </div>
+                    </div>
+
+                    <h5 className={isDark ? 'mb-2 text-sm font-medium text-slate-200' : 'mb-2 text-sm font-medium text-slate-700'}>
+                      Contributors to this file
+                    </h5>
+                    <div className="mb-4 max-h-48 overflow-auto">
+                      <table className="w-full text-left">
+                        <thead>
+                          <tr>
+                            <th className={tableHeaderClass}>Author</th>
+                            <th className={tableHeaderClass}>Changes</th>
+                            <th className={tableHeaderClass}>+/-</th>
+                            <th className={tableHeaderClass}>Last Change</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fileImpactData.authorChanges.map((author) => (
+                            <tr key={author.email}>
+                              <td className={tableCellClass}>
+                                <div className="font-medium">{author.name}</div>
+                                <div className={isDark ? 'text-xs text-slate-500' : 'text-xs text-slate-400'}>
+                                  {author.email}
+                                </div>
+                              </td>
+                              <td className={tableCellClass}>{author.count}</td>
+                              <td className={tableCellClass}>
+                                <span className={additionsClass}>+{author.additions}</span>
+                                {' / '}
+                                <span className={deletionsClass}>-{author.deletions}</span>
+                              </td>
+                              <td className={tableCellClass}>
+                                {author.lastChange ? author.lastChange.slice(0, 10) : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <h5 className={isDark ? 'mb-2 text-sm font-medium text-slate-200' : 'mb-2 text-sm font-medium text-slate-700'}>
+                      Commit History
+                    </h5>
+                    <div className="max-h-64 overflow-auto space-y-2">
+                      {fileImpactData.commits.slice(0, 50).map((commit) => {
+                        const change = fileImpactData.changesByCommit.get(commit.sha ?? '')
+                        return (
+                          <div
+                            key={commit.sha}
+                            className={isDark
+                              ? 'rounded-lg border border-slate-700 bg-slate-800/50 p-3'
+                              : 'rounded-lg border border-slate-200 bg-slate-50 p-3'
+                            }
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className={isDark ? 'text-sm text-slate-100 truncate' : 'text-sm text-slate-800 truncate'}>
+                                  {(commit.message ?? '').split('\n')[0] || '(no message)'}
+                                </div>
+                                <div className={isDark ? 'text-xs text-slate-500' : 'text-xs text-slate-400'}>
+                                  {commit.author_name} · {commit.authored_at?.slice(0, 10)}
+                                </div>
+                              </div>
+                              <div className="text-right text-xs">
+                                <span className={additionsClass}>+{change?.additions ?? 0}</span>
+                                {' / '}
+                                <span className={deletionsClass}>-{change?.deletions ?? 0}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {fileImpactData.commits.length > 50 && (
+                        <p className={isDark ? 'text-xs text-slate-500' : 'text-xs text-slate-400'}>
+                          Showing 50 of {fileImpactData.commits.length} commits
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* COMMIT SEARCH */}
+      {activeTab === 'commit-search' && (
+        <div className={cardClass}>
+          <h4 className={subheadingClass}>Commit Search with Complex Filters</h4>
+          <p className={isDark ? 'mb-4 text-xs text-slate-400' : 'mb-4 text-xs text-slate-500'}>
+            Search across {totalCommits.toLocaleString()} commits with multiple combinable filters.
+            All filtering happens instantly in your browser - no API calls needed.
+          </p>
+
+          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+            <div>
+              <label className={isDark ? 'mb-1 block text-xs text-slate-400' : 'mb-1 block text-xs text-slate-500'}>
+                Author (name or email)
+              </label>
+              <input
+                type="text"
+                value={searchFilters.author}
+                onChange={(e) => setSearchFilters((prev) => ({ ...prev, author: e.target.value }))}
+                placeholder="e.g. john"
+                className={isDark
+                  ? 'w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none'
+                  : 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none'
+                }
+              />
+            </div>
+            <div>
+              <label className={isDark ? 'mb-1 block text-xs text-slate-400' : 'mb-1 block text-xs text-slate-500'}>
+                Commit message contains
+              </label>
+              <input
+                type="text"
+                value={searchFilters.message}
+                onChange={(e) => setSearchFilters((prev) => ({ ...prev, message: e.target.value }))}
+                placeholder="e.g. fix bug"
+                className={isDark
+                  ? 'w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none'
+                  : 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none'
+                }
+              />
+            </div>
+            <div>
+              <label className={isDark ? 'mb-1 block text-xs text-slate-400' : 'mb-1 block text-xs text-slate-500'}>
+                File path contains
+              </label>
+              <input
+                type="text"
+                value={searchFilters.filePath}
+                onChange={(e) => setSearchFilters((prev) => ({ ...prev, filePath: e.target.value }))}
+                placeholder="e.g. src/components"
+                className={isDark
+                  ? 'w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none'
+                  : 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none'
+                }
+              />
+            </div>
+            <div>
+              <label className={isDark ? 'mb-1 block text-xs text-slate-400' : 'mb-1 block text-xs text-slate-500'}>
+                Date from
+              </label>
+              <input
+                type="date"
+                value={searchFilters.dateFrom}
+                onChange={(e) => setSearchFilters((prev) => ({ ...prev, dateFrom: e.target.value }))}
+                className={isDark
+                  ? 'w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none'
+                  : 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-emerald-500 focus:outline-none'
+                }
+              />
+            </div>
+            <div>
+              <label className={isDark ? 'mb-1 block text-xs text-slate-400' : 'mb-1 block text-xs text-slate-500'}>
+                Date to
+              </label>
+              <input
+                type="date"
+                value={searchFilters.dateTo}
+                onChange={(e) => setSearchFilters((prev) => ({ ...prev, dateTo: e.target.value }))}
+                className={isDark
+                  ? 'w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none'
+                  : 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-emerald-500 focus:outline-none'
+                }
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={isDark ? 'mb-1 block text-xs text-slate-400' : 'mb-1 block text-xs text-slate-500'}>
+                  Min additions
+                </label>
+                <input
+                  type="number"
+                  value={searchFilters.minAdditions}
+                  onChange={(e) => setSearchFilters((prev) => ({ ...prev, minAdditions: e.target.value }))}
+                  placeholder="0"
+                  min="0"
+                  className={isDark
+                    ? 'w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none'
+                    : 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-emerald-500 focus:outline-none'
+                  }
+                />
+              </div>
+              <div>
+                <label className={isDark ? 'mb-1 block text-xs text-slate-400' : 'mb-1 block text-xs text-slate-500'}>
+                  Max additions
+                </label>
+                <input
+                  type="number"
+                  value={searchFilters.maxAdditions}
+                  onChange={(e) => setSearchFilters((prev) => ({ ...prev, maxAdditions: e.target.value }))}
+                  placeholder="∞"
+                  min="0"
+                  className={isDark
+                    ? 'w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none'
+                    : 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-emerald-500 focus:outline-none'
+                  }
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSearchFilters({
+                author: '',
+                message: '',
+                filePath: '',
+                dateFrom: '',
+                dateTo: '',
+                minAdditions: '',
+                maxAdditions: '',
+                minDeletions: '',
+                maxDeletions: '',
+              })}
+              className={isDark
+                ? 'rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400 transition hover:bg-slate-800'
+                : 'rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100'
+              }
+            >
+              Clear all filters
+            </button>
+            {searchResults && (
+              <span className={isDark ? 'text-sm text-emerald-400' : 'text-sm text-emerald-600'}>
+                Found {searchResults.length.toLocaleString()} matching commits
+              </span>
+            )}
+          </div>
+
+          {!searchResults ? (
+            <div className={emptyClass}>
+              Enter at least one filter to search commits
+            </div>
+          ) : searchResults.length === 0 ? (
+            <div className={emptyClass}>
+              No commits match your filters
+            </div>
+          ) : (
+            <div className="max-h-96 overflow-auto space-y-2">
+              {searchResults.slice(0, 100).map((commit) => {
+                const agg = commitAggregates.get(commit.sha ?? '')
+                return (
+                  <div
+                    key={commit.sha}
+                    className={isDark
+                      ? 'rounded-lg border border-slate-700 bg-slate-800/50 p-3'
+                      : 'rounded-lg border border-slate-200 bg-slate-50 p-3'
+                    }
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className={isDark ? 'text-sm text-slate-100' : 'text-sm text-slate-800'}>
+                          {(commit.message ?? '').split('\n')[0] || '(no message)'}
+                        </div>
+                        <div className={isDark ? 'text-xs text-slate-500' : 'text-xs text-slate-400'}>
+                          <span className="font-medium">{commit.author_name}</span>
+                          {' · '}
+                          {commit.authored_at?.slice(0, 10)}
+                          {' · '}
+                          <span className="font-mono">{commit.sha?.slice(0, 7)}</span>
+                        </div>
+                      </div>
+                      <div className="text-right text-xs whitespace-nowrap">
+                        <span className={additionsClass}>+{agg?.additions ?? 0}</span>
+                        {' / '}
+                        <span className={deletionsClass}>-{agg?.deletions ?? 0}</span>
+                        <div className={isDark ? 'text-slate-500' : 'text-slate-400'}>
+                          {agg?.files.length ?? 0} files
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              {searchResults.length > 100 && (
+                <p className={isDark ? 'text-xs text-slate-500' : 'text-xs text-slate-400'}>
+                  Showing 100 of {searchResults.length} matching commits
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
