@@ -2,12 +2,15 @@ import * as React from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/react-db'
+import { diffLines } from 'diff'
 import { useRepoStreams } from '@ps/streams'
 import { useRepoFixture } from '@ps/test-fixture-bridge'
 import { useCollections } from '@tsdb/collections'
 import type { Database } from '@ps/schema'
+import { gitStore, type PackRow } from '@ps/git-store'
 import { useTheme } from '../ui/theme-context'
 import { BreadcrumbChips } from '../components/BreadcrumbChips'
+import { InlineSpinner } from '../components/InlineSpinner'
 
 export const Route = createFileRoute('/org/$orgId/repo/$repoId/analytics' as any)({
   component: Analytics,
@@ -37,6 +40,24 @@ type DailyActivity = {
   commit_count: number
 }
 
+type DiffLine = {
+  type: 'context' | 'add' | 'remove'
+  text: string
+}
+
+type SingleFileDiffState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; lines: DiffLine[] }
+  | { status: 'binary'; message: string }
+  | { status: 'missing'; message: string }
+  | { status: 'too_large'; message: string }
+
+const decoder = 'TextDecoder' in globalThis ? new TextDecoder('utf-8') : null
+const MAX_DIFF_PREVIEW_BYTES = 200_000
+const DIFF_SNIPPET_LIMIT = 2_000
+
 function Analytics() {
   const { orgId, repoId } = Route.useParams()
   const { theme } = useTheme()
@@ -47,6 +68,7 @@ function Analytics() {
   const {
     commits: commitsCollection,
     file_changes: fileChangesCollection,
+    objects: objectsCollection,
   } = useCollections()
 
   const { data: liveCommits = [] } = useLiveQuery(
@@ -83,17 +105,54 @@ function Analytics() {
   const commits = fixture?.commits?.length ? fixture.commits : liveCommits
   const fileChanges = fixture?.fileChanges?.length ? fixture.fileChanges : liveFileChanges
 
+  // Pack indexing for diff viewing
+  const packRows = useLiveQuery(
+    (q) =>
+      q
+        .from({ o: objectsCollection })
+        .where(({ o }) => eq(o.org_id, orgId))
+        .where(({ o }) => eq(o.repo_id, repoId))
+        .select(({ o }) => ({
+          id: o.id,
+          org_id: o.org_id,
+          repo_id: o.repo_id,
+          pack_oid: o.pack_oid,
+          storage_key: o.storage_key,
+          size_bytes: o.size_bytes,
+          pack_bytes: '',
+          created_at: o.created_at,
+        })),
+    [objectsCollection, orgId, repoId],
+  ) as { data: PackRow[] }
+
+  const packKey = React.useMemo(
+    () => packRows.data.map((row) => `${row.pack_oid}:${row.storage_key ?? ''}`).join('|'),
+    [packRows.data],
+  )
+
+  React.useEffect(() => {
+    if (!packRows.data.length) return
+    void gitStore.indexPacks(packRows.data).catch((error) => {
+      console.error('[gitStore] failed to index packs (analytics view)', error)
+    })
+  }, [packKey, packRows.data])
+
   // File hotspot ignore patterns - demonstrates reactive filtering
   const defaultIgnorePatterns = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'CHANGELOG.md', 'CHANGELOG']
   const [ignoredPatterns, setIgnoredPatterns] = React.useState<string[]>(defaultIgnorePatterns)
 
   // === ADVANCED FEATURES STATE ===
   // Active tab for advanced features
-  const [activeTab, setActiveTab] = React.useState<'overview' | 'blame-timeline' | 'commit-search'>('overview')
+  const [activeTab, setActiveTab] = React.useState<'overview' | 'author-insights' | 'blame-timeline' | 'commit-search'>('overview')
+
+  // Author Insights state
+  const [selectedAuthorEmail, setSelectedAuthorEmail] = React.useState<string | null>(null)
 
   // Blame Timeline state
   const [selectedFilePath, setSelectedFilePath] = React.useState<string | null>(null)
   const [fileSearchQuery, setFileSearchQuery] = React.useState('')
+  const [expandedBlameCommit, setExpandedBlameCommit] = React.useState<string | null>(null)
+  const [blameDiffStates, setBlameDiffStates] = React.useState<Record<string, SingleFileDiffState>>({})
 
   // Commit Search state
   const [searchFilters, setSearchFilters] = React.useState({
@@ -350,6 +409,176 @@ function Analytics() {
     return Array.from(authors.entries()).map(([email, name]) => ({ email, name }))
   }, [commits])
 
+  // Author-specific file hotspots (across all branches)
+  const authorFileHotspots = React.useMemo<FileHotspot[]>(() => {
+    if (!selectedAuthorEmail) return []
+    
+    // Get all commit SHAs by this author
+    const authorCommitShas = new Set<string>()
+    for (const commit of commits) {
+      if (commit.author_email === selectedAuthorEmail && commit.sha) {
+        authorCommitShas.add(commit.sha)
+      }
+    }
+    
+    // Aggregate file changes for those commits
+    const hotspotsMap = new Map<string, FileHotspot>()
+    for (const fc of fileChanges) {
+      if (!fc.commit_sha || !authorCommitShas.has(fc.commit_sha)) continue
+      const path = fc.path ?? 'unknown'
+      const existing = hotspotsMap.get(path) ?? {
+        path: fc.path,
+        change_count: 0,
+        total_additions: 0,
+        total_deletions: 0,
+      }
+      existing.change_count += 1
+      existing.total_additions += fc.additions ?? 0
+      existing.total_deletions += fc.deletions ?? 0
+      hotspotsMap.set(path, existing)
+    }
+    
+    return Array.from(hotspotsMap.values()).sort((a, b) => b.change_count - a.change_count)
+  }, [selectedAuthorEmail, commits, fileChanges])
+
+  // Apply ignore patterns to author file hotspots
+  const filteredAuthorFileHotspots = React.useMemo<FileHotspot[]>(() => {
+    const isIgnored = (path: string | null) => {
+      if (!path) return false
+      const filename = path.split('/').pop() ?? path
+      return ignoredPatterns.some((pattern) => {
+        if (pattern.startsWith('*')) {
+          return filename.endsWith(pattern.slice(1))
+        }
+        if (pattern.endsWith('*')) {
+          return filename.startsWith(pattern.slice(0, -1))
+        }
+        return filename === pattern || path === pattern
+      })
+    }
+    return authorFileHotspots.filter((h) => !isIgnored(h.path))
+  }, [authorFileHotspots, ignoredPatterns])
+
+  // Get selected author stats
+  const selectedAuthorStats = React.useMemo(() => {
+    if (!selectedAuthorEmail) return null
+    return contributorStats.find((s) => s.author_email === selectedAuthorEmail) ?? null
+  }, [selectedAuthorEmail, contributorStats])
+
+  // === BLAME TIMELINE DIFF LOADING ===
+  const isLikelyBinary = React.useCallback((content: Uint8Array) => {
+    if (!content || content.length === 0) return false
+    const sample = content.subarray(0, 4000)
+    let decoded: string
+    try {
+      decoded = decoder?.decode(sample, { stream: false }) ?? new TextDecoder('utf-8', { fatal: false }).decode(sample)
+    } catch {
+      return true
+    }
+    return /\u0000/.test(decoded)
+  }, [])
+
+  const decodeContent = React.useCallback((content: Uint8Array) => {
+    if (decoder) return decoder.decode(content)
+    return new TextDecoder('utf-8', { fatal: false }).decode(content)
+  }, [])
+
+  const loadSingleFileDiff = React.useCallback(
+    async (commitSha: string, filePath: string): Promise<SingleFileDiffState> => {
+      const { parents } = await gitStore.getCommitInfo(commitSha)
+      const parentSha = parents?.[0] ?? null
+
+      let nextBytes: Uint8Array | null = null
+      let prevBytes: Uint8Array | null = null
+
+      try {
+        const result = await gitStore.readFile(commitSha, filePath)
+        nextBytes = result.content
+      } catch {
+        nextBytes = null
+      }
+
+      if (parentSha) {
+        try {
+          const prevResult = await gitStore.readFile(parentSha, filePath)
+          prevBytes = prevResult.content
+        } catch {
+          prevBytes = null
+        }
+      }
+
+      if (!nextBytes && !prevBytes) {
+        return { status: 'missing', message: 'File contents unavailable in this replica.' }
+      }
+
+      const candidate = nextBytes ?? prevBytes
+      if (candidate && candidate.length > MAX_DIFF_PREVIEW_BYTES) {
+        return { status: 'too_large', message: 'File is too large for inline preview.' }
+      }
+
+      if ((nextBytes && isLikelyBinary(nextBytes)) || (prevBytes && isLikelyBinary(prevBytes))) {
+        return { status: 'binary', message: 'Binary file — download to inspect locally.' }
+      }
+
+      const nextContent = nextBytes ? decodeContent(nextBytes) : ''
+      const prevContent = prevBytes ? decodeContent(prevBytes) : ''
+      const diff = diffLines(prevContent, nextContent)
+
+      const lines: DiffLine[] = []
+      for (const part of diff) {
+        const type: DiffLine['type'] = part.added ? 'add' : part.removed ? 'remove' : 'context'
+        const value = part.value.endsWith('\n') ? part.value.slice(0, -1) : part.value
+        const segments = value.split('\n')
+        for (const segment of segments) {
+          const text = segment.slice(0, DIFF_SNIPPET_LIMIT)
+          lines.push({ type, text })
+        }
+      }
+
+      return { status: 'ready', lines }
+    },
+    [decodeContent, isLikelyBinary],
+  )
+
+  // Effect to load diff when a blame commit is expanded
+  React.useEffect(() => {
+    if (!expandedBlameCommit || !selectedFilePath) return
+    const key = `${expandedBlameCommit}:${selectedFilePath}`
+    const existingState = blameDiffStates[key]
+    if (existingState && existingState.status !== 'idle') {
+      return
+    }
+
+    let cancelled = false
+    setBlameDiffStates((prev) => ({ ...prev, [key]: { status: 'loading' } }))
+
+    const startDiff = async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+
+      loadSingleFileDiff(expandedBlameCommit, selectedFilePath)
+        .then((state) => {
+          if (cancelled) return
+          setBlameDiffStates((prev) => ({ ...prev, [key]: state }))
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          if (cancelled) return
+          setBlameDiffStates((prev) => ({ ...prev, [key]: { status: 'error', message } }))
+        })
+    }
+
+    void startDiff()
+
+    return () => {
+      cancelled = true
+    }
+  }, [expandedBlameCommit, selectedFilePath, blameDiffStates, loadSingleFileDiff])
+
+  // Clear expanded commit when file selection changes
+  React.useEffect(() => {
+    setExpandedBlameCommit(null)
+  }, [selectedFilePath])
+
   const headingClass = isDark ? 'text-lg font-semibold text-slate-100' : 'text-lg font-semibold text-slate-900'
   const subheadingClass = isDark ? 'text-base font-medium text-slate-200' : 'text-base font-medium text-slate-800'
   const cardClass = isDark
@@ -394,9 +623,10 @@ function Analytics() {
 
       {/* Tab Navigation */}
       <div className="flex flex-wrap gap-1">
-        {(['overview', 'blame-timeline', 'commit-search'] as const).map((tab) => {
+        {(['overview', 'author-insights', 'blame-timeline', 'commit-search'] as const).map((tab) => {
           const labels = {
             overview: 'Overview',
+            'author-insights': 'Author Insights',
             'blame-timeline': 'Blame Timeline',
             'commit-search': 'Commit Search',
           }
@@ -500,10 +730,25 @@ function Analytics() {
                 </thead>
                 <tbody>
                   {contributorStats.slice(0, 15).map((stat, index) => (
-                    <tr key={stat.author_email ?? index}>
+                    <tr
+                      key={stat.author_email ?? index}
+                      onClick={() => {
+                        setSelectedAuthorEmail(stat.author_email)
+                        setActiveTab('author-insights')
+                      }}
+                      className={isDark
+                        ? 'cursor-pointer transition hover:bg-slate-800/50'
+                        : 'cursor-pointer transition hover:bg-slate-50'
+                      }
+                    >
                       <td className={tableCellClass}>{index + 1}</td>
                       <td className={tableCellClass}>
-                        <div className="font-medium">{stat.author_name ?? 'Unknown'}</div>
+                        <div className={isDark
+                          ? 'font-medium text-emerald-400 hover:text-emerald-300'
+                          : 'font-medium text-emerald-600 hover:text-emerald-500'
+                        }>
+                          {stat.author_name ?? 'Unknown'}
+                        </div>
                         <div className={isDark ? 'text-xs text-slate-500' : 'text-xs text-slate-400'}>
                           {stat.author_email}
                         </div>
@@ -660,6 +905,244 @@ function Analytics() {
         </>
       )}
 
+      {/* AUTHOR INSIGHTS */}
+      {activeTab === 'author-insights' && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {/* Leaderboard - Left Panel */}
+          <div className={cardClass}>
+            <h4 className={subheadingClass}>Contributor Leaderboard</h4>
+            <p className={isDark ? 'mb-4 text-xs text-slate-400' : 'mb-4 text-xs text-slate-500'}>
+              Click an author to see their file hotspots across all branches
+            </p>
+            {contributorStats.length === 0 ? (
+              <div className={emptyClass}>No contributor data available</div>
+            ) : (
+              <div className="max-h-[500px] overflow-auto space-y-1">
+                {contributorStats.map((stat, index) => {
+                  const isSelected = stat.author_email === selectedAuthorEmail
+                  return (
+                    <button
+                      key={stat.author_email ?? index}
+                      type="button"
+                      onClick={() => setSelectedAuthorEmail(stat.author_email)}
+                      className={
+                        isSelected
+                          ? isDark
+                            ? 'w-full rounded-lg bg-emerald-500/20 p-3 text-left transition border border-emerald-500/30'
+                            : 'w-full rounded-lg bg-emerald-50 p-3 text-left transition border border-emerald-200'
+                          : isDark
+                            ? 'w-full rounded-lg bg-slate-800/50 p-3 text-left transition hover:bg-slate-800 border border-transparent'
+                            : 'w-full rounded-lg bg-slate-50 p-3 text-left transition hover:bg-slate-100 border border-transparent'
+                      }
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className={isDark ? 'font-medium text-slate-100 truncate' : 'font-medium text-slate-800 truncate'}>
+                            <span className={isDark ? 'text-slate-500 mr-2' : 'text-slate-400 mr-2'}>#{index + 1}</span>
+                            {stat.author_name ?? 'Unknown'}
+                          </div>
+                          <div className={isDark ? 'text-xs text-slate-500 truncate' : 'text-xs text-slate-400 truncate'}>
+                            {stat.author_email}
+                          </div>
+                        </div>
+                        <div className="text-right text-xs whitespace-nowrap">
+                          <div className={isDark ? 'font-medium text-slate-200' : 'font-medium text-slate-700'}>
+                            {stat.commit_count} commits
+                          </div>
+                          <div>
+                            <span className={additionsClass}>+{stat.total_additions.toLocaleString()}</span>
+                            {' / '}
+                            <span className={deletionsClass}>-{stat.total_deletions.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* File Hotspots - Right Panel (2 cols) */}
+          <div className={`${cardClass} lg:col-span-2`}>
+            {!selectedAuthorEmail ? (
+              <div className="flex h-full items-center justify-center">
+                <div className={emptyClass}>Select an author from the leaderboard to view their file hotspots</div>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h4 className={subheadingClass}>
+                      File Hotspots for {selectedAuthorStats?.author_name ?? selectedAuthorEmail}
+                    </h4>
+                    <p className={isDark ? 'text-xs text-slate-400' : 'text-xs text-slate-500'}>
+                      Most frequently changed files by this author across all branches
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAuthorEmail(null)}
+                    className={isDark
+                      ? 'text-xs text-slate-500 hover:text-slate-300'
+                      : 'text-xs text-slate-400 hover:text-slate-600'
+                    }
+                  >
+                    Clear selection
+                  </button>
+                </div>
+
+                {/* Author Stats Summary */}
+                {selectedAuthorStats && (
+                  <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <div className={statCardClass}>
+                      <div className={statValueClass}>{selectedAuthorStats.commit_count}</div>
+                      <div className={statLabelClass}>Commits</div>
+                    </div>
+                    <div className={statCardClass}>
+                      <div className={statValueClass}>{authorFileHotspots.length}</div>
+                      <div className={statLabelClass}>Files Touched</div>
+                    </div>
+                    <div className={statCardClass}>
+                      <div className={`${statValueClass} ${additionsClass}`}>+{selectedAuthorStats.total_additions.toLocaleString()}</div>
+                      <div className={statLabelClass}>Additions</div>
+                    </div>
+                    <div className={statCardClass}>
+                      <div className={`${statValueClass} ${deletionsClass}`}>-{selectedAuthorStats.total_deletions.toLocaleString()}</div>
+                      <div className={statLabelClass}>Deletions</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Ignore Patterns */}
+                <div className="mb-4 flex flex-wrap items-center gap-1">
+                  {ignoredPatterns.length > 0 ? (
+                    <>
+                      <span className={isDark ? 'text-xs text-slate-500' : 'text-xs text-slate-400'}>Ignoring:</span>
+                      {ignoredPatterns.map((pattern) => (
+                        <button
+                          key={pattern}
+                          type="button"
+                          onClick={() => setIgnoredPatterns((prev) => prev.filter((p) => p !== pattern))}
+                          className={isDark
+                            ? 'inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-300 transition hover:bg-slate-700'
+                            : 'inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 transition hover:bg-slate-200'
+                          }
+                          title={`Click to stop ignoring ${pattern}`}
+                        >
+                          {pattern}
+                          <span className="text-[10px]">×</span>
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setIgnoredPatterns([])}
+                        className={isDark
+                          ? 'ml-1 text-xs text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline'
+                          : 'ml-1 text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline'
+                        }
+                      >
+                        Clear all
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIgnoredPatterns(defaultIgnorePatterns)}
+                      className={isDark
+                        ? 'text-xs text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline'
+                        : 'text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline'
+                      }
+                    >
+                      Reset default filters
+                    </button>
+                  )}
+                </div>
+
+                {/* File Hotspots Table */}
+                {filteredAuthorFileHotspots.length === 0 ? (
+                  <div className={emptyClass}>
+                    {authorFileHotspots.length > 0
+                      ? `All ${authorFileHotspots.length} files are filtered out. Try removing some ignore patterns.`
+                      : 'No file change data available for this author'}
+                  </div>
+                ) : (
+                  <div className="max-h-[400px] overflow-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr>
+                          <th className={tableHeaderClass}>File</th>
+                          <th className={tableHeaderClass}>Changes</th>
+                          <th className={tableHeaderClass}>+/-</th>
+                          <th className={tableHeaderClass} style={{ width: 60 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredAuthorFileHotspots.slice(0, 50).map((hotspot, index) => {
+                          const filename = (hotspot.path ?? '').split('/').pop() ?? hotspot.path ?? ''
+                          return (
+                            <tr key={hotspot.path ?? index}>
+                              <td className={`${tableCellClass} max-w-xs truncate font-mono text-xs`} title={hotspot.path ?? ''}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedFilePath(hotspot.path)
+                                    setActiveTab('blame-timeline')
+                                  }}
+                                  className={isDark
+                                    ? 'text-left text-emerald-400 hover:text-emerald-300 hover:underline'
+                                    : 'text-left text-emerald-600 hover:text-emerald-500 hover:underline'
+                                  }
+                                >
+                                  {hotspot.path ?? 'unknown'}
+                                </button>
+                              </td>
+                              <td className={tableCellClass}>{hotspot.change_count.toLocaleString()}</td>
+                              <td className={tableCellClass}>
+                                <span className={additionsClass}>+{hotspot.total_additions.toLocaleString()}</span>
+                                {' / '}
+                                <span className={deletionsClass}>-{hotspot.total_deletions.toLocaleString()}</span>
+                              </td>
+                              <td className={tableCellClass}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (filename && !ignoredPatterns.includes(filename)) {
+                                      setIgnoredPatterns((prev) => [...prev, filename])
+                                    }
+                                  }}
+                                  className={isDark
+                                    ? 'rounded px-1.5 py-0.5 text-[10px] text-slate-500 transition hover:bg-slate-800 hover:text-slate-300'
+                                    : 'rounded px-1.5 py-0.5 text-[10px] text-slate-400 transition hover:bg-slate-100 hover:text-slate-600'
+                                  }
+                                  title={`Ignore ${filename}`}
+                                >
+                                  Ignore
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    {filteredAuthorFileHotspots.length > 50 && (
+                      <p className={isDark ? 'mt-3 text-xs text-slate-500' : 'mt-3 text-xs text-slate-400'}>
+                        Showing 50 of {filteredAuthorFileHotspots.length} files
+                      </p>
+                    )}
+                  </div>
+                )}
+                {ignoredPatterns.length > 0 && authorFileHotspots.length > filteredAuthorFileHotspots.length && (
+                  <p className={isDark ? 'mt-3 text-xs text-slate-500' : 'mt-3 text-xs text-slate-400'}>
+                    {authorFileHotspots.length - filteredAuthorFileHotspots.length} files filtered out
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* BLAME TIMELINE */}
       {activeTab === 'blame-timeline' && (
         <div className="space-y-4">
@@ -777,12 +1260,17 @@ function Analytics() {
                     <h5 className={isDark ? 'mb-2 text-sm font-medium text-slate-200' : 'mb-2 text-sm font-medium text-slate-700'}>
                       Commit History
                     </h5>
-                    <div className="max-h-64 overflow-auto space-y-2">
+                    <div className="max-h-[500px] overflow-auto space-y-2">
                       {fileImpactData.commits.slice(0, 50).map((commit) => {
                         const change = fileImpactData.changesByCommit.get(commit.sha ?? '')
+                        const sha = commit.sha ?? ''
+                        const isExpanded = expandedBlameCommit === sha
+                        const diffKey = `${sha}:${selectedFilePath}`
+                        const diffState = blameDiffStates[diffKey]
+
                         return (
                           <div
-                            key={commit.sha}
+                            key={sha}
                             className={isDark
                               ? 'rounded-lg border border-slate-700 bg-slate-800/50 p-3'
                               : 'rounded-lg border border-slate-200 bg-slate-50 p-3'
@@ -794,15 +1282,76 @@ function Analytics() {
                                   {(commit.message ?? '').split('\n')[0] || '(no message)'}
                                 </div>
                                 <div className={isDark ? 'text-xs text-slate-500' : 'text-xs text-slate-400'}>
-                                  {commit.author_name} · {commit.authored_at?.slice(0, 10)}
+                                  {commit.author_name} · {commit.authored_at?.slice(0, 10)} · <span className="font-mono">{sha.slice(0, 7)}</span>
                                 </div>
                               </div>
-                              <div className="text-right text-xs">
-                                <span className={additionsClass}>+{change?.additions ?? 0}</span>
-                                {' / '}
-                                <span className={deletionsClass}>-{change?.deletions ?? 0}</span>
+                              <div className="flex items-center gap-2">
+                                <div className="text-right text-xs">
+                                  <span className={additionsClass}>+{change?.additions ?? 0}</span>
+                                  {' / '}
+                                  <span className={deletionsClass}>-{change?.deletions ?? 0}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedBlameCommit((prev) => (prev === sha ? null : sha))}
+                                  className={isDark
+                                    ? 'rounded-full border border-slate-600 px-2 py-0.5 text-[10px] font-medium text-slate-300 transition hover:bg-slate-700'
+                                    : 'rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-medium text-slate-600 transition hover:bg-slate-200'
+                                  }
+                                >
+                                  {isExpanded ? 'Hide diff' : 'View diff'}
+                                </button>
                               </div>
                             </div>
+
+                            {/* Diff View */}
+                            {isExpanded && (
+                              <div className="mt-3">
+                                {!diffState || diffState.status === 'idle' || diffState.status === 'loading' ? (
+                                  <div className={`flex items-center gap-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                    <InlineSpinner size={12} color={isDark ? '#94a3b8' : '#64748b'} aria-label="Loading diff" />
+                                    <span>Loading diff…</span>
+                                  </div>
+                                ) : diffState.status === 'error' ? (
+                                  <div className={`text-xs ${isDark ? 'text-red-400' : 'text-red-600'}`}>
+                                    Failed to load diff: {diffState.message}
+                                  </div>
+                                ) : diffState.status === 'missing' || diffState.status === 'binary' || diffState.status === 'too_large' ? (
+                                  <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                    {diffState.message}
+                                  </div>
+                                ) : (
+                                  <div className={isDark
+                                    ? 'max-h-80 overflow-auto rounded-lg border border-slate-700 bg-slate-950 text-[12px] font-mono'
+                                    : 'max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-100 text-[12px] font-mono'
+                                  }>
+                                    {diffState.lines.map((line, idx) => (
+                                      <div
+                                        key={idx}
+                                        className={
+                                          line.type === 'add'
+                                            ? isDark
+                                              ? 'flex gap-2 bg-emerald-500/10 px-3 py-0.5 text-emerald-200'
+                                              : 'flex gap-2 bg-emerald-50 px-3 py-0.5 text-emerald-800'
+                                            : line.type === 'remove'
+                                              ? isDark
+                                                ? 'flex gap-2 bg-red-500/10 px-3 py-0.5 text-red-200'
+                                                : 'flex gap-2 bg-red-50 px-3 py-0.5 text-red-800'
+                                              : isDark
+                                                ? 'flex gap-2 px-3 py-0.5 text-slate-300'
+                                                : 'flex gap-2 px-3 py-0.5 text-slate-700'
+                                        }
+                                      >
+                                        <span className="w-3 select-none text-[10px] opacity-60">
+                                          {line.type === 'add' ? '+' : line.type === 'remove' ? '−' : ''}
+                                        </span>
+                                        <span className="whitespace-pre-wrap break-all">{line.text || ' '}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )
                       })}
