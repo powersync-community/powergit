@@ -1,15 +1,12 @@
 import * as React from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { IoRefreshOutline } from 'react-icons/io5'
 import { eq } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/react-db'
 import { useRepoStreams } from '@ps/streams'
 import { useRepoFixture } from '@ps/test-fixture-bridge'
 import { useCollections } from '@tsdb/collections'
 import type { Database } from '@ps/schema'
-import { requestGithubImport } from '@ps/daemon-client'
 import { useTheme } from '../ui/theme-context'
-import { InlineSpinner } from '../components/InlineSpinner'
 import { BreadcrumbChips } from '../components/BreadcrumbChips'
 
 export const Route = createFileRoute('/org/$orgId/repo/$repoId/analytics' as any)({
@@ -18,9 +15,6 @@ export const Route = createFileRoute('/org/$orgId/repo/$repoId/analytics' as any
 
 type CommitRow = Pick<Database['commits'], 'sha' | 'author_name' | 'author_email' | 'authored_at'>
 type FileChangeRow = Pick<Database['file_changes'], 'commit_sha' | 'path' | 'additions' | 'deletions'>
-type RepoRow = Pick<Database['repositories'], 'repo_url' | 'default_branch'>
-type ImportJobRow = Pick<Database['import_jobs'], 'id' | 'status' | 'error' | 'workflow_url'>
-
 type ContributorStat = {
   author_name: string | null
   author_email: string | null
@@ -53,31 +47,7 @@ function Analytics() {
   const {
     commits: commitsCollection,
     file_changes: fileChangesCollection,
-    repositories,
-    import_jobs: importJobs,
   } = useCollections()
-
-  const { data: repoRows = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ r: repositories })
-        .where(({ r }) => eq(r.org_id, orgId))
-        .where(({ r }) => eq(r.repo_id, repoId))
-        .select(({ r }) => ({ repo_url: r.repo_url, default_branch: r.default_branch })),
-    [repositories, orgId, repoId],
-  ) as { data: Array<RepoRow> }
-  const repoUrl = repoRows[0]?.repo_url ?? null
-  const repoDefaultBranch = repoRows[0]?.default_branch ?? null
-
-  const { data: latestImportJobs = [] } = useLiveQuery(
-    (q) =>
-      q
-        .from({ j: importJobs })
-        .where(({ j }) => eq(j.org_id, orgId))
-        .where(({ j }) => eq(j.repo_id, repoId))
-        .orderBy(({ j }) => j.updated_at ?? '', 'desc'),
-    [importJobs, orgId, repoId],
-  ) as { data: Array<ImportJobRow> }
 
   const { data: liveCommits = [] } = useLiveQuery(
     (q) =>
@@ -112,48 +82,9 @@ function Analytics() {
   const commits = fixture?.commits?.length ? fixture.commits : liveCommits
   const fileChanges = fixture?.fileChanges?.length ? fixture.fileChanges : liveFileChanges
 
-  const [refreshStatus, setRefreshStatus] = React.useState<'idle' | 'loading' | 'queued' | 'running' | 'done' | 'error'>('idle')
-  const [refreshJobId, setRefreshJobId] = React.useState<string | null>(null)
-  const [refreshWorkflowUrl, setRefreshWorkflowUrl] = React.useState<string | null>(null)
-  const [refreshMessage, setRefreshMessage] = React.useState<string | null>(null)
-
   // File hotspot ignore patterns - demonstrates reactive filtering
   const defaultIgnorePatterns = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'CHANGELOG.md', 'CHANGELOG']
   const [ignoredPatterns, setIgnoredPatterns] = React.useState<string[]>(defaultIgnorePatterns)
-
-  const trackedJob = React.useMemo(() => {
-    const job = latestImportJobs[0] ?? null
-    if (!job) return null
-    if (refreshJobId && job.id !== refreshJobId) return null
-    return job
-  }, [latestImportJobs, refreshJobId])
-
-  React.useEffect(() => {
-    if (!trackedJob) return
-    const status = (trackedJob.status ?? '').toLowerCase()
-    if (status === 'queued' || status === 'pending') {
-      setRefreshStatus('queued')
-      setRefreshMessage(null)
-    } else if (status === 'running') {
-      setRefreshStatus('running')
-      setRefreshMessage(null)
-    } else if (status === 'success') {
-      setRefreshStatus('done')
-      setRefreshMessage(null)
-    } else if (status === 'error') {
-      setRefreshStatus('error')
-      setRefreshMessage(trackedJob.error ?? 'Refresh failed.')
-    }
-  }, [trackedJob?.status, trackedJob?.error])
-
-  React.useEffect(() => {
-    if (refreshStatus !== 'done') return
-    const timeout = window.setTimeout(() => {
-      setRefreshStatus('idle')
-      setRefreshMessage(null)
-    }, 2500)
-    return () => window.clearTimeout(timeout)
-  }, [refreshStatus])
 
   const contributorStats = React.useMemo<ContributorStat[]>(() => {
     const statsMap = new Map<string, ContributorStat>()
@@ -271,54 +202,6 @@ function Analytics() {
   const deletionsClass = isDark ? 'text-red-400' : 'text-red-600'
   const barClass = isDark ? 'bg-emerald-500' : 'bg-emerald-500'
   const emptyClass = isDark ? 'text-slate-500 italic' : 'text-slate-400 italic'
-  const refreshBusy = refreshStatus === 'loading' || refreshStatus === 'queued' || refreshStatus === 'running'
-  const refreshSpinnerColor = isDark ? '#34d399' : '#0f766e'
-
-  const handleRefresh = async () => {
-    if (refreshBusy) {
-      const workflowUrl = (trackedJob?.workflow_url ?? '').trim() || (refreshWorkflowUrl ?? '').trim()
-      if (workflowUrl) {
-        window.open(workflowUrl, '_blank', 'noopener,noreferrer')
-      }
-      return
-    }
-    if (!repoUrl) {
-      setRefreshStatus('error')
-      setRefreshMessage('Repository URL is unavailable.')
-      return
-    }
-    setRefreshStatus('loading')
-    setRefreshJobId(null)
-    setRefreshWorkflowUrl(null)
-    setRefreshMessage(null)
-    try {
-      const job = await requestGithubImport({
-        repoUrl,
-        orgId,
-        repoId,
-        branch: repoDefaultBranch,
-      })
-      setRefreshJobId(job.id ?? null)
-      const workflowUrlRaw = (job as unknown as { workflowUrl?: unknown }).workflowUrl
-      const workflowUrl = typeof workflowUrlRaw === 'string' ? workflowUrlRaw.trim() : ''
-      setRefreshWorkflowUrl(workflowUrl.length > 0 ? workflowUrl : null)
-      const initialStatus = (job.status ?? '').toLowerCase()
-      if (initialStatus === 'error') {
-        setRefreshStatus('error')
-        setRefreshMessage(job.error ?? 'Refresh failed.')
-      } else if (initialStatus === 'success') {
-        setRefreshStatus('done')
-      } else if (initialStatus === 'running') {
-        setRefreshStatus('running')
-      } else {
-        setRefreshStatus('queued')
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to refresh repository.'
-      setRefreshStatus('error')
-      setRefreshMessage(message)
-    }
-  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6" data-testid="analytics-view">
@@ -336,46 +219,9 @@ function Analytics() {
         <h3 className={headingClass} data-testid="analytics-heading">
           {repoId} - Analytics
         </h3>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className={
-              isDark
-                ? 'inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-600 bg-slate-900 px-3 py-1 text-xs font-medium text-slate-200 transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/40'
-                : 'inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200'
-            }
-            onClick={handleRefresh}
-            title={
-              refreshBusy
-                ? (trackedJob?.workflow_url ?? '').trim() || (refreshWorkflowUrl ?? '').trim()
-                  ? 'View GitHub Actions run'
-                  : 'Refresh already in progress'
-                : 'Re-run import for this repository'
-            }
-            data-testid="analytics-refresh"
-          >
-            {refreshBusy ? (
-              <>
-                <InlineSpinner size={12} color={refreshSpinnerColor} aria-label="Refreshing repository" />
-                <span>Refreshing...</span>
-              </>
-            ) : (
-              <>
-                <IoRefreshOutline aria-hidden />
-                <span>Refresh</span>
-              </>
-            )}
-          </button>
-          {refreshStatus === 'error' && refreshMessage ? (
-            <span className={isDark ? 'text-xs text-red-400' : 'text-xs text-red-600'}>{refreshMessage}</span>
-          ) : null}
-          {refreshStatus === 'done' ? (
-            <span className={isDark ? 'text-xs text-emerald-400' : 'text-xs text-emerald-600'}>Synced</span>
-          ) : null}
-          <span className={isDark ? 'text-xs text-slate-400' : 'text-xs text-slate-500'}>
-            Powered by TanStack DB + PowerSync
-          </span>
-        </div>
+        <span className={isDark ? 'text-xs text-slate-400' : 'text-xs text-slate-500'}>
+          Powered by TanStack DB + PowerSync
+        </span>
       </div>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
